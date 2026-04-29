@@ -10,7 +10,7 @@ SageBot is a lightweight utility written in C, designed to prevent being disconn
 
 ![Mô tả ảnh](assets/proof.jpeg)
 
-## Tutorial
+## How to use?
 1. [Download here.](https://github.com/18mzu/sagebot/releases/tag/release)
 2. Run sagebot.exe
 3. Activate and AFK
