@@ -286,7 +286,6 @@ int main(void) {
     set_color(7);
     
     printf(" are responsible for this.\n");
-    printf("   (Just play the game, bruh!)\n\n");
 
     printf("You have been warned. ");
     for (int i = 3; i > 0; i--) {
