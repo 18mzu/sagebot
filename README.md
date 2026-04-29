@@ -22,3 +22,7 @@ Q: Can I get banned for using this stupid tool?
 A: Using .exe that trigger actions in the game is bannable (Yes, Vanguard does read this .exe) but SageBot works in a completely random patterns, therefore the security of your account is guaranteed.
 
 HOWEVER, you are responsible for the actions taken on your account. It is your responsibility if you get banned for using SageBot and I do not take any responsibility for any damage.
+
+Q: Can I use this in CS2 too? :D
+
+A: You will be votekicked if you afk.
