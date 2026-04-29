@@ -8,7 +8,7 @@ SageBot is a lightweight utility written in C, designed to prevent being disconn
 ![Competitive](https://img.shields.io/badge/TESTED-COMPETITIVE-green?labelColor=grey)
 
 
-![Mô tả ảnh](assets/proof.jpeg)
+![Mô tả ảnh](assets/proofcomp.jpeg)
 
 ## How to use?
 1. [Download here.](https://github.com/18mzu/sagebot/releases/tag/release)
