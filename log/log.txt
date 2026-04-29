@@ -1,0 +1,13 @@
+[10:46:29PM] sagebot is ready.
+[10:46:33PM] TAB Spammer started
+[10:46:34PM] action: TAB -> 0
+[10:46:35PM] action: TAB -> 1
+[10:46:36PM] action: TAB -> 2
+[10:46:38PM] action: TAB -> 3
+[10:46:39PM] action: TAB -> 4
+[10:46:40PM] action: TAB -> 5
+[10:46:41PM] action: TAB -> 6
+[10:46:42PM] TAB Spammer stopped (F6)
+[10:46:46PM] sagebot started
+[10:46:49PM] action: LEFT -> 0
+[10:46:52PM] action: RIGHT -> 1
