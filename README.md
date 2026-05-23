@@ -23,6 +23,6 @@ A: Using .exe that trigger actions in the game is bannable (Yes, Vanguard does r
 
 HOWEVER, you are responsible for the actions taken on your account. It is your responsibility if you get banned for using SageBot and I do not take any responsibility for any damage.
 
-Q: Can I use this in CS2 too? :D
+Q: Can I use this in CS2? :D
 
 A: You will be votekicked if you afk.
