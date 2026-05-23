@@ -25,4 +25,4 @@ HOWEVER, you are responsible for the actions taken on your account. It is your r
 
 Q: Can I use this in CS2? :D
 
-A: You will be votekicked if you afk.
+A: You will be votekicked if you pretend to be afk.
