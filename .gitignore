@@ -1,0 +1,8 @@
+# Ignore source code as requested
+*.c
+*.h
+src/
+
+# Temporary and runtime files
+config.ini
+log/
