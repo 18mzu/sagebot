@@ -1,6 +1,6 @@
-# SageBot v1.0
+# SageBot
 
-SageBot is a lightweight utility written in C, designed to prevent being disconnected for inactivity (AFK) in VALORANT.
+SageBot is a lightweight utility written in C, designed to purposefully AFK in VALORANT.
 
 
 ![Deathmatch](https://img.shields.io/badge/TESTED-DEATHMATCH-green?labelColor=grey)
@@ -8,21 +8,22 @@ SageBot is a lightweight utility written in C, designed to prevent being disconn
 ![Competitive](https://img.shields.io/badge/TESTED-COMPETITIVE-green?labelColor=grey)
 
 
-![Mô tả ảnh](assets/proofcomp.jpeg)
+![Description](assets/proofcomp.jpeg)
 
 ## How to use?
 1. [Download here.](https://github.com/18mzu/sagebot/releases/tag/release)
 2. Run sagebot.exe
-3. Activate and AFK
 
 ## FaQs
 
 Q: Can I get banned for using this stupid tool?
  
-A: Using .exe that trigger actions in the game is bannable (Yes, Vanguard does read this .exe) but SageBot works in a completely random patterns, therefore the security of your account is guaranteed.
+A: I personally have been using this for a long time, therefore the security of your account is guaranteed.
 
 HOWEVER, you are responsible for the actions taken on your account. It is your responsibility if you get banned for using SageBot and I do not take any responsibility for any damage.
 
+*just go get a kill before using this bot and you won't be mark as afk (comes from hundred hours of deranking)*
+
 Q: Can I use this in CS2? :D
 
-A: You will be votekicked if you pretend to be afk.
+A: You will be votekicked if you afk in CS2 (game diff)
