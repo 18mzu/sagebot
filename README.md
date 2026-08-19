@@ -17,12 +17,8 @@ SageBot is a lightweight utility written in C, designed to purposefully AFK in V
 ## FaQs
 
 Q: Can I get banned for using this stupid tool?
- 
-A: I personally have been using this for a long time, therefore the security of your account is guaranteed.
 
-HOWEVER, you are responsible for the actions taken on your account. It is your responsibility if you get banned for using SageBot and I do not take any responsibility for any damage.
-
-*just go get a kill before using this bot and you won't be mark as afk (comes from hundred hours of deranking)*
+A: Absolutely no. Vanguard doesn’t care about this.
 
 Q: Can I use this in CS2? :D
 
