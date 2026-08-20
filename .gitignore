@@ -3,4 +3,3 @@ config.ini
 log/
 build.bat
 changelog.txt
-*.exe
