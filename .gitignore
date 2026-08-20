@@ -1,8 +1,6 @@
-# Ignore source code as requested
-*.c
-*.h
-src/
-
-# Temporary and runtime files
+# Temporary, local build, and runtime files
 config.ini
 log/
+build.bat
+changelog.txt
+*.exe
