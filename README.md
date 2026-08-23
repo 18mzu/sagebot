@@ -11,7 +11,7 @@ SageBot is a lightweight utility written in C, designed to prevent being disconn
 ![Description](assets/proofcomp.jpeg)
 
 ## How to use?
-1. [Download here.](https://github.com/18mzu/sagebot/releases/tag/release)
+1. [Download here.]([https://github.com/18mzu/sagebot/releases/tag/release](https://github.com/18mzu/sagebot/releases/tag/v2.1))
 2. Run sagebot.exe
 
 ## FaQs
