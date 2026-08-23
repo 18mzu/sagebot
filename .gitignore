@@ -3,3 +3,9 @@ config.ini
 log/
 build.bat
 changelog.txt
+*.res
+assets/resource.rc
+assets/resource.res
+sagebot_gui.exe
+sagebot.exe
+*.exe
