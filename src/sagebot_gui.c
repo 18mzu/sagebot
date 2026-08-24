@@ -976,62 +976,101 @@ static void update_char_count_ui(void) {
   SetWindowTextW(g_hLblChatCharCount, buf);
 }
 
+static const wchar_t *g_default_changelog =
+    L"[v2.1]\r\n- Added some music.\r\n- Modified chat length due to misinfo.\r\n- "
+    L"Modified a Chat Preset.\r\n- added popcorn Sage.\r\n- Clove might be crying "
+    L"ToT.";
+
 static void load_changelog_ui(void) {
   if (!g_hEditChangelogs)
     return;
+
+  // 1. Try reading from embedded PE Resource (Resource ID 4)
+  HRSRC hRes = FindResourceW(NULL, MAKEINTRESOURCEW(4), RT_RCDATA);
+  if (hRes) {
+    HGLOBAL hResData = LoadResource(NULL, hRes);
+    if (hResData) {
+      DWORD size = SizeofResource(NULL, hRes);
+      const char *pData = (const char *)LockResource(hResData);
+      if (pData && size > 0) {
+        size_t norm_cap = size * 2 + 1;
+        char *norm_buf = (char *)malloc(norm_cap);
+        if (norm_buf) {
+          size_t j = 0;
+          for (size_t i = 0; i < size; i++) {
+            if (pData[i] == '\n' && (i == 0 || pData[i - 1] != '\r')) {
+              norm_buf[j++] = '\r';
+            }
+            norm_buf[j++] = pData[i];
+          }
+          norm_buf[j] = '\0';
+
+          int wlen = MultiByteToWideChar(CP_UTF8, 0, norm_buf, -1, NULL, 0);
+          if (wlen > 0) {
+            wchar_t *wbuf = (wchar_t *)malloc(wlen * sizeof(wchar_t));
+            if (wbuf) {
+              MultiByteToWideChar(CP_UTF8, 0, norm_buf, -1, wbuf, wlen);
+              SetWindowTextW(g_hEditChangelogs, wbuf);
+              free(wbuf);
+              free(norm_buf);
+              return;
+            }
+          }
+          free(norm_buf);
+        }
+      }
+    }
+  }
+
+  // 2. Fallback to reading changelog.txt from disk
   FILE *f = NULL;
   fopen_s(&f, CHANGELOG_FILE, "rb");
-  if (!f) {
-    SetWindowTextW(g_hEditChangelogs,
-                   L"changelog.txt not found.\r\nCreate changelog.txt in the "
-                   L"application directory.");
-    return;
-  }
-  fseek(f, 0, SEEK_END);
-  long size = ftell(f);
-  fseek(f, 0, SEEK_SET);
+  if (f) {
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
 
-  if (size <= 0) {
-    fclose(f);
-    SetWindowTextW(g_hEditChangelogs, L"Changelog is currently empty.");
-    return;
-  }
+    if (size > 0) {
+      char *buf = (char *)malloc(size + 1);
+      if (buf) {
+        size_t read_bytes = fread(buf, 1, size, f);
+        buf[read_bytes] = '\0';
+        fclose(f);
 
-  char *buf = (char *)malloc(size + 1);
-  if (!buf) {
-    fclose(f);
-    return;
-  }
-  size_t read_bytes = fread(buf, 1, size, f);
-  buf[read_bytes] = '\0';
-  fclose(f);
+        size_t norm_cap = read_bytes * 2 + 1;
+        char *norm_buf = (char *)malloc(norm_cap);
+        if (norm_buf) {
+          size_t j = 0;
+          for (size_t i = 0; i < read_bytes; i++) {
+            if (buf[i] == '\n' && (i == 0 || buf[i - 1] != '\r')) {
+              norm_buf[j++] = '\r';
+            }
+            norm_buf[j++] = buf[i];
+          }
+          norm_buf[j] = '\0';
+          free(buf);
 
-  size_t norm_cap = read_bytes * 2 + 1;
-  char *norm_buf = (char *)malloc(norm_cap);
-  if (!norm_buf) {
-    free(buf);
-    return;
-  }
-  size_t j = 0;
-  for (size_t i = 0; i < read_bytes; i++) {
-    if (buf[i] == '\n' && (i == 0 || buf[i - 1] != '\r')) {
-      norm_buf[j++] = '\r';
-    }
-    norm_buf[j++] = buf[i];
-  }
-  norm_buf[j] = '\0';
-  free(buf);
-
-  int wlen = MultiByteToWideChar(CP_UTF8, 0, norm_buf, -1, NULL, 0);
-  if (wlen > 0) {
-    wchar_t *wbuf = (wchar_t *)malloc(wlen * sizeof(wchar_t));
-    if (wbuf) {
-      MultiByteToWideChar(CP_UTF8, 0, norm_buf, -1, wbuf, wlen);
-      SetWindowTextW(g_hEditChangelogs, wbuf);
-      free(wbuf);
+          int wlen = MultiByteToWideChar(CP_UTF8, 0, norm_buf, -1, NULL, 0);
+          if (wlen > 0) {
+            wchar_t *wbuf = (wchar_t *)malloc(wlen * sizeof(wchar_t));
+            if (wbuf) {
+              MultiByteToWideChar(CP_UTF8, 0, norm_buf, -1, wbuf, wlen);
+              SetWindowTextW(g_hEditChangelogs, wbuf);
+              free(wbuf);
+              free(norm_buf);
+              return;
+            }
+          }
+          free(norm_buf);
+        }
+      }
+    } else {
+      fclose(f);
     }
   }
-  free(norm_buf);
+
+  // 3. Fallback to in-memory hardcoded default text
+  SetWindowTextW(g_hEditChangelogs, g_default_changelog);
 }
 
 static void show_chat_controls(int show) {
