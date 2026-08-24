@@ -976,16 +976,11 @@ static void update_char_count_ui(void) {
   SetWindowTextW(g_hLblChatCharCount, buf);
 }
 
-static const wchar_t *g_default_changelog =
-    L"[v2.1]\r\n- Added some music.\r\n- Modified chat length due to misinfo.\r\n- "
-    L"Modified a Chat Preset.\r\n- added popcorn Sage.\r\n- Clove might be crying "
-    L"ToT.";
-
 static void load_changelog_ui(void) {
   if (!g_hEditChangelogs)
     return;
 
-  // 1. Try reading from embedded PE Resource (Resource ID 4)
+  // 1. Read from embedded PE Resource (Resource ID 4)
   HRSRC hRes = FindResourceW(NULL, MAKEINTRESOURCEW(4), RT_RCDATA);
   if (hRes) {
     HGLOBAL hResData = LoadResource(NULL, hRes);
@@ -1069,8 +1064,7 @@ static void load_changelog_ui(void) {
     }
   }
 
-  // 3. Fallback to in-memory hardcoded default text
-  SetWindowTextW(g_hEditChangelogs, g_default_changelog);
+  SetWindowTextW(g_hEditChangelogs, L"Changelog is currently empty.");
 }
 
 static void show_chat_controls(int show) {
