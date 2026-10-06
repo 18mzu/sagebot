@@ -14,12 +14,5 @@ SageBot is an external, multi-purpose tool for VALORANT.
 1. [Download here.](https://github.com/18mzu/sagebot/releases/tag/v2.1)
 2. Run sagebot.exe
 
-## FaQs
+This is just a very fun project that I made to use personally. I have never gotten banned using this before.
 
-Q: Can I get banned for using this stupid tool?
- 
-A: Absolutely no. I have been using this for a long time.
-
-Q: Can I use this in CS2? :D
-
-A: You will be votekicked if you pretend to be afk.
