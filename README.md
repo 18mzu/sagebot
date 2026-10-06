@@ -1,6 +1,6 @@
 # SageBot
 
-SageBot is a lightweight utility written in C, designed to prevent being disconnected for inactivity (AFK) in VALORANT.
+SageBot is an external, multi-purpose tool for VALORANT.
 
 
 ![Deathmatch](https://img.shields.io/badge/TESTED-DEATHMATCH-green?labelColor=grey)
