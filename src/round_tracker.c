@@ -246,8 +246,15 @@ static void resolve_map_name(const char *rawMap, wchar_t *out, size_t out_len) {
   else if (strstr(rawMap, "Pitt") || strstr(rawMap, "Pearl")) wcscpy_s(out, out_len, L"Pearl");
   else if (strstr(rawMap, "Canyon") || strstr(rawMap, "Fracture")) wcscpy_s(out, out_len, L"Fracture");
   else if (strstr(rawMap, "Plummet") || strstr(rawMap, "Summit")) wcscpy_s(out, out_len, L"Summit");
+  else if (strstr(rawMap, "Rook") || strstr(rawMap, "Corrode")) wcscpy_s(out, out_len, L"Corrode");
   else if (strstr(rawMap, "Poveglia") || strstr(rawMap, "Range")) wcscpy_s(out, out_len, L"The Range");
+  else if (strstr(rawMap, "HURM_Alley") || strstr(rawMap, "District")) wcscpy_s(out, out_len, L"District");
+  else if (strstr(rawMap, "HURM_Bowl") || strstr(rawMap, "Kasbah")) wcscpy_s(out, out_len, L"Kasbah");
+  else if (strstr(rawMap, "HURM_Helix") || strstr(rawMap, "Drift")) wcscpy_s(out, out_len, L"Drift");
+  else if (strstr(rawMap, "HURM_HighTide") || strstr(rawMap, "Glitch")) wcscpy_s(out, out_len, L"Glitch");
+  else if (strstr(rawMap, "HURM_Yard") || strstr(rawMap, "Piazza")) wcscpy_s(out, out_len, L"Piazza");
   else if (strstr(rawMap, "HURM")) wcscpy_s(out, out_len, L"Team Deathmatch");
+  else if (strstr(rawMap, "AbilityDraft") || strstr(rawMap, "Gauntlet")) wcscpy_s(out, out_len, L"Gauntlet");
   else wcscpy_s(out, out_len, L"-");
 }
 
@@ -315,32 +322,35 @@ static void resolve_agent_from_log(wchar_t *out, size_t out_len) {
       char *pQuote = strchr(pPawn, '\'');
       if (pQuote) *pQuote = '\0';
 
-      if (strstr(pPawn, "Sarge")) wcscpy_s(out, out_len, L"Brimstone");
-      else if (strstr(pPawn, "Hunter")) wcscpy_s(out, out_len, L"Sova");
-      else if (strstr(pPawn, "Thorne")) wcscpy_s(out, out_len, L"Sage");
-      else if (strstr(pPawn, "Wushu")) wcscpy_s(out, out_len, L"Jett");
-      else if (strstr(pPawn, "Vampire")) wcscpy_s(out, out_len, L"Reyna");
-      else if (strstr(pPawn, "Clay")) wcscpy_s(out, out_len, L"Raze");
-      else if (strstr(pPawn, "Wraith")) wcscpy_s(out, out_len, L"Omen");
-      else if (strstr(pPawn, "Smonk")) wcscpy_s(out, out_len, L"Clove");
-      else if (strstr(pPawn, "Iris")) wcscpy_s(out, out_len, L"Vyse");
-      else if (strstr(pPawn, "Stealth")) wcscpy_s(out, out_len, L"Yoru");
-      else if (strstr(pPawn, "Cashew")) wcscpy_s(out, out_len, L"Tejo");
-      else if (strstr(pPawn, "Sequoia")) wcscpy_s(out, out_len, L"Iso");
-      else if (strstr(pPawn, "BountyHunter")) wcscpy_s(out, out_len, L"Fade");
-      else if (strstr(pPawn, "Gumshoe")) wcscpy_s(out, out_len, L"Cypher");
-      else if (strstr(pPawn, "Mage")) wcscpy_s(out, out_len, L"Astra");
-      else if (strstr(pPawn, "Sprinter")) wcscpy_s(out, out_len, L"Neon");
-      else if (strstr(pPawn, "Deadeye")) wcscpy_s(out, out_len, L"Chamber");
-      else if (strstr(pPawn, "AggroBot")) wcscpy_s(out, out_len, L"Gekko");
-      else if (strstr(pPawn, "Cable")) wcscpy_s(out, out_len, L"Deadlock");
-      else if (strstr(pPawn, "Pandemic")) wcscpy_s(out, out_len, L"Viper");
+      if (strstr(pPawn, "Sarge") || strstr(pPawn, "Brimstone")) wcscpy_s(out, out_len, L"Brimstone");
+      else if (strstr(pPawn, "Rift") || strstr(pPawn, "Astra")) wcscpy_s(out, out_len, L"Astra");
+      else if (strstr(pPawn, "Hunter") || strstr(pPawn, "Sova")) wcscpy_s(out, out_len, L"Sova");
+      else if (strstr(pPawn, "Thorne") || strstr(pPawn, "Sage")) wcscpy_s(out, out_len, L"Sage");
+      else if (strstr(pPawn, "Wushu") || strstr(pPawn, "Jett")) wcscpy_s(out, out_len, L"Jett");
+      else if (strstr(pPawn, "Vampire") || strstr(pPawn, "Reyna")) wcscpy_s(out, out_len, L"Reyna");
+      else if (strstr(pPawn, "Clay") || strstr(pPawn, "Raze")) wcscpy_s(out, out_len, L"Raze");
+      else if (strstr(pPawn, "Wraith") || strstr(pPawn, "Omen")) wcscpy_s(out, out_len, L"Omen");
+      else if (strstr(pPawn, "Smonk") || strstr(pPawn, "Clove")) wcscpy_s(out, out_len, L"Clove");
+      else if (strstr(pPawn, "Nox") || strstr(pPawn, "Vyse")) wcscpy_s(out, out_len, L"Vyse");
+      else if (strstr(pPawn, "Stealth") || strstr(pPawn, "Yoru")) wcscpy_s(out, out_len, L"Yoru");
+      else if (strstr(pPawn, "Cashew") || strstr(pPawn, "Tejo")) wcscpy_s(out, out_len, L"Tejo");
+      else if (strstr(pPawn, "Sequoia") || strstr(pPawn, "Iso")) wcscpy_s(out, out_len, L"Iso");
+      else if (strstr(pPawn, "BountyHunter") || strstr(pPawn, "Fade")) wcscpy_s(out, out_len, L"Fade");
+      else if (strstr(pPawn, "Gumshoe") || strstr(pPawn, "Cypher")) wcscpy_s(out, out_len, L"Cypher");
+      else if (strstr(pPawn, "Mage") || strstr(pPawn, "Harbor")) wcscpy_s(out, out_len, L"Harbor");
+      else if (strstr(pPawn, "Sprinter") || strstr(pPawn, "Neon")) wcscpy_s(out, out_len, L"Neon");
+      else if (strstr(pPawn, "Deadeye") || strstr(pPawn, "Chamber")) wcscpy_s(out, out_len, L"Chamber");
+      else if (strstr(pPawn, "AggroBot") || strstr(pPawn, "Aggrobot") || strstr(pPawn, "Gekko")) wcscpy_s(out, out_len, L"Gekko");
+      else if (strstr(pPawn, "Cable") || strstr(pPawn, "Deadlock")) wcscpy_s(out, out_len, L"Deadlock");
+      else if (strstr(pPawn, "Pandemic") || strstr(pPawn, "Viper")) wcscpy_s(out, out_len, L"Viper");
       else if (strstr(pPawn, "Phoenix")) wcscpy_s(out, out_len, L"Phoenix");
       else if (strstr(pPawn, "Breach")) wcscpy_s(out, out_len, L"Breach");
       else if (strstr(pPawn, "Killjoy")) wcscpy_s(out, out_len, L"Killjoy");
-      else if (strstr(pPawn, "Guide")) wcscpy_s(out, out_len, L"Skye");
-      else if (strstr(pPawn, "Grenadier")) wcscpy_s(out, out_len, L"KAY/O");
-      else if (strstr(pPawn, "Harbor")) wcscpy_s(out, out_len, L"Harbor");
+      else if (strstr(pPawn, "Guide") || strstr(pPawn, "Skye")) wcscpy_s(out, out_len, L"Skye");
+      else if (strstr(pPawn, "Grenadier") || strstr(pPawn, "KAY/O") || strstr(pPawn, "Kayo")) wcscpy_s(out, out_len, L"KAY/O");
+      else if (strstr(pPawn, "Iris")) wcscpy_s(out, out_len, L"Miks");
+      else if (strstr(pPawn, "Pine") || strstr(pPawn, "Veto")) wcscpy_s(out, out_len, L"Veto");
+      else if (strstr(pPawn, "Terra") || strstr(pPawn, "Waylay")) wcscpy_s(out, out_len, L"Waylay");
     }
   }
 
@@ -372,6 +382,11 @@ static DWORD WINAPI round_tracker_thread_proc(LPVOID param) {
                                   last_match_ally_score, last_match_enemy_score,
                                   last_match_rank, last_match_riot_id);
         prev_in_game = 0;
+        last_match_ally_score = 0;
+        last_match_enemy_score = 0;
+        wcscpy_s(last_match_map, 64, L"-");
+        wcscpy_s(last_match_agent, 64, L"-");
+        wcscpy_s(last_match_gamemode, 64, L"-");
       }
       EnterCriticalSection(&g_round_lock);
       g_round_info.is_running = 0;
@@ -475,7 +490,7 @@ static DWORD WINAPI round_tracker_thread_proc(LPVOID param) {
                                strstr(obj, "\"product_id\":\"valorant\"") != NULL);
             int is_my_puuid = (g_cached_puuid[0] != '\0' && strstr(obj, g_cached_puuid) != NULL);
 
-            if (is_valorant && (is_my_puuid || !found_state)) {
+            if (is_valorant && (is_my_puuid || (g_cached_puuid[0] == '\0' && !found_state))) {
               // Extract game_name and game_tag
               char *pName = strstr(obj, "\"game_name\":\"");
               char *pTag = strstr(obj, "\"game_tag\":\"");
@@ -568,7 +583,7 @@ static DWORD WINAPI round_tracker_thread_proc(LPVOID param) {
                       }
                       round_num = ally_score + enemy_score + 1;
                       swprintf_s(new_display, 64, L"Round %d | %d - %d", round_num, ally_score, enemy_score);
-                      wcscpy_s(new_phase, 64, L"Ingame");
+                      wcscpy_s(new_phase, 64, L"In Game");
                       resolve_agent_from_log(new_agent, 64);
                       found_state = 1;
                     } else if (strstr(decoded, "\"sessionLoopState\":\"MENUS\"") != NULL) {
@@ -647,14 +662,23 @@ static DWORD WINAPI round_tracker_thread_proc(LPVOID param) {
       if (new_gamemode[0] != L'-') wcscpy_s(last_match_gamemode, 64, new_gamemode);
       if (new_rank[0] != L'-') wcscpy_s(last_match_rank, 64, new_rank);
       if (new_riot_id[0] != L'-') wcscpy_s(last_match_riot_id, 64, new_riot_id);
-      last_match_ally_score = ally_score;
-      last_match_enemy_score = enemy_score;
+      if (ally_score > 0 || enemy_score > 0) {
+        if (ally_score + enemy_score >= last_match_ally_score + last_match_enemy_score) {
+          last_match_ally_score = ally_score;
+          last_match_enemy_score = enemy_score;
+        }
+      }
     }
 
     if (prev_in_game == 1 && in_game == 0) {
       webhook_trigger_match_end(last_match_map, last_match_agent, last_match_gamemode,
                                 last_match_ally_score, last_match_enemy_score,
                                 last_match_rank, last_match_riot_id);
+      last_match_ally_score = 0;
+      last_match_enemy_score = 0;
+      wcscpy_s(last_match_map, 64, L"-");
+      wcscpy_s(last_match_agent, 64, L"-");
+      wcscpy_s(last_match_gamemode, 64, L"-");
     }
     prev_in_game = in_game;
     

@@ -439,10 +439,121 @@ static void show_main_controls(int show) {
   ShowWindow(g_hEditLog, command);
 }
 
+// --- Status Tab Dynamic Color Helpers ---
+static COLORREF get_rank_color(const wchar_t *text) {
+  if (!text || !*text || wcscmp(text, L"-") == 0) return RGB(139, 148, 158);
+  if (wcsstr(text, L"Radiant"))   return RGB(255, 240, 146); // Radiant Solar Gold
+  if (wcsstr(text, L"Immortal"))  return RGB(222, 39, 98);   // Crimson Ruby
+  if (wcsstr(text, L"Ascendant")) return RGB(34, 181, 132);  // Deep Emerald
+  if (wcsstr(text, L"Diamond"))   return RGB(168, 92, 232);  // Amethyst Violet
+  if (wcsstr(text, L"Platinum"))  return RGB(72, 177, 200);  // Ice Crystal Platinum
+  if (wcsstr(text, L"Gold"))      return RGB(240, 178, 50);  // Sun Gold Medal
+  if (wcsstr(text, L"Silver"))    return RGB(223, 228, 234); // White Silver Sheen
+  if (wcsstr(text, L"Bronze"))    return RGB(184, 123, 76);  // Polished Copper/Bronze
+  if (wcsstr(text, L"Iron"))      return RGB(120, 130, 138); // Cast Iron / Slate
+  return RGB(139, 148, 158);
+}
+
+static COLORREF get_map_color(const wchar_t *text) {
+  if (!text || !*text || wcscmp(text, L"-") == 0) return RGB(139, 148, 158);
+  if (wcsstr(text, L"Ascent"))   return RGB(224, 109, 40);  // Primal/Old-fashioned Venetian Orange
+  if (wcsstr(text, L"Bind"))     return RGB(224, 159, 90);  // Desert Sand
+  if (wcsstr(text, L"Haven"))    return RGB(229, 89, 52);   // Kyoto Autumn Crimson-Orange
+  if (wcsstr(text, L"Split"))    return RGB(157, 101, 216); // Shibuya Cyber Purple
+  if (wcsstr(text, L"Icebox"))   return RGB(122, 209, 232); // Siberian Arctic Blue
+  if (wcsstr(text, L"Breeze"))   return RGB(45, 212, 191);  // Tropical Turquoise
+  if (wcsstr(text, L"Fracture")) return RGB(72, 187, 120);  // Dual Radianite Green
+  if (wcsstr(text, L"Pearl"))    return RGB(43, 120, 212);  // Submerged Ocean Blue
+  if (wcsstr(text, L"Lotus"))    return RGB(236, 72, 153);  // Ancient Lotus Pink
+  if (wcsstr(text, L"Sunset"))   return RGB(244, 114, 182); // LA Golden Hour Pink/Peach
+  if (wcsstr(text, L"Abyss"))    return RGB(59, 89, 152);   // Dark Cobalt Void
+  return RGB(52, 211, 153);
+}
+
+static COLORREF get_gamemode_color(const wchar_t *text) {
+  if (!text || !*text || wcscmp(text, L"-") == 0) return RGB(139, 148, 158);
+  if (wcsstr(text, L"Competitive")) return RGB(255, 70, 85);   // Valorant Red
+  if (wcsstr(text, L"Unrated"))     return RGB(6, 182, 212);   // Classic Cyan
+  if (wcsstr(text, L"Swiftplay"))   return RGB(59, 130, 246);  // Lightning Blue
+  if (wcsstr(text, L"Spike Rush"))  return RGB(249, 115, 22);  // Overdrive Orange
+  if (wcsstr(text, L"Deathmatch"))  return RGB(239, 68, 68);   // Blood Red
+  if (wcsstr(text, L"Premier"))     return RGB(212, 175, 55);  // Premier Gold
+  if (wcsstr(text, L"Custom"))      return RGB(99, 102, 241);  // Indigo
+  return RGB(96, 165, 250);
+}
+
+static COLORREF get_phase_color(const wchar_t *text) {
+  if (!text || !*text || wcscmp(text, L"-") == 0) return RGB(139, 148, 158);
+  if (wcsstr(text, L"Queue"))        return RGB(245, 158, 11); // Amber / Countdown
+  if (wcsstr(text, L"Agent Select") ||
+      wcsstr(text, L"Pregame"))      return RGB(139, 92, 246); // Tactical Violet
+  if (wcsstr(text, L"In Game") ||
+      wcsstr(text, L"Ingame"))       return RGB(59, 130, 246); // Cobalt Sapphire (#3B82F6)
+  if (wcsstr(text, L"Lobby"))        return RGB(139, 148, 158); // Chill Slate
+  return RGB(244, 114, 182);
+}
+
+static COLORREF get_agent_color(const wchar_t *text) {
+  if (!text || !*text || wcscmp(text, L"-") == 0) return RGB(139, 148, 158);
+  // Controllers
+  if (wcsstr(text, L"Brimstone")) return RGB(227, 101, 40);  // Orbital Tactical Orange
+  if (wcsstr(text, L"Viper"))     return RGB(43, 230, 110);  // Toxic Acid Green
+  if (wcsstr(text, L"Omen"))      return RGB(91, 79, 150);   // Shrouded Shadow Indigo
+  if (wcsstr(text, L"Astra"))     return RGB(163, 75, 216);  // Cosmic Astral Purple
+  if (wcsstr(text, L"Harbor"))    return RGB(17, 165, 184);  // Tidal Aqua Cyan
+  if (wcsstr(text, L"Clove"))     return RGB(216, 127, 227); // Petal Lilac
+  // Duelists
+  if (wcsstr(text, L"Jett"))      return RGB(103, 229, 255); // Cloud Sky Blue
+  if (wcsstr(text, L"Phoenix"))   return RGB(255, 75, 43);   // Solar Flare Orange
+  if (wcsstr(text, L"Reyna"))     return RGB(186, 24, 186);  // Empress Leer Magenta
+  if (wcsstr(text, L"Raze"))      return RGB(255, 124, 42);  // Neon Tangerine
+  if (wcsstr(text, L"Yoru"))      return RGB(40, 90, 235);   // Dimensional Drift Azure
+  if (wcsstr(text, L"Neon"))      return RGB(0, 240, 255);   // Bioelectric Cyan
+  if (wcsstr(text, L"Iso"))       return RGB(118, 80, 236);  // Prismatic Shield Lavender
+  // Initiators
+  if (wcsstr(text, L"Sova"))      return RGB(53, 152, 219);  // Arctic Recon Cerulean
+  if (wcsstr(text, L"Breach"))    return RGB(184, 85, 38);   // Seismic Fault Rust Brown
+  if (wcsstr(text, L"Skye"))      return RGB(59, 183, 94);   // Bloom Emerald
+  if (wcsstr(text, L"KAY/O") ||
+      wcsstr(text, L"Kayo"))      return RGB(0, 210, 211);   // Zero/Point EMP Cyan
+  if (wcsstr(text, L"Fade"))      return RGB(110, 105, 160); // Nightmare Indigo-Slate
+  if (wcsstr(text, L"Gekko"))     return RGB(198, 248, 42);  // Slime Lime Chartreuse
+  // Sentinels
+  if (wcsstr(text, L"Sage"))      return RGB(47, 229, 168);  // Jade Mint
+  if (wcsstr(text, L"Killjoy"))   return RGB(255, 222, 0);   // Canary Yellow
+  if (wcsstr(text, L"Cypher"))    return RGB(203, 163, 104); // Moroccan Sand Gold
+  if (wcsstr(text, L"Chamber"))   return RGB(209, 165, 69);  // French Gilded Gold
+  if (wcsstr(text, L"Deadlock"))  return RGB(118, 152, 179); // Glacial Steel Blue
+  if (wcsstr(text, L"Vyse"))      return RGB(158, 116, 162); // Rose Quicksilver Steel
+  return RGB(167, 139, 250);
+}
+
+static COLORREF get_round_color(const wchar_t *text) {
+  if (!text || !*text || wcscmp(text, L"-") == 0) return RGB(139, 148, 158);
+  if (wcsstr(text, L"In Queue"))     return RGB(245, 158, 11); // Amber
+  if (wcsstr(text, L"Round"))        return RGB(59, 130, 246); // Cobalt Sapphire (#3B82F6)
+  if (wcsstr(text, L"Agent Select")) return RGB(139, 92, 246); // Violet
+  if (wcsstr(text, L"Lobby"))        return RGB(139, 148, 158); // Slate
+  return RGB(167, 139, 250);
+}
+
+static COLORREF g_colorRank = RGB(240, 178, 50);
+static COLORREF g_colorMap = RGB(52, 211, 153);
+static COLORREF g_colorGamemode = RGB(96, 165, 250);
+static COLORREF g_colorPhase = RGB(244, 114, 182);
+static COLORREF g_colorAgent = RGB(167, 139, 250);
+static COLORREF g_colorRound = RGB(167, 139, 250);
+
 static void update_status_tab_ui(void) {
   if (!g_hLblRiotIdVal) return;
   RoundTrackerInfo info;
   get_round_tracker_snapshot(&info);
+  g_colorRank = get_rank_color(info.rank_name);
+  g_colorMap = get_map_color(info.map_name);
+  g_colorGamemode = get_gamemode_color(info.gamemode);
+  g_colorPhase = get_phase_color(info.game_phase);
+  g_colorAgent = get_agent_color(info.agent_name);
+  g_colorRound = get_round_color(info.display_text);
   SetWindowTextW(g_hLblRiotIdVal, info.riot_id);
   SetWindowTextW(g_hLblRankVal, info.rank_name);
   SetWindowTextW(g_hLblMapVal, info.map_name);
@@ -1327,10 +1438,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                       NULL, NULL, NULL);
     SendMessageW(g_hLblUpdateStatus, WM_SETFONT, (WPARAM)g_hFontSmall, TRUE);
 
-    // ----------------------------------------------------
-    // STATUS TAB CONTROLS (Live Ingame & Profile Information)
-    // ----------------------------------------------------
-    // Box 1: Player Profile Card
     g_hLblBox1Header = CreateWindowW(
         L"STATIC", L"PLAYER PROFILE", WS_CHILD,
         176, 26, 290, 18, hWnd, NULL, NULL, NULL);
@@ -2091,8 +2198,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
       return (INT_PTR)g_hCardBgBrush;
     }
 
-    if (hCtl == g_hLblRoundVal) {
-      SetTextColor(hdcStatic, RGB(167, 139, 250)); // Sleek Light Purple (#a78bfa)
+    if (hCtl && hCtl == g_hLblRoundVal) {
+      SetTextColor(hdcStatic, g_colorRound);
       return (INT_PTR)g_hCardBgBrush;
     }
 
@@ -2101,33 +2208,33 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
       return (INT_PTR)g_hCardBgBrush;
     }
 
-    if (hCtl == g_hLblRiotIdVal) {
+    if (hCtl && hCtl == g_hLblRiotIdVal) {
       SetTextColor(hdcStatic, RGB(255, 255, 255));
       return (INT_PTR)g_hCardBgBrush;
     }
 
-    if (hCtl == g_hLblRankVal) {
-      SetTextColor(hdcStatic, RGB(245, 158, 11)); // Amber/Gold
+    if (hCtl && hCtl == g_hLblRankVal) {
+      SetTextColor(hdcStatic, g_colorRank);
       return (INT_PTR)g_hCardBgBrush;
     }
 
-    if (hCtl == g_hLblMapVal) {
-      SetTextColor(hdcStatic, RGB(52, 211, 153)); // Emerald
+    if (hCtl && hCtl == g_hLblMapVal) {
+      SetTextColor(hdcStatic, g_colorMap);
       return (INT_PTR)g_hCardBgBrush;
     }
 
-    if (hCtl == g_hLblGamemodeVal) {
-      SetTextColor(hdcStatic, RGB(96, 165, 250)); // Sky Blue
+    if (hCtl && hCtl == g_hLblGamemodeVal) {
+      SetTextColor(hdcStatic, g_colorGamemode);
       return (INT_PTR)g_hCardBgBrush;
     }
 
-    if (hCtl == g_hLblPhaseVal) {
-      SetTextColor(hdcStatic, RGB(244, 114, 182)); // Rose
+    if (hCtl && hCtl == g_hLblPhaseVal) {
+      SetTextColor(hdcStatic, g_colorPhase);
       return (INT_PTR)g_hCardBgBrush;
     }
 
-    if (hCtl == g_hLblAgentVal) {
-      SetTextColor(hdcStatic, RGB(167, 139, 250)); // Sleek Purple
+    if (hCtl && hCtl == g_hLblAgentVal) {
+      SetTextColor(hdcStatic, g_colorAgent);
       return (INT_PTR)g_hCardBgBrush;
     }
 

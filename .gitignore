@@ -4,5 +4,3 @@ log/
 sagebot_gui.exe
 sagebot.exe
 *.exe
-*.res
-assets/resource.rc
