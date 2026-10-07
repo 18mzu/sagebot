@@ -1,0 +1,8 @@
+[v2.4]
+- Improved update handling with cmd.
+- Updated GetAsyncKeyState() for better usage.
+- Implemented lockfile. Added Player Profile and Match Info.
+- New music updated.
+- added Discord Webhook
+
+HUGE UPDATE GNG
