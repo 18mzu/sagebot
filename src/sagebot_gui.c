@@ -1,117 +1,48 @@
-#ifndef UNICODE
-#define UNICODE
-#endif
-#ifndef _UNICODE
-#define _UNICODE
-#endif
-
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#include <windowsx.h>
-#include <commctrl.h>
-#include <dwmapi.h>
-#include <mmsystem.h>
-#include <stdatomic.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
-#include <uxtheme.h>
-
-#pragma comment(lib, "comctl32.lib")
-#pragma comment(lib, "user32.lib")
-#pragma comment(lib, "gdi32.lib")
-#pragma comment(lib, "uxtheme.lib")
-#pragma comment(lib, "dwmapi.lib")
-#pragma comment(lib, "winmm.lib")
-
-// Defines & Constants
-#define RUN_SECONDS 4800
-#define CONFIG_FILE_NAME "config.ini"
-
-#define TAB_MIN_MS 900
-#define TAB_RAND_MS 400
-
-#define LISTENER_LOOP_MS 50
-#define STOP_CHECK_MS 50
-#define SUPPRESS_WINDOW_MS 80
-
-#define LOG_DIR "log"
-#define LOG_FILE "log\\log.txt"
-#define CHANGELOG_FILE "changelog.txt"
-
-// Custom Windows Messages
-#define WM_APP_LOG (WM_USER + 2)
-#define WM_APP_UPDATE_STATUS (WM_USER + 3)
-
-// Control IDs
-#define ID_NAV_CHANGELOGS 1000
-#define ID_NAV_MAIN 1001
-#define ID_NAV_CHAT 1002
-#define ID_NAV_AUTO_VOTING 1003
-#define ID_NAV_MUSIC 1005
-#define ID_NAV_SETTINGS 1004
-
-#define ID_BTN_START_STOP 1010
-#define ID_EDIT_LOG 1011
-#define ID_EDIT_CHANGELOGS 1012
-
-#define ID_CHK_CHAT 1020
-#define ID_COMBO_CHAT_TARGET 1021
-#define ID_MENU_CHAT_TEAM 1022
-#define ID_MENU_CHAT_ALL 1028
-#define ID_EDIT_CHAT_INTERVAL 1023
-#define ID_EDIT_CHAT_TEXT 1024
-#define ID_BTN_CHAT_SAVE 1025
-#define ID_BTN_CHAT_EXAMPLE_1 1026
-#define ID_BTN_CHAT_EXAMPLE_2 1027
-
-#define ID_RADIO_VOTE_OFF 1030
-#define ID_RADIO_VOTE_YES 1031
-#define ID_RADIO_VOTE_NO 1032
-
-#define ID_BTN_REBIND 1040
-
-#define ID_BTN_MUSIC_PLAY 1050
-#define ID_SLIDER_MUSIC_POS 1051
-#define ID_SLIDER_MUSIC_VOL 1052
-#define ID_TIMER_MUSIC 1053
-
-// Modern Clean Gaming Dark Palette
-#define COLOR_BASE_BG RGB(26, 26, 26)        // #1a1a1a Deep dark canvas
-#define COLOR_SIDEBAR_BG RGB(18, 18, 18)     // #121212 Sidebar panel
-#define COLOR_CARD_BG RGB(34, 34, 34)        // #222222 Elevated card surface
-#define COLOR_CARD_BORDER RGB(54, 54, 54)    // #363636 Card outline
-#define COLOR_SIDEBAR_BORDER RGB(42, 42, 42) // #2a2a2a Divider line
-
-#define COLOR_ACCENT_PURPLE RGB(138, 92, 246) // #8a5cf6 Primary active tab
-#define COLOR_ACCENT_HOVER RGB(40, 40, 40)    // #282828 Sidebar item hover
-#define COLOR_BTN_START RGB(34, 197, 94)      // #22c55e Emerald green start
-#define COLOR_BTN_START_HVR RGB(22, 163, 74)  // #16a34a Darker green
-#define COLOR_BTN_STOP RGB(239, 68, 68)       // #ef4444 Crimson red stop
-#define COLOR_BTN_STOP_HVR RGB(220, 38, 38)   // #dc2626 Darker red
-
-#define COLOR_TEXT_PRIMARY RGB(241, 245, 249)   // #f1f5f9 Crisp white
-#define COLOR_TEXT_SECONDARY RGB(156, 163, 175) // #9ca3af Muted slate
-#define COLOR_TEXT_MUTED RGB(107, 114, 128)     // #6b7280 Subtle helper
-#define COLOR_INPUT_BG RGB(20, 20, 20)          // #141414 Dark input field
+#include "common.h"
+#include "config.h"
+#include "audio.h"
+#include "spammer.h"
+#include "ui_slider.h"
+#include "updater.h"
+#include "round_tracker.h"
+#include "webhook.h"
 
 // Global State Variables
-static HWND g_hWnd = NULL;
+HWND g_hWnd = NULL;
 static HWND g_hNavMain = NULL;
+static HWND g_hNavConfig = NULL;
 static HWND g_hNavChat = NULL;
 static HWND g_hNavAutoVoting = NULL;
 static HWND g_hNavMusic = NULL;
+static HWND g_hNavWebhook = NULL;
 static HWND g_hNavChangelogs = NULL;
 static HWND g_hNavSettings = NULL;
 
+// Config Tab Controls (Anti-AFK Method)
+static HWND g_hLblConfigHeader = NULL;
+static HWND g_hLblConfigSub = NULL;
+static HWND g_hRadioModeClick = NULL;
+static HWND g_hRadioModeMove = NULL;
+static HWND g_hLblClickSettingsTitle = NULL;
+static HWND g_hLblClickSettingsSub = NULL;
+static HWND g_hLblClickKeyTitle = NULL;
+static HWND g_hBtnKeyBadge = NULL;
+static HWND g_hLblIntervalTitle = NULL;
+static HWND g_hBtnDelayBadge = NULL;
+static HWND g_hLblIntervalNote = NULL;
+static HWND g_hLblSlowModeTitle = NULL;
+static HWND g_hChkSlowMode = NULL;
+static HWND g_hLblSlowModeDesc = NULL;
+
 // Main Tab Controls
 static HWND g_hLblStatusTitle = NULL;
-static HWND g_hLblStatusVal = NULL;
+HWND g_hLblStatusVal = NULL;
 static HWND g_hLblHotkeyTitle = NULL;
-static HWND g_hLblHotkeyVal = NULL;
-static HWND g_hBtnStart = NULL;
-static HWND g_hEditLog = NULL;
+HWND g_hLblHotkeyVal = NULL;
+static HWND g_hLblRoundTitle = NULL;
+HWND g_hLblRoundVal = NULL;
+HWND g_hBtnStart = NULL;
+HWND g_hEditLog = NULL;
 
 // Changelogs Tab Control
 static HWND g_hEditChangelogs = NULL;
@@ -128,7 +59,6 @@ static HWND g_hEditChatInterval = NULL;
 static HWND g_hLblChatText = NULL;
 static HWND g_hLblChatCharCount = NULL;
 static HWND g_hEditChatText = NULL;
-static HWND g_hBtnChatSave = NULL;
 static HWND g_hLblPresets = NULL;
 static HWND g_hBtnChatExample1 = NULL;
 static HWND g_hBtnChatExample2 = NULL;
@@ -136,7 +66,6 @@ static HWND g_hBtnChatExample2 = NULL;
 // Toast Notification State
 static int g_show_toast = 0;
 static wchar_t g_toast_text[64] = L"";
-#define ID_TIMER_TOAST 999
 
 // Auto-Vote Tab Controls
 static HWND g_hLblVoteHeader = NULL;
@@ -145,30 +74,50 @@ static HWND g_hRadioVoteOff = NULL;
 static HWND g_hRadioVoteYes = NULL;
 static HWND g_hRadioVoteNo = NULL;
 
-// Music Player Tab Controls & State
-static HWND g_hLblMusicHeader = NULL;
-static HWND g_hLblMusicSub = NULL;
-static HWND g_hLblMusicTitle = NULL;
-static HWND g_hLblMusicArtist = NULL;
-static HWND g_hBtnMusicPlay = NULL;
-static HWND g_hSliderMusicPos = NULL;
-static HWND g_hLblMusicTime = NULL;
-static HWND g_hSliderMusicVol = NULL;
-static HWND g_hLblMusicVol = NULL;
-static HBITMAP g_hBmpMusicCover = NULL;
-static int g_music_playing = 0;
-static int g_music_opened = 0;
-static int g_music_length_ms = 0;
-static int g_music_volume = 80; // 0 to 100
-static int g_music_user_seeking = 0;
-
 // Settings Tab Controls
 static HWND g_hLblSettingsHeader = NULL;
 static HWND g_hLblSettingsHelp = NULL;
 static HWND g_hLblSettingsKeyTitle = NULL;
-static HWND g_hLblSettingsKeyBadge = NULL;
-static HWND g_hBtnRebind = NULL;
-static HWND g_hLblSettingsNote = NULL;
+HWND g_hBtnRebind = NULL;
+static HWND g_hLblUpdateHeader = NULL;
+static HWND g_hLblUpdateVersion = NULL;
+static HWND g_hBtnCheckUpdate = NULL;
+HWND g_hLblUpdateStatus = NULL;
+
+// Status Tab Controls
+static HWND g_hNavStatus = NULL;
+static HWND g_hLblBox1Header = NULL;
+static HWND g_hLblRiotIdTitle = NULL;
+static HWND g_hLblRiotIdVal = NULL;
+static HWND g_hLblRankTitle = NULL;
+static HWND g_hLblRankVal = NULL;
+static HWND g_hLblBox2Header = NULL;
+static HWND g_hLblMapTitle = NULL;
+static HWND g_hLblMapVal = NULL;
+static HWND g_hLblGamemodeTitle = NULL;
+static HWND g_hLblGamemodeVal = NULL;
+static HWND g_hLblPhaseTitle = NULL;
+static HWND g_hLblPhaseVal = NULL;
+static HWND g_hLblAgentTitle = NULL;
+static HWND g_hLblAgentVal = NULL;
+
+// Webhook Tab Controls
+static HWND g_hLblWebhookHeader = NULL;
+static HWND g_hLblWebhookSub = NULL;
+static HWND g_hLblWebhookUrl = NULL;
+static HWND g_hLblWebhookUrlNote = NULL;
+static HWND g_hEditWebhookUrl = NULL;
+static HWND g_hLblWebhookUserId = NULL;
+static HWND g_hLblWebhookUserIdNote = NULL;
+static HWND g_hEditWebhookUserId = NULL;
+static HWND g_hLblWebhookHint = NULL;
+static HWND g_hBtnWebhookSave = NULL;
+static HWND g_hBtnWebhookTest = NULL;
+static HWND g_hLblWebhookStatus = NULL;
+
+wchar_t g_webhook_url[512] = L"";
+wchar_t g_webhook_user_id[64] = L"";
+CRITICAL_SECTION g_webhook_lock;
 
 // Styling Brushes & Fonts
 static HBRUSH g_hBaseBgBrush = NULL;
@@ -184,743 +133,38 @@ static HFONT g_hFontHeader = NULL;
 static HFONT g_hFontNormal = NULL;
 static HFONT g_hFontSmall = NULL;
 static HFONT g_hFontMonospace = NULL;
+static HFONT g_hFontStatusLabel = NULL;
+static HFONT g_hFontStatusValue = NULL;
 
-static atomic_int g_status = 0;
-static atomic_int g_pressed = 0;
-static atomic_int g_listener = 1;
-static atomic_int g_playpause_vk = VK_F9;
-static atomic_int g_auto_vote_mode = 0; // 0=off, 1=Yes (F5), 2=No (F6)
-static atomic_int g_chat_mode = 0;      // 0=off, 1=on
-static atomic_int g_chat_target = 0;    // 0=team, 1=all
-static atomic_int g_chat_interval = 180;
-static wchar_t g_chat_text[512] =
-    L"With great Power comes great Responsibility";
-static CRITICAL_SECTION g_chat_lock;
-static atomic_int g_suppress_hotkey = 0;
-static atomic_int g_is_rebinding = 0;
-static int g_current_tab =
-    0; // 0=MAIN, 1=CHANGELOG, 2=CHAT, 3=AUTO VOTING, 4=SETTINGS
+atomic_int g_status = 0;
+atomic_int g_pressed = 0;
+atomic_int g_listener = 1;
+atomic_int g_playpause_vk = VK_F9;
+atomic_int g_auto_vote_mode = 0;
+atomic_int g_anti_afk_mode = 0;
+atomic_int g_anti_afk_key = VK_TAB;
+atomic_int g_slow_mode = 0;
+atomic_int g_chat_mode = 0;
+atomic_int g_chat_target = 0;
+atomic_int g_chat_interval = 180;
+wchar_t g_chat_text[512] = L"With great Power comes great Responsibility";
+CRITICAL_SECTION g_chat_lock;
+atomic_int g_suppress_hotkey = 0;
+atomic_int g_is_rebinding = 0;
+atomic_int g_is_rebinding_afk = 0;
+int g_current_tab = 0;
 
-static wchar_t g_config_path[MAX_PATH] = L"config.ini";
-static HANDLE g_hSpammerThread = NULL;
+wchar_t g_config_path[MAX_PATH] = L"config.ini";
 static HANDLE g_hHotkeyThread = NULL;
 
 // Forward Declarations
-static void init_config_path(void);
-static void load_config(void);
-static void save_config(void);
-static void append_log_ui(const wchar_t *text);
-static void update_status_ui(void);
-static void start_spammer(void);
-static void stop_spammer(void);
+void append_log_ui(const wchar_t *text);
+void update_status_ui(void);
 static void switch_tab(int tab_id);
 static void load_changelog_ui(void);
-static void get_key_name_w(int vk, wchar_t *buf, size_t size);
-static void draw_rounded_rect(HDC hdc, RECT *r, int radius, COLORREF fill,
-                              COLORREF border, int borderWidth);
+static void handle_draw_item(HWND hWnd, const DRAWITEMSTRUCT *pDIS);
 
-#include <olectl.h>
-
-static HBITMAP load_jpeg_from_resource_or_file(int resId, const wchar_t *fallbackPath,
-                                               int targetW, int targetH) {
-  IStream *pStream = NULL;
-  DWORD dwSize = 0;
-
-  // 1. Try loading directly from embedded exe resources
-  HRSRC hRes = FindResourceW(NULL, MAKEINTRESOURCEW(resId), RT_RCDATA);
-  if (hRes) {
-    HGLOBAL hResData = LoadResource(NULL, hRes);
-    if (hResData) {
-      dwSize = SizeofResource(NULL, hRes);
-      void *pData = LockResource(hResData);
-      if (pData && dwSize > 0) {
-        HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, dwSize);
-        if (hMem) {
-          void *pMemData = GlobalLock(hMem);
-          if (pMemData) {
-            memcpy(pMemData, pData, dwSize);
-            GlobalUnlock(hMem);
-            CreateStreamOnHGlobal(hMem, TRUE, &pStream);
-          } else {
-            GlobalFree(hMem);
-          }
-        }
-      }
-    }
-  }
-
-  // 2. Fallback to reading file from disk if not found in resources
-  if (!pStream && fallbackPath) {
-    wchar_t fullPath[MAX_PATH];
-    if (GetFullPathNameW(fallbackPath, MAX_PATH, fullPath, NULL) == 0) {
-      wcsncpy_s(fullPath, MAX_PATH, fallbackPath, _TRUNCATE);
-    }
-    HANDLE hFile = CreateFileW(fullPath, GENERIC_READ, FILE_SHARE_READ, NULL,
-                               OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (hFile != INVALID_HANDLE_VALUE) {
-      dwSize = GetFileSize(hFile, NULL);
-      if (dwSize > 0 && dwSize != INVALID_FILE_SIZE) {
-        HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, dwSize);
-        if (hMem) {
-          void *pMemData = GlobalLock(hMem);
-          if (pMemData) {
-            DWORD dwRead = 0;
-            ReadFile(hFile, pMemData, dwSize, &dwRead, NULL);
-            GlobalUnlock(hMem);
-            CreateStreamOnHGlobal(hMem, TRUE, &pStream);
-          } else {
-            GlobalFree(hMem);
-          }
-        }
-      }
-      CloseHandle(hFile);
-    }
-  }
-
-  if (!pStream) {
-    return NULL;
-  }
-
-  IPicture *pPicture = NULL;
-  HRESULT hr = OleLoadPicture(pStream, dwSize, FALSE, &IID_IPicture, (void **)&pPicture);
-  pStream->lpVtbl->Release(pStream);
-
-  if (FAILED(hr) || !pPicture) {
-    return NULL;
-  }
-
-  long hmWidth = 0;
-  long hmHeight = 0;
-  pPicture->lpVtbl->get_Width(pPicture, &hmWidth);
-  pPicture->lpVtbl->get_Height(pPicture, &hmHeight);
-
-  HDC hdcScreen = GetDC(NULL);
-  HDC hdcMem = CreateCompatibleDC(hdcScreen);
-  HBITMAP hBmp = CreateCompatibleBitmap(hdcScreen, targetW, targetH);
-  HBITMAP hOldBmp = (HBITMAP)SelectObject(hdcMem, hBmp);
-
-  RECT rc = {0, 0, targetW, targetH};
-  HBRUSH hBr = CreateSolidBrush(COLOR_CARD_BG);
-  FillRect(hdcMem, &rc, hBr);
-  DeleteObject(hBr);
-
-  pPicture->lpVtbl->Render(pPicture, hdcMem, 0, 0, targetW, targetH, 0,
-                           hmHeight, hmWidth, -hmHeight, NULL);
-
-  SelectObject(hdcMem, hOldBmp);
-  DeleteDC(hdcMem);
-  ReleaseDC(NULL, hdcScreen);
-  pPicture->lpVtbl->Release(pPicture);
-
-  return hBmp;
-}
-
-// Custom Slider Window Procedure (Zero Windows Trackbar Artifacts)
-static LRESULT CALLBACK CustomSliderProc(HWND hWnd, UINT uMsg, WPARAM wParam,
-                                         LPARAM lParam) {
-  switch (uMsg) {
-  case WM_CREATE: {
-    SetWindowLongPtr(hWnd, GWLP_USERDATA, 0);
-    return 0;
-  }
-
-  case WM_ERASEBKGND:
-    return 1;
-
-  case WM_LBUTTONDOWN:
-  case WM_MOUSEMOVE: {
-    if (uMsg == WM_LBUTTONDOWN || (wParam & MK_LBUTTON)) {
-      if (uMsg == WM_LBUTTONDOWN) {
-        SetCapture(hWnd);
-      }
-      int mouseX = GET_X_LPARAM(lParam);
-      RECT rc;
-      GetClientRect(hWnd, &rc);
-      int padX = 8;
-      int trackW = rc.right - rc.left - (padX * 2);
-      if (trackW > 0) {
-        int clampedX = mouseX - padX;
-        if (clampedX < 0)
-          clampedX = 0;
-        if (clampedX > trackW)
-          clampedX = trackW;
-
-        int minVal = (int)(INT_PTR)GetPropW(hWnd, L"MinVal");
-        int maxVal = (int)(INT_PTR)GetPropW(hWnd, L"MaxVal");
-        if (maxVal <= minVal)
-          maxVal = 100;
-
-        int curPos = (int)GetWindowLongPtr(hWnd, GWLP_USERDATA);
-        int newPos = minVal + (clampedX * (maxVal - minVal)) / trackW;
-        if (newPos != curPos || uMsg == WM_LBUTTONDOWN) {
-          SetWindowLongPtr(hWnd, GWLP_USERDATA, (LONG_PTR)newPos);
-
-          HWND hParent = GetParent(hWnd);
-          if (hParent) {
-            SendMessageW(hParent, WM_HSCROLL,
-                         MAKEWPARAM(TB_THUMBTRACK, newPos), (LPARAM)hWnd);
-          }
-          InvalidateRect(hWnd, NULL, FALSE);
-        }
-      }
-      return 0;
-    }
-    break;
-  }
-
-  case WM_LBUTTONUP: {
-    if (GetCapture() == hWnd) {
-      ReleaseCapture();
-    }
-    int pos = (int)GetWindowLongPtr(hWnd, GWLP_USERDATA);
-    HWND hParent = GetParent(hWnd);
-    if (hParent) {
-      SendMessageW(hParent, WM_HSCROLL,
-                   MAKEWPARAM(TB_ENDTRACK, pos), (LPARAM)hWnd);
-    }
-    RedrawWindow(hWnd, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ERASE);
-    return 0;
-  }
-
-  case TBM_GETPOS:
-    return GetWindowLongPtr(hWnd, GWLP_USERDATA);
-
-  case TBM_SETPOS: {
-    BOOL redraw = (BOOL)wParam;
-    SetWindowLongPtr(hWnd, GWLP_USERDATA, (LONG_PTR)lParam);
-    if (redraw) {
-      RedrawWindow(hWnd, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ERASE);
-    }
-    return 0;
-  }
-
-  case TBM_SETRANGE: {
-    int minVal = LOWORD(lParam);
-    int maxVal = HIWORD(lParam);
-    SetPropW(hWnd, L"MinVal", (HANDLE)(INT_PTR)minVal);
-    SetPropW(hWnd, L"MaxVal", (HANDLE)(INT_PTR)maxVal);
-    return 0;
-  }
-
-  case TBM_GETRANGEMIN:
-    return (LRESULT)(INT_PTR)GetPropW(hWnd, L"MinVal");
-
-  case TBM_GETRANGEMAX: {
-    int maxVal = (int)(INT_PTR)GetPropW(hWnd, L"MaxVal");
-    return (maxVal <= 0) ? 100 : maxVal;
-  }
-
-  case WM_PAINT: {
-    PAINTSTRUCT ps;
-    HDC hdc = BeginPaint(hWnd, &ps);
-
-    RECT rcClient;
-    GetClientRect(hWnd, &rcClient);
-
-    // Double buffer full control area
-    HDC hdcMem = CreateCompatibleDC(hdc);
-    HBITMAP hbmMem = CreateCompatibleBitmap(hdc, rcClient.right, rcClient.bottom);
-    HBITMAP hbmOld = (HBITMAP)SelectObject(hdcMem, hbmMem);
-
-    // Dark solid card background
-    HBRUSH hBrBg = CreateSolidBrush(COLOR_CARD_BG);
-    FillRect(hdcMem, &rcClient, hBrBg);
-    DeleteObject(hBrBg);
-
-    int pos = (int)GetWindowLongPtr(hWnd, GWLP_USERDATA);
-    int minVal = (int)(INT_PTR)GetPropW(hWnd, L"MinVal");
-    int maxVal = (int)(INT_PTR)GetPropW(hWnd, L"MaxVal");
-    if (maxVal <= minVal)
-      maxVal = 100;
-
-    int padX = 8;
-    int trackW = rcClient.right - rcClient.left - (padX * 2);
-    int cy = (rcClient.top + rcClient.bottom) / 2;
-    int trackH = 4;
-    RECT rcTrack = {padX, cy - (trackH / 2), padX + trackW, cy + (trackH / 2)};
-
-    // Dark slate background line
-    draw_rounded_rect(hdcMem, &rcTrack, 2, RGB(45, 45, 60), RGB(65, 65, 85), 0);
-
-    // Calculate filled width
-    int fillW = ((pos - minVal) * trackW) / (maxVal - minVal);
-    if (fillW < 0)
-      fillW = 0;
-    if (fillW > trackW)
-      fillW = trackW;
-
-    // Filled vibrant purple glow line
-    if (fillW > 0) {
-      RECT rcFill = {rcTrack.left, rcTrack.top, rcTrack.left + fillW, rcTrack.bottom};
-      draw_rounded_rect(hdcMem, &rcFill, 2, RGB(139, 92, 246), RGB(167, 139, 250), 0);
-    }
-
-    // Centered Circle Thumb
-    int thumbX = rcTrack.left + fillW;
-    int r = 6;
-
-    // Outer Purple Ring
-    HBRUSH hBrRing = CreateSolidBrush(RGB(139, 92, 246));
-    HPEN hPenRing = CreatePen(PS_SOLID, 1, RGB(167, 139, 250));
-    HBRUSH hOldBr = (HBRUSH)SelectObject(hdcMem, hBrRing);
-    HPEN hOldPen = (HPEN)SelectObject(hdcMem, hPenRing);
-    Ellipse(hdcMem, thumbX - r, cy - r, thumbX + r, cy + r);
-
-    // Inner White Dot
-    HBRUSH hBrWhite = CreateSolidBrush(RGB(255, 255, 255));
-    HPEN hPenWhite = CreatePen(PS_SOLID, 1, RGB(255, 255, 255));
-    SelectObject(hdcMem, hBrWhite);
-    SelectObject(hdcMem, hPenWhite);
-    Ellipse(hdcMem, thumbX - (r - 2), cy - (r - 2), thumbX + (r - 2), cy + (r - 2));
-
-    SelectObject(hdcMem, hOldBr);
-    SelectObject(hdcMem, hOldPen);
-    DeleteObject(hBrRing);
-    DeleteObject(hPenRing);
-    DeleteObject(hBrWhite);
-    DeleteObject(hPenWhite);
-
-    BitBlt(hdc, 0, 0, rcClient.right, rcClient.bottom, hdcMem, 0, 0, SRCCOPY);
-    SelectObject(hdcMem, hbmOld);
-    DeleteObject(hbmMem);
-    DeleteDC(hdcMem);
-    EndPaint(hWnd, &ps);
-    return 0;
-  }
-
-  case WM_DESTROY:
-    RemovePropW(hWnd, L"MinVal");
-    RemovePropW(hWnd, L"MaxVal");
-    break;
-  }
-  return DefWindowProcW(hWnd, uMsg, wParam, lParam);
-}
-
-// Drawing Helper
-static LRESULT CALLBACK EditSubclassProc(HWND hWnd, UINT uMsg, WPARAM wParam,
-                                         LPARAM lParam, UINT_PTR uIdSubclass,
-                                         DWORD_PTR dwRefData) {
-  (void)uIdSubclass;
-  (void)dwRefData;
-  if (uMsg == WM_KEYDOWN) {
-    if (wParam == 'A' && (GetKeyState(VK_CONTROL) & 0x8000)) {
-      SendMessageW(hWnd, EM_SETSEL, 0, -1);
-      return 0;
-    }
-  } else if (uMsg == WM_CHAR) {
-    // Suppress beep on Ctrl+A
-    if (wParam == 1) {
-      return 0;
-    }
-  } else if (uMsg == WM_NCDESTROY) {
-    RemoveWindowSubclass(hWnd, EditSubclassProc, uIdSubclass);
-  }
-  return DefSubclassProc(hWnd, uMsg, wParam, lParam);
-}
-
-static void draw_rounded_rect(HDC hdc, RECT *r, int radius, COLORREF fill,
-                              COLORREF border, int borderWidth) {
-  HBRUSH hBrush = CreateSolidBrush(fill);
-  HPEN hPen = (borderWidth > 0) ? CreatePen(PS_SOLID, borderWidth, border)
-                                : CreatePen(PS_NULL, 0, 0);
-  HBRUSH hOldBrush = (HBRUSH)SelectObject(hdc, hBrush);
-  HPEN hOldPen = (HPEN)SelectObject(hdc, hPen);
-
-  RoundRect(hdc, r->left, r->top, r->right, r->bottom, radius, radius);
-
-  SelectObject(hdc, hOldBrush);
-  SelectObject(hdc, hOldPen);
-  DeleteObject(hBrush);
-  DeleteObject(hPen);
-}
-
-// Path & Config Utilities
-static void init_config_path(void) {
-  wchar_t exePath[MAX_PATH];
-  DWORD len = GetModuleFileNameW(NULL, exePath, MAX_PATH);
-  if (len == 0 || len >= MAX_PATH) {
-    wcscpy_s(g_config_path, MAX_PATH, L"config.ini");
-    return;
-  }
-  for (int i = (int)len - 1; i >= 0; --i) {
-    if (exePath[i] == L'\\' || exePath[i] == L'/') {
-      exePath[i + 1] = L'\0';
-      break;
-    }
-  }
-  wcscpy_s(g_config_path, MAX_PATH, exePath);
-  wcscat_s(g_config_path, MAX_PATH, L"config.ini");
-}
-
-static void save_config(void) {
-  wchar_t buf[32];
-  wchar_t chat_text[512];
-
-  swprintf_s(buf, 32, L"%d", atomic_load(&g_playpause_vk));
-  WritePrivateProfileStringW(L"Settings", L"PlayPause", buf, g_config_path);
-
-  swprintf_s(buf, 32, L"%d", atomic_load(&g_auto_vote_mode));
-  WritePrivateProfileStringW(L"Settings", L"AutoVote", buf, g_config_path);
-
-  swprintf_s(buf, 32, L"%d", atomic_load(&g_chat_mode));
-  WritePrivateProfileStringW(L"Chat", L"Enabled", buf, g_config_path);
-
-  swprintf_s(buf, 32, L"%d", atomic_load(&g_chat_target));
-  WritePrivateProfileStringW(L"Chat", L"Target", buf, g_config_path);
-
-  swprintf_s(buf, 32, L"%d", atomic_load(&g_chat_interval));
-  WritePrivateProfileStringW(L"Chat", L"Interval", buf, g_config_path);
-
-  EnterCriticalSection(&g_chat_lock);
-  wcscpy_s(chat_text, 512, g_chat_text);
-  LeaveCriticalSection(&g_chat_lock);
-  WritePrivateProfileStringW(L"Chat", L"Text", chat_text, g_config_path);
-}
-
-static void load_config(void) {
-  int playpause =
-      GetPrivateProfileIntW(L"Settings", L"PlayPause", VK_F9, g_config_path);
-  int autovote =
-      GetPrivateProfileIntW(L"Settings", L"AutoVote", 0, g_config_path);
-  int chat_mode = GetPrivateProfileIntW(
-      L"Chat", L"Enabled",
-      GetPrivateProfileIntW(L"Settings", L"UncleBenQuote", 0, g_config_path),
-      g_config_path);
-  int chat_target = GetPrivateProfileIntW(L"Chat", L"Target", 0, g_config_path);
-  int chat_interval =
-      GetPrivateProfileIntW(L"Chat", L"Interval", 180, g_config_path);
-  wchar_t chat_text[512];
-
-  if (playpause < 8 || playpause > 254 || playpause == VK_LBUTTON ||
-      playpause == VK_RBUTTON || playpause == VK_MBUTTON) {
-    playpause = VK_F9;
-  }
-  if (autovote < 0 || autovote > 2)
-    autovote = 0;
-  if (chat_mode < 0 || chat_mode > 1)
-    chat_mode = 0;
-  if (chat_target < 0 || chat_target > 1)
-    chat_target = 0;
-  if (chat_interval < 1 || chat_interval > 86400)
-    chat_interval = 180;
-  GetPrivateProfileStringW(L"Chat", L"Text",
-                           L"With great Power comes great Responsibility",
-                           chat_text, 512, g_config_path);
-
-  atomic_store(&g_playpause_vk, playpause);
-  atomic_store(&g_auto_vote_mode, autovote);
-  atomic_store(&g_chat_mode, chat_mode);
-  atomic_store(&g_chat_target, chat_target);
-  atomic_store(&g_chat_interval, chat_interval);
-  EnterCriticalSection(&g_chat_lock);
-  wcscpy_s(g_chat_text, 512, chat_text);
-  LeaveCriticalSection(&g_chat_lock);
-}
-
-// Time & Formatting
-static void current_time_str_w(wchar_t *buf, size_t size) {
-  SYSTEMTIME st;
-  GetLocalTime(&st);
-  int h = st.wHour % 12;
-  if (h == 0)
-    h = 12;
-  swprintf_s(buf, size, L"%02d:%02d:%02d %s", h, st.wMinute, st.wSecond,
-             st.wHour < 12 ? L"AM" : L"PM");
-}
-
-static int rand_range(int min, int extra) {
-  return min + (rand() % (extra + 1));
-}
-
-static void get_key_name_w(int vk, wchar_t *buf, size_t size) {
-  LONG scan = (LONG)MapVirtualKeyW((UINT)vk, MAPVK_VK_TO_VSC) << 16;
-  if (!scan || !GetKeyNameTextW(scan, buf, (int)size)) {
-    swprintf_s(buf, size, L"VK_0x%02X", vk);
-  }
-}
-
-// File Logging
-static void check_files(void) {
-  CreateDirectoryA(LOG_DIR, NULL);
-  FILE *f = NULL;
-  fopen_s(&f, LOG_FILE, "a");
-  if (f)
-    fclose(f);
-}
-
-static void log_write(const char *text) {
-  check_files();
-  FILE *f = NULL;
-  fopen_s(&f, LOG_FILE, "a");
-  if (f) {
-    fprintf(f, "%s\n", text);
-    fclose(f);
-  }
-}
-
-static void send_gui_log(const wchar_t *msg) {
-  if (g_hWnd && IsWindow(g_hWnd)) {
-    wchar_t *heapMsg = _wcsdup(msg);
-    PostMessageW(g_hWnd, WM_APP_LOG, 0, (LPARAM)heapMsg);
-  }
-}
-
-static void logger(const wchar_t *action, int count) {
-  wchar_t ts[32];
-  current_time_str_w(ts, 32);
-  wchar_t buf[256];
-  swprintf_s(buf, 256, L"[%s] action: %s -> %d", ts, action, count);
-  send_gui_log(buf);
-
-  char ansiBuf[512];
-  WideCharToMultiByte(CP_UTF8, 0, buf, -1, ansiBuf, sizeof(ansiBuf), NULL,
-                      NULL);
-  log_write(ansiBuf);
-}
-
-static void status_logger(const wchar_t *text) {
-  wchar_t ts[32];
-  current_time_str_w(ts, 32);
-  wchar_t buf[256];
-  swprintf_s(buf, 256, L"[%s] %s", ts, text);
-  send_gui_log(buf);
-
-  char ansiBuf[512];
-  WideCharToMultiByte(CP_UTF8, 0, buf, -1, ansiBuf, sizeof(ansiBuf), NULL,
-                      NULL);
-  log_write(ansiBuf);
-}
-
-// Key Injection Helpers
-static void send_key_press(WORD vk) {
-  INPUT inp = {0};
-  inp.type = INPUT_KEYBOARD;
-  inp.ki.wVk = vk;
-  SendInput(1, &inp, sizeof(INPUT));
-  Sleep(50 + rand() % 50);
-  inp.ki.dwFlags = KEYEVENTF_KEYUP;
-  SendInput(1, &inp, sizeof(INPUT));
-}
-
-static void send_extra_key(WORD vk) {
-  int is_hotkey = ((int)vk == atomic_load(&g_playpause_vk));
-  if (is_hotkey)
-    atomic_store(&g_suppress_hotkey, 1);
-  send_key_press(vk);
-  if (is_hotkey) {
-    Sleep(SUPPRESS_WINDOW_MS);
-    atomic_store(&g_suppress_hotkey, 0);
-  }
-}
-
-static int copy_to_clipboard_w(const wchar_t *text) {
-  if (!OpenClipboard(NULL))
-    return 0;
-  EmptyClipboard();
-  size_t len = (wcslen(text) + 1) * sizeof(wchar_t);
-  HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, len);
-  if (hMem) {
-    memcpy(GlobalLock(hMem), text, len);
-    GlobalUnlock(hMem);
-    SetClipboardData(CF_UNICODETEXT, hMem);
-  }
-  CloseClipboard();
-  return hMem != NULL;
-}
-
-static void send_paste_action(void) {
-  INPUT inputs[4] = {0};
-  inputs[0].type = INPUT_KEYBOARD;
-  inputs[0].ki.wVk = VK_CONTROL;
-
-  inputs[1].type = INPUT_KEYBOARD;
-  inputs[1].ki.wVk = 'V';
-
-  inputs[2].type = INPUT_KEYBOARD;
-  inputs[2].ki.wVk = 'V';
-  inputs[2].ki.dwFlags = KEYEVENTF_KEYUP;
-
-  inputs[3].type = INPUT_KEYBOARD;
-  inputs[3].ki.wVk = VK_CONTROL;
-  inputs[3].ki.dwFlags = KEYEVENTF_KEYUP;
-
-  SendInput(4, inputs, sizeof(INPUT));
-}
-
-static void send_chat_message(void) {
-  wchar_t local_text[512];
-
-  EnterCriticalSection(&g_chat_lock);
-  wcscpy_s(local_text, 512, g_chat_text);
-  LeaveCriticalSection(&g_chat_lock);
-
-  if (local_text[0] == L'\0')
-    return;
-
-  if (!copy_to_clipboard_w(local_text))
-    return;
-
-  if (atomic_load(&g_chat_target) == 1) {
-    INPUT inputs[4] = {0};
-    inputs[0].type = INPUT_KEYBOARD;
-    inputs[0].ki.wVk = VK_SHIFT;
-    inputs[1].type = INPUT_KEYBOARD;
-    inputs[1].ki.wVk = VK_RETURN;
-    inputs[2].type = INPUT_KEYBOARD;
-    inputs[2].ki.wVk = VK_RETURN;
-    inputs[2].ki.dwFlags = KEYEVENTF_KEYUP;
-    inputs[3].type = INPUT_KEYBOARD;
-    inputs[3].ki.wVk = VK_SHIFT;
-    inputs[3].ki.dwFlags = KEYEVENTF_KEYUP;
-    SendInput(4, inputs, sizeof(INPUT));
-  } else {
-    send_extra_key(VK_RETURN);
-  }
-
-  send_paste_action();
-  Sleep(50 + rand() % 50);
-  send_extra_key(VK_RETURN);
-}
-
-static int interruptible_sleep(int total_ms) {
-  int waited = 0;
-  while (waited < total_ms) {
-    if (atomic_load(&g_pressed))
-      return 1;
-    int chunk = (total_ms - waited < STOP_CHECK_MS) ? (total_ms - waited)
-                                                    : STOP_CHECK_MS;
-    Sleep(chunk);
-    waited += chunk;
-  }
-  return atomic_load(&g_pressed);
-}
-
-// Background Threads
-DWORD WINAPI hotkey_thread(LPVOID param) {
-  (void)param;
-  int was_down = 0;
-  while (atomic_load(&g_listener)) {
-    if (atomic_load(&g_is_rebinding)) {
-      for (int vk = 8; vk <= 254; vk++) {
-        if (vk == VK_LBUTTON || vk == VK_RBUTTON || vk == VK_MBUTTON)
-          continue;
-        if (GetAsyncKeyState(vk) & 0x8000) {
-          if (vk == VK_F5 || vk == VK_F6) {
-            send_gui_log(L"[SYSTEM] F5 and F6 are reserved for Auto-Vote and "
-                         L"cannot be Play/Pause.");
-            Sleep(500);
-            break;
-          }
-          atomic_store(&g_playpause_vk, vk);
-          save_config();
-          // Wait for key release to prevent triggering start immediately
-          while (GetAsyncKeyState(vk) & 0x8000) {
-            Sleep(20);
-          }
-          was_down = 1;
-          atomic_store(&g_is_rebinding, 0);
-          PostMessageW(g_hWnd, WM_APP_UPDATE_STATUS, 0, 0);
-          break;
-        }
-      }
-      Sleep(30);
-      continue;
-    }
-
-    int vk = atomic_load(&g_playpause_vk);
-    int down = (GetAsyncKeyState(vk) & 0x8000) != 0;
-
-    if (atomic_load(&g_suppress_hotkey)) {
-      was_down = down;
-    } else {
-      if (down && !was_down) {
-        atomic_store(&g_pressed, 1);
-        PostMessageW(g_hWnd, WM_APP_UPDATE_STATUS, 1, 0);
-      }
-      was_down = down;
-    }
-    Sleep(LISTENER_LOOP_MS);
-  }
-  return 0;
-}
-
-DWORD WINAPI spammer_thread_proc(LPVOID param) {
-  (void)param;
-  status_logger(L"SageBot started.");
-
-  ULONGLONG start_tick = GetTickCount64();
-  ULONGLONG last_chat_tick = 0;
-  int count = 0;
-
-  while (atomic_load(&g_status)) {
-    int interval = rand_range(TAB_MIN_MS, TAB_RAND_MS);
-
-    if (interruptible_sleep(interval)) {
-      atomic_store(&g_pressed, 0);
-      atomic_store(&g_status, 0);
-      PostMessageW(g_hWnd, WM_APP_UPDATE_STATUS, 0, 0);
-      return 0;
-    }
-
-    ULONGLONG elapsed = (GetTickCount64() - start_tick) / 1000;
-    if (elapsed >= RUN_SECONDS) {
-      status_logger(L"Stopped SageBot");
-      atomic_store(&g_status, 0);
-      PostMessageW(g_hWnd, WM_APP_UPDATE_STATUS, 0, 0);
-      return 0;
-    }
-
-    send_key_press(VK_TAB);
-    logger(L"TAB", count++);
-
-    int mode = atomic_load(&g_auto_vote_mode);
-    if (mode == 1)
-      send_extra_key(VK_F5);
-    else if (mode == 2)
-      send_extra_key(VK_F6);
-
-    ULONGLONG now = GetTickCount64();
-    int chat_interval_ms = atomic_load(&g_chat_interval) * 1000;
-    if (chat_interval_ms < 1000)
-      chat_interval_ms = 180000;
-
-    if (atomic_load(&g_chat_mode) == 1 &&
-        (last_chat_tick == 0 ||
-         (now - last_chat_tick) >= (ULONGLONG)chat_interval_ms)) {
-      last_chat_tick = now;
-      send_chat_message();
-      logger(L"CHAT_MESSAGE", count++);
-    }
-  }
-
-  PostMessageW(g_hWnd, WM_APP_UPDATE_STATUS, 0, 0);
-  return 0;
-}
-
-static void start_spammer(void) {
-  if (atomic_load(&g_status))
-    return;
-  if (g_hEditLog)
-    SetWindowTextW(g_hEditLog, L"");
-  status_logger(L"Logs cleared.");
-
-  atomic_store(&g_status, 1);
-  atomic_store(&g_pressed, 0);
-  g_hSpammerThread = CreateThread(NULL, 0, spammer_thread_proc, NULL, 0, NULL);
-  update_status_ui();
-}
-
-static void stop_spammer(void) {
-  if (!atomic_load(&g_status))
-    return;
-  atomic_store(&g_status, 0);
-  atomic_store(&g_pressed, 1);
-  update_status_ui();
-  status_logger(L"Stopped SageBot");
-}
-
-// GUI Helper Functions
-static void append_log_ui(const wchar_t *text) {
+void append_log_ui(const wchar_t *text) {
   if (!g_hEditLog)
     return;
   int len = GetWindowTextLengthW(g_hEditLog);
@@ -929,7 +173,7 @@ static void append_log_ui(const wchar_t *text) {
   SendMessageW(g_hEditLog, EM_REPLACESEL, FALSE, (LPARAM)L"\r\n");
 }
 
-static void update_status_ui(void) {
+void update_status_ui(void) {
   wchar_t keyname[32];
   get_key_name_w(atomic_load(&g_playpause_vk), keyname, 32);
 
@@ -951,10 +195,27 @@ static void update_status_ui(void) {
     SetWindowTextW(g_hBtnRebind, keyname);
   }
 
+  wchar_t afkKeyName[32];
+  get_key_name_w(atomic_load(&g_anti_afk_key), afkKeyName, 32);
+  if (atomic_load(&g_is_rebinding_afk)) {
+    SetWindowTextW(g_hBtnKeyBadge, L"Press...");
+  } else {
+    SetWindowTextW(g_hBtnKeyBadge, afkKeyName);
+  }
+
   InvalidateRect(g_hBtnStart, NULL, TRUE);
   InvalidateRect(g_hBtnRebind, NULL, TRUE);
+  InvalidateRect(g_hBtnKeyBadge, NULL, TRUE);
   InvalidateRect(g_hLblStatusVal, NULL, TRUE);
   InvalidateRect(g_hLblHotkeyVal, NULL, TRUE);
+
+  wchar_t roundText[64];
+  get_round_display_text(roundText, 64);
+  if (g_hLblRoundVal) {
+    SetWindowTextW(g_hLblRoundVal, roundText);
+    InvalidateRect(g_hLblRoundVal, NULL, TRUE);
+  }
+
   InvalidateRect(g_hWnd, NULL, TRUE);
 }
 
@@ -1080,7 +341,6 @@ static void show_chat_controls(int show) {
   ShowWindow(g_hLblChatText, command);
   ShowWindow(g_hLblChatCharCount, command);
   ShowWindow(g_hEditChatText, command);
-  ShowWindow(g_hBtnChatSave, command);
   ShowWindow(g_hBtnChatExample1, command);
   ShowWindow(g_hBtnChatExample2, command);
 }
@@ -1097,187 +357,76 @@ static void show_vote_controls(int show) {
 #define MUSIC_ALIAS L"sagebot_bgm"
 #define MUSIC_FILE L"assets\\music.mp3"
 
-static wchar_t g_extracted_mp3_path[MAX_PATH] = L"";
-
-static const wchar_t *get_playable_mp3_path(void) {
-  if (g_extracted_mp3_path[0] != L'\0') {
-    return g_extracted_mp3_path;
-  }
-
-  // 1. Try extracting from embedded resource ID 3
-  HRSRC hRes = FindResourceW(NULL, MAKEINTRESOURCEW(3), RT_RCDATA);
-  if (hRes) {
-    HGLOBAL hResData = LoadResource(NULL, hRes);
-    if (hResData) {
-      DWORD dwSize = SizeofResource(NULL, hRes);
-      void *pData = LockResource(hResData);
-      if (pData && dwSize > 0) {
-        wchar_t tempPath[MAX_PATH];
-        GetTempPathW(MAX_PATH, tempPath);
-        swprintf_s(g_extracted_mp3_path, MAX_PATH, L"%ssagebot_bgm.mp3", tempPath);
-
-        HANDLE hFile = CreateFileW(g_extracted_mp3_path, GENERIC_WRITE, 0, NULL,
-                                   CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-        if (hFile != INVALID_HANDLE_VALUE) {
-          DWORD dwWritten = 0;
-          WriteFile(hFile, pData, dwSize, &dwWritten, NULL);
-          CloseHandle(hFile);
-          return g_extracted_mp3_path;
-        }
-      }
-    }
-  }
-
-  // 2. Fallback to local asset file
-  return MUSIC_FILE;
-}
-
-static void music_open(void) {
-  if (g_music_opened)
-    return;
-
-  const wchar_t *mp3Path = get_playable_mp3_path();
-  wchar_t cmd[512];
-  swprintf_s(cmd, 512, L"open \"%s\" type mpegvideo alias %s", mp3Path,
-             MUSIC_ALIAS);
-  MCIERROR err = mciSendStringW(cmd, NULL, 0, NULL);
-  if (err == 0) {
-    g_music_opened = 1;
-    mciSendStringW(L"set " MUSIC_ALIAS L" time format milliseconds", NULL, 0,
-                   NULL);
-
-    wchar_t lenBuf[64];
-    mciSendStringW(L"status " MUSIC_ALIAS L" length", lenBuf, 64, NULL);
-    g_music_length_ms = wcstol(lenBuf, NULL, 10);
-    if (g_music_length_ms <= 0)
-      g_music_length_ms = 180000;
-
-    // Apply volume (0 - 1000)
-    int vol1000 = g_music_volume * 10;
-    swprintf_s(cmd, 512, L"setaudio " MUSIC_ALIAS L" volume to %d", vol1000);
-    mciSendStringW(cmd, NULL, 0, NULL);
-  }
-}
-
-static void music_play(void) {
-  if (!g_music_opened)
-    music_open();
-
-  if (g_music_opened) {
-    mciSendStringW(L"play " MUSIC_ALIAS L" repeat", NULL, 0, NULL);
-    g_music_playing = 1;
-    if (g_hBtnMusicPlay) {
-      SetWindowTextW(g_hBtnMusicPlay, L"⏸  Pause");
-      InvalidateRect(g_hBtnMusicPlay, NULL, TRUE);
-    }
-  }
-}
-
-static void music_pause(void) {
-  if (g_music_opened && g_music_playing) {
-    mciSendStringW(L"pause " MUSIC_ALIAS, NULL, 0, NULL);
-    g_music_playing = 0;
-    if (g_hBtnMusicPlay) {
-      SetWindowTextW(g_hBtnMusicPlay, L"▶  Play");
-      InvalidateRect(g_hBtnMusicPlay, NULL, TRUE);
-    }
-  }
-}
-
-static void music_toggle(void) {
-  if (g_music_playing) {
-    music_pause();
-  } else {
-    music_play();
-  }
-}
-
-static void music_set_volume(int vol) {
-  if (vol < 0)
-    vol = 0;
-  if (vol > 100)
-    vol = 100;
-  g_music_volume = vol;
-  if (g_music_opened) {
-    wchar_t cmd[64];
-    swprintf_s(cmd, 64, L"setaudio " MUSIC_ALIAS L" volume to %d", vol * 10);
-    mciSendStringW(cmd, NULL, 0, NULL);
-  }
-  if (g_hLblMusicVol) {
-    wchar_t buf[32];
-    swprintf_s(buf, 32, L"Volume: %d%%", vol);
-    SetWindowTextW(g_hLblMusicVol, buf);
-  }
-}
-
-static void music_seek_to(int pos_ms) {
-  if (!g_music_opened)
-    music_open();
-
-  if (g_music_opened) {
-    wchar_t cmd[64];
-    swprintf_s(cmd, 64, L"seek " MUSIC_ALIAS L" to %d", pos_ms);
-    mciSendStringW(cmd, NULL, 0, NULL);
-    if (g_music_playing) {
-      mciSendStringW(L"play " MUSIC_ALIAS L" repeat", NULL, 0, NULL);
-    }
-  }
-}
-
-static void music_update_progress(void) {
-  if (!g_music_opened || !g_hSliderMusicPos || !g_hLblMusicTime)
-    return;
-
-  wchar_t posBuf[64];
-  mciSendStringW(L"status " MUSIC_ALIAS L" position", posBuf, 64, NULL);
-  int cur_ms = wcstol(posBuf, NULL, 10);
-  if (cur_ms < 0)
-    cur_ms = 0;
-
-  if (!g_music_user_seeking) {
-    SendMessageW(g_hSliderMusicPos, TBM_SETPOS, TRUE, cur_ms / 1000);
-  }
-
-  int cur_s = cur_ms / 1000;
-  int tot_s = g_music_length_ms / 1000;
-  wchar_t timeBuf[64];
-  swprintf_s(timeBuf, 64, L"%02d:%02d / %02d:%02d", cur_s / 60, cur_s % 60,
-             tot_s / 60, tot_s % 60);
-  SetWindowTextW(g_hLblMusicTime, timeBuf);
-}
-
-static void music_cleanup(void) {
-  if (g_music_opened) {
-    mciSendStringW(L"stop " MUSIC_ALIAS, NULL, 0, NULL);
-    mciSendStringW(L"close " MUSIC_ALIAS, NULL, 0, NULL);
-    g_music_opened = 0;
-    g_music_playing = 0;
-  }
-  if (g_extracted_mp3_path[0] != L'\0') {
-    DeleteFileW(g_extracted_mp3_path);
-    g_extracted_mp3_path[0] = L'\0';
-  }
-  if (g_hBmpMusicCover) {
-    DeleteObject(g_hBmpMusicCover);
-    g_hBmpMusicCover = NULL;
-  }
-}
-
-static void show_music_controls(int show) {
-  int command = show ? SW_SHOW : SW_HIDE;
-  ShowWindow(g_hSliderMusicPos, command);
-  ShowWindow(g_hLblMusicTime, command);
-  ShowWindow(g_hBtnMusicPlay, command);
-  ShowWindow(g_hSliderMusicVol, command);
-  ShowWindow(g_hLblMusicVol, command);
-}
-
 static void show_settings_controls(int show) {
   int command = show ? SW_SHOW : SW_HIDE;
   ShowWindow(g_hLblSettingsHeader, command);
   ShowWindow(g_hLblSettingsHelp, command);
   ShowWindow(g_hLblSettingsKeyTitle, command);
   ShowWindow(g_hBtnRebind, command);
+  ShowWindow(g_hLblUpdateHeader, command);
+  ShowWindow(g_hLblUpdateVersion, command);
+  ShowWindow(g_hBtnCheckUpdate, command);
+  ShowWindow(g_hLblUpdateStatus, command);
+}
+
+static void update_config_mode_ui(void) {
+  int mode = atomic_load(&g_anti_afk_mode); // 0 = Click, 1 = Hold
+  if (mode == 1) {
+    SetWindowTextW(g_hLblClickSettingsTitle, L"Hold Mode Settings");
+    SetWindowTextW(g_hLblClickSettingsSub, L"Continuously holds down the selected key.");
+    SetWindowTextW(g_hLblClickKeyTitle, L"Holding Key");
+    SetWindowTextW(g_hLblIntervalNote, L"Tips: The W key makes you move forward!");
+
+    ShowWindow(g_hLblIntervalTitle, SW_HIDE);
+    ShowWindow(g_hBtnDelayBadge, SW_HIDE);
+    ShowWindow(g_hLblSlowModeTitle, SW_HIDE);
+    ShowWindow(g_hChkSlowMode, SW_HIDE);
+    ShowWindow(g_hLblSlowModeDesc, SW_HIDE);
+
+    SetWindowPos(g_hLblIntervalNote, NULL, 176, 296, 290, 36, SWP_NOZORDER);
+  } else {
+    SetWindowTextW(g_hLblClickSettingsTitle, L"Click Mode Settings");
+    SetWindowTextW(g_hLblClickSettingsSub, L"Randomly clicks the selected key.");
+    SetWindowTextW(g_hLblClickKeyTitle, L"Clicking Key");
+    SetWindowTextW(g_hLblIntervalNote, L"Interval between clicks is randomized.");
+
+    SetWindowPos(g_hLblIntervalNote, NULL, 176, 322, 290, 16, SWP_NOZORDER);
+
+    if (g_current_tab == 6) {
+      ShowWindow(g_hLblIntervalTitle, SW_SHOW);
+      ShowWindow(g_hBtnDelayBadge, SW_SHOW);
+      ShowWindow(g_hLblSlowModeTitle, SW_SHOW);
+      ShowWindow(g_hChkSlowMode, SW_SHOW);
+      ShowWindow(g_hLblSlowModeDesc, SW_SHOW);
+    }
+  }
+
+  InvalidateRect(g_hRadioModeClick, NULL, TRUE);
+  InvalidateRect(g_hRadioModeMove, NULL, TRUE);
+  InvalidateRect(g_hWnd, NULL, TRUE);
+}
+
+static void show_config_controls(int show) {
+  int command = show ? SW_SHOW : SW_HIDE;
+  ShowWindow(g_hLblConfigHeader, command);
+  ShowWindow(g_hLblConfigSub, command);
+  ShowWindow(g_hRadioModeClick, command);
+  ShowWindow(g_hRadioModeMove, command);
+  ShowWindow(g_hLblClickSettingsTitle, command);
+  ShowWindow(g_hLblClickSettingsSub, command);
+  ShowWindow(g_hLblClickKeyTitle, command);
+  ShowWindow(g_hBtnKeyBadge, command);
+  ShowWindow(g_hLblIntervalNote, command);
+
+  if (show) {
+    update_config_mode_ui();
+  } else {
+    ShowWindow(g_hLblIntervalTitle, SW_HIDE);
+    ShowWindow(g_hBtnDelayBadge, SW_HIDE);
+    ShowWindow(g_hLblSlowModeTitle, SW_HIDE);
+    ShowWindow(g_hChkSlowMode, SW_HIDE);
+    ShowWindow(g_hLblSlowModeDesc, SW_HIDE);
+  }
 }
 
 static void show_main_controls(int show) {
@@ -1290,8 +439,69 @@ static void show_main_controls(int show) {
   ShowWindow(g_hEditLog, command);
 }
 
+static void update_status_tab_ui(void) {
+  if (!g_hLblRiotIdVal) return;
+  RoundTrackerInfo info;
+  get_round_tracker_snapshot(&info);
+  SetWindowTextW(g_hLblRiotIdVal, info.riot_id);
+  SetWindowTextW(g_hLblRankVal, info.rank_name);
+  SetWindowTextW(g_hLblMapVal, info.map_name);
+  SetWindowTextW(g_hLblGamemodeVal, info.gamemode);
+  SetWindowTextW(g_hLblPhaseVal, info.game_phase);
+  SetWindowTextW(g_hLblAgentVal, info.agent_name);
+  SetWindowTextW(g_hLblRoundVal, info.display_text);
+  InvalidateRect(g_hLblRiotIdVal, NULL, TRUE);
+  InvalidateRect(g_hLblRankVal, NULL, TRUE);
+  InvalidateRect(g_hLblMapVal, NULL, TRUE);
+  InvalidateRect(g_hLblGamemodeVal, NULL, TRUE);
+  InvalidateRect(g_hLblPhaseVal, NULL, TRUE);
+  InvalidateRect(g_hLblAgentVal, NULL, TRUE);
+  InvalidateRect(g_hLblRoundVal, NULL, TRUE);
+}
+
+static void show_status_controls(int show) {
+  int command = show ? SW_SHOW : SW_HIDE;
+  ShowWindow(g_hLblBox1Header, command);
+  ShowWindow(g_hLblRiotIdTitle, command);
+  ShowWindow(g_hLblRiotIdVal, command);
+  ShowWindow(g_hLblRankTitle, command);
+  ShowWindow(g_hLblRankVal, command);
+  ShowWindow(g_hLblBox2Header, command);
+  ShowWindow(g_hLblMapTitle, command);
+  ShowWindow(g_hLblMapVal, command);
+  ShowWindow(g_hLblGamemodeTitle, command);
+  ShowWindow(g_hLblGamemodeVal, command);
+  ShowWindow(g_hLblPhaseTitle, command);
+  ShowWindow(g_hLblPhaseVal, command);
+  ShowWindow(g_hLblAgentTitle, command);
+  ShowWindow(g_hLblAgentVal, command);
+  ShowWindow(g_hLblRoundTitle, command);
+  ShowWindow(g_hLblRoundVal, command);
+  if (show) {
+    update_status_tab_ui();
+  }
+}
+
+static void show_webhook_controls(int show) {
+  int command = show ? SW_SHOW : SW_HIDE;
+  ShowWindow(g_hLblWebhookHeader, command);
+  ShowWindow(g_hLblWebhookSub, command);
+  ShowWindow(g_hLblWebhookUrl, command);
+  ShowWindow(g_hLblWebhookUrlNote, command);
+  ShowWindow(g_hEditWebhookUrl, command);
+  ShowWindow(g_hLblWebhookUserId, command);
+  ShowWindow(g_hLblWebhookUserIdNote, command);
+  ShowWindow(g_hEditWebhookUserId, command);
+  ShowWindow(g_hLblWebhookHint, command);
+  ShowWindow(g_hBtnWebhookSave, command);
+  ShowWindow(g_hBtnWebhookTest, command);
+  ShowWindow(g_hLblWebhookStatus, command);
+}
+
 static void switch_tab(int tab_id) {
   g_current_tab = tab_id;
+  atomic_store(&g_is_rebinding, 0);
+  atomic_store(&g_is_rebinding_afk, 0);
 
   show_main_controls(tab_id == 0);
   ShowWindow(g_hEditChangelogs, tab_id == 1 ? SW_SHOW : SW_HIDE);
@@ -1299,6 +509,9 @@ static void switch_tab(int tab_id) {
   show_vote_controls(tab_id == 3);
   show_settings_controls(tab_id == 4);
   show_music_controls(tab_id == 5);
+  show_config_controls(tab_id == 6);
+  show_status_controls(tab_id == 7);
+  show_webhook_controls(tab_id == 8);
 
   if (tab_id == 1) {
     load_changelog_ui();
@@ -1307,15 +520,20 @@ static void switch_tab(int tab_id) {
   // Repaint window cleanly
   InvalidateRect(g_hNavChangelogs, NULL, TRUE);
   InvalidateRect(g_hNavMain, NULL, TRUE);
+  InvalidateRect(g_hNavStatus, NULL, TRUE);
+  InvalidateRect(g_hNavConfig, NULL, TRUE);
   InvalidateRect(g_hNavChat, NULL, TRUE);
   InvalidateRect(g_hNavAutoVoting, NULL, TRUE);
   InvalidateRect(g_hNavMusic, NULL, TRUE);
+  InvalidateRect(g_hNavWebhook, NULL, TRUE);
   InvalidateRect(g_hNavSettings, NULL, TRUE);
   InvalidateRect(g_hWnd, NULL, TRUE);
 }
 
 // Custom Draw Helper for Owner-Drawn Buttons
+
 static void handle_draw_item(HWND hWnd, const DRAWITEMSTRUCT *pDIS) {
+  (void)hWnd;
   HDC hdc = pDIS->hDC;
   RECT rc = pDIS->rcItem;
   UINT id = pDIS->CtlID;
@@ -1323,8 +541,9 @@ static void handle_draw_item(HWND hWnd, const DRAWITEMSTRUCT *pDIS) {
   SetBkMode(hdc, TRANSPARENT);
 
   // 1. Sidebar Navigation Buttons
-  if (id == ID_NAV_CHANGELOGS || id == ID_NAV_MAIN || id == ID_NAV_CHAT ||
-      id == ID_NAV_AUTO_VOTING || id == ID_NAV_MUSIC || id == ID_NAV_SETTINGS) {
+  if (id == ID_NAV_CHANGELOGS || id == ID_NAV_MAIN || id == ID_NAV_STATUS ||
+      id == ID_NAV_CONFIG || id == ID_NAV_CHAT || id == ID_NAV_AUTO_VOTING ||
+      id == ID_NAV_MUSIC || id == ID_NAV_WEBHOOK || id == ID_NAV_SETTINGS) {
     int tab_index = 0;
     const wchar_t *text = L"";
 
@@ -1332,6 +551,14 @@ static void handle_draw_item(HWND hWnd, const DRAWITEMSTRUCT *pDIS) {
     case ID_NAV_MAIN:
       tab_index = 0;
       text = L"▶  Main";
+      break;
+    case ID_NAV_STATUS:
+      tab_index = 7;
+      text = L"📊  Status";
+      break;
+    case ID_NAV_CONFIG:
+      tab_index = 6;
+      text = L"🛠️  Config";
       break;
     case ID_NAV_CHAT:
       tab_index = 2;
@@ -1344,6 +571,10 @@ static void handle_draw_item(HWND hWnd, const DRAWITEMSTRUCT *pDIS) {
     case ID_NAV_MUSIC:
       tab_index = 5;
       text = L"🎵  Music";
+      break;
+    case ID_NAV_WEBHOOK:
+      tab_index = 8;
+      text = L"🔔  Webhook";
       break;
     case ID_NAV_CHANGELOGS:
       tab_index = 1;
@@ -1427,18 +658,34 @@ static void handle_draw_item(HWND hWnd, const DRAWITEMSTRUCT *pDIS) {
     return;
   }
 
-  // 4. Chat Save Button (Modern Purple Accent)
-  if (id == ID_BTN_CHAT_SAVE) {
-    COLORREF bgCol = isSelected ? RGB(109, 40, 217) : RGB(124, 58, 237);
-    draw_rounded_rect(hdc, &rc, 8, bgCol, RGB(167, 139, 250), 1);
+  // 3.1 Check For Updates Button (Modern Slate Pill)
+  if (id == ID_BTN_CHECK_UPDATE) {
+    COLORREF bgCol = isSelected ? RGB(55, 48, 75) : RGB(35, 30, 48);
+    COLORREF borderCol = isSelected ? RGB(167, 139, 250) : RGB(138, 92, 246);
+    draw_rounded_rect(hdc, &rc, 8, bgCol, borderCol, 1);
 
     wchar_t btnText[64];
     GetWindowTextW(pDIS->hwndItem, btnText, 64);
-    SelectObject(hdc, g_hFontHeader);
-    SetTextColor(hdc, RGB(255, 255, 255));
+    SelectObject(hdc, g_hFontNormal);
+    SetTextColor(hdc, RGB(221, 214, 254));
     DrawTextW(hdc, btnText, -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     return;
   }
+
+  // 3.2 Webhook Action Buttons (Save / Test)
+  if (id == ID_BTN_WEBHOOK_SAVE || id == ID_BTN_WEBHOOK_TEST) {
+    COLORREF bgCol = isSelected ? RGB(45, 38, 65) : RGB(30, 26, 44);
+    COLORREF borderCol = isSelected ? RGB(167, 139, 250) : RGB(138, 92, 246);
+    draw_rounded_rect(hdc, &rc, 6, bgCol, borderCol, 1);
+
+    wchar_t btnText[64];
+    GetWindowTextW(pDIS->hwndItem, btnText, 64);
+    SelectObject(hdc, g_hFontNormal);
+    SetTextColor(hdc, isSelected ? RGB(255, 255, 255) : RGB(221, 214, 254));
+    DrawTextW(hdc, btnText, -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    return;
+  }
+
 
   // 4.1 Music Play/Pause Button (Clean Glowing Triangle / Pause Icon)
   if (id == ID_BTN_MUSIC_PLAY) {
@@ -1499,8 +746,10 @@ static void handle_draw_item(HWND hWnd, const DRAWITEMSTRUCT *pDIS) {
   }
 
   // 6. Modern On/Off Slider Switch Toggle
-  if (id == ID_CHK_CHAT) {
-    int is_on = (atomic_load(&g_chat_mode) == 1);
+  if (id == ID_CHK_CHAT || id == ID_CHK_SLOW_MODE) {
+    int is_on = (id == ID_CHK_CHAT)
+                    ? (atomic_load(&g_chat_mode) == 1)
+                    : (atomic_load(&g_slow_mode) == 1);
     COLORREF trackBg = is_on ? RGB(34, 197, 94) : RGB(50, 50, 65);
     COLORREF trackBorder = is_on ? RGB(74, 222, 128) : RGB(70, 70, 90);
 
@@ -1584,15 +833,103 @@ static void handle_draw_item(HWND hWnd, const DRAWITEMSTRUCT *pDIS) {
               DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     return;
   }
+
+  // 9. Anti-AFK Method Radio Cards (Config Tab)
+  if (id == ID_RADIO_MODE_CLICK || id == ID_RADIO_MODE_MOVE) {
+    int afk_mode = atomic_load(&g_anti_afk_mode);
+    int is_click = (id == ID_RADIO_MODE_CLICK);
+    int is_active = (is_click && afk_mode == 0) || (!is_click && afk_mode == 1);
+
+    COLORREF bgCol;
+    COLORREF borderCol;
+    if (is_active) {
+      bgCol = isSelected ? RGB(45, 38, 65) : RGB(36, 32, 52);
+      borderCol = RGB(138, 92, 246);
+    } else {
+      bgCol = isSelected ? RGB(32, 32, 42) : RGB(22, 22, 28);
+      borderCol = isSelected ? RGB(80, 80, 100) : COLOR_CARD_BORDER;
+    }
+
+    draw_rounded_rect(hdc, &rc, 8, bgCol, borderCol, is_active ? 2 : 1);
+
+    // Left indicator circle
+    int cy = (rc.top + rc.bottom) / 2;
+    RECT rcOuterCircle = {rc.left + 14, cy - 8, rc.left + 30, cy + 8};
+    draw_rounded_rect(hdc, &rcOuterCircle, 16,
+                      is_active ? RGB(30, 24, 45) : RGB(26, 26, 32),
+                      is_active ? RGB(138, 92, 246) : RGB(60, 60, 72), 1);
+    if (is_active) {
+      RECT rcInnerDot = {rc.left + 18, cy - 4, rc.left + 26, cy + 4};
+      draw_rounded_rect(hdc, &rcInnerDot, 8, RGB(167, 139, 250), RGB(167, 139, 250), 0);
+    }
+
+    // Title Text
+    SelectObject(hdc, is_active ? g_hFontHeader : g_hFontNormal);
+    SetTextColor(hdc, is_active ? RGB(255, 255, 255) : COLOR_TEXT_SECONDARY);
+    RECT rcText = {rc.left + 38, rc.top, rc.right - 90, rc.bottom};
+    DrawTextW(hdc, is_click ? L"Click Mode" : L"Hold Mode", -1, &rcText,
+              DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
+    // Right Chip Badge
+    RECT rcChip = {rc.right - 84, cy - 11, rc.right - 12, cy + 11};
+    if (is_active) {
+      draw_rounded_rect(hdc, &rcChip, 12, RGB(18, 42, 28), RGB(34, 197, 94), 1);
+      SelectObject(hdc, g_hFontSmall);
+      SetTextColor(hdc, RGB(74, 222, 128));
+      DrawTextW(hdc, L"● ACTIVE", -1, &rcChip, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    }
+    return;
+  }
+
+  // 10. Key Badge Display (Mechanical Keycap style / Rebinding state)
+  if (id == ID_BTN_KEY_BADGE) {
+    int is_rebinding = atomic_load(&g_is_rebinding_afk);
+    COLORREF bgCol = is_rebinding
+                         ? RGB(180, 83, 9)
+                         : (isSelected ? RGB(50, 42, 75) : RGB(35, 30, 52));
+    COLORREF borderCol =
+        is_rebinding ? RGB(251, 191, 36)
+                     : (isSelected ? RGB(167, 139, 250) : RGB(138, 92, 246));
+
+    draw_rounded_rect(hdc, &rc, 6, bgCol, borderCol, 1);
+
+    wchar_t btnText[64];
+    if (is_rebinding) {
+      wcscpy_s(btnText, 64, L"Press...");
+    } else {
+      get_key_name_w(atomic_load(&g_anti_afk_key), btnText, 64);
+    }
+
+    SelectObject(hdc, is_rebinding ? g_hFontSmall : g_hFontNormal);
+    SetTextColor(hdc, RGB(255, 255, 255));
+    DrawTextW(hdc, btnText, -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    return;
+  }
+
+  // 11. Delay Badge Display
+  if (id == ID_BTN_DELAY_BADGE) {
+    int is_slow = (atomic_load(&g_slow_mode) == 1);
+    COLORREF bgCol = is_slow ? RGB(45, 30, 20) : RGB(24, 24, 30);
+    COLORREF borderCol = is_slow ? RGB(245, 158, 11) : RGB(55, 55, 68);
+    draw_rounded_rect(hdc, &rc, 6, bgCol, borderCol, 1);
+    SelectObject(hdc, g_hFontSmall);
+    SetTextColor(hdc, is_slow ? RGB(251, 191, 36) : RGB(196, 181, 253));
+    DrawTextW(hdc, is_slow ? L"3.7 – 4.2 s" : L"900 – 1300 ms", -1, &rc,
+              DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    return;
+  }
 }
 
 // Window Procedure
+
 LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
   switch (msg) {
   case WM_CREATE: {
     g_hWnd = hWnd;
     init_config_path();
     InitializeCriticalSection(&g_chat_lock);
+    InitializeCriticalSection(&g_webhook_lock);
+    round_tracker_init();
     load_config();
 
     // Styling Brushes
@@ -1632,29 +969,50 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                                    CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
                                    DEFAULT_PITCH | FF_DONTCARE, L"Consolas");
 
-    // ----------------------------------------------------
-    // SIDEBAR NAVIGATION (Left Panel 0 to 145px)
-    // ----------------------------------------------------
+    g_hFontStatusLabel = CreateFontW(16, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+                                     DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+                                     CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                                     DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+
+    g_hFontStatusValue = CreateFontW(16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                                     DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+                                     CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                                     DEFAULT_PITCH | FF_DONTCARE, L"Bahnschrift");
 
     // MAIN Tab Button (Primary)
     g_hNavMain = CreateWindowW(L"BUTTON", L"▶  Main",
                                WS_CHILD | WS_VISIBLE | BS_OWNERDRAW, 12, 16,
                                124, 36, hWnd, (HMENU)ID_NAV_MAIN, NULL, NULL);
 
+    // STATUS Tab Button (Between Main and Config)
+    g_hNavStatus = CreateWindowW(L"BUTTON", L"📊  Status",
+                                 WS_CHILD | WS_VISIBLE | BS_OWNERDRAW, 12, 58,
+                                 124, 36, hWnd, (HMENU)ID_NAV_STATUS, NULL, NULL);
+
+    // CONFIG Tab Button (Between Status and Chat)
+    g_hNavConfig = CreateWindowW(L"BUTTON", L"🛠️  Config",
+                                 WS_CHILD | WS_VISIBLE | BS_OWNERDRAW, 12, 100,
+                                 124, 36, hWnd, (HMENU)ID_NAV_CONFIG, NULL, NULL);
+
     // Chat Tab Button
     g_hNavChat = CreateWindowW(L"BUTTON", L"💬  Chat",
-                               WS_CHILD | WS_VISIBLE | BS_OWNERDRAW, 12, 58,
+                               WS_CHILD | WS_VISIBLE | BS_OWNERDRAW, 12, 142,
                                124, 36, hWnd, (HMENU)ID_NAV_CHAT, NULL, NULL);
 
     // Auto Voting Tab Button
     g_hNavAutoVoting = CreateWindowW(
         L"BUTTON", L"🗳️  Auto Voting", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW, 12,
-        100, 124, 36, hWnd, (HMENU)ID_NAV_AUTO_VOTING, NULL, NULL);
+        184, 124, 36, hWnd, (HMENU)ID_NAV_AUTO_VOTING, NULL, NULL);
 
     // Music Player Tab Button
     g_hNavMusic = CreateWindowW(L"BUTTON", L"🎵  Music",
-                                WS_CHILD | WS_VISIBLE | BS_OWNERDRAW, 12, 142,
+                                WS_CHILD | WS_VISIBLE | BS_OWNERDRAW, 12, 226,
                                 124, 36, hWnd, (HMENU)ID_NAV_MUSIC, NULL, NULL);
+
+    // WEBHOOK Tab Button
+    g_hNavWebhook = CreateWindowW(
+        L"BUTTON", L"🔔  Webhook", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW, 12,
+        268, 124, 36, hWnd, (HMENU)ID_NAV_WEBHOOK, NULL, NULL);
 
     // CHANGELOG Tab Button (Positioned right above Settings)
     g_hNavChangelogs = CreateWindowW(
@@ -1666,51 +1024,39 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         L"BUTTON", L"⚙  Settings", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW, 12,
         400, 124, 36, hWnd, (HMENU)ID_NAV_SETTINGS, NULL, NULL);
 
-    // Load Huge Music Album Cover Bitmap (270x230) directly from embedded resource or disk
-    g_hBmpMusicCover = load_jpeg_from_resource_or_file(2, L"assets\\musicplayer.jpg", 270, 230);
-
-    // ----------------------------------------------------
-    // MAIN TAB CONTROLS
-    // ----------------------------------------------------
-
-    // STATUS:                                STOPPED
     g_hLblStatusTitle =
         CreateWindowW(L"STATIC", L"STATUS:", WS_CHILD | WS_VISIBLE | SS_LEFT,
-                      176, 28, 100, 20, hWnd, NULL, NULL, NULL);
+                      176, 24, 100, 20, hWnd, NULL, NULL, NULL);
     SendMessageW(g_hLblStatusTitle, WM_SETFONT, (WPARAM)g_hFontHeader, TRUE);
 
     g_hLblStatusVal =
         CreateWindowW(L"STATIC", L"STOPPED", WS_CHILD | WS_VISIBLE | SS_RIGHT,
-                      356, 28, 110, 20, hWnd, NULL, NULL, NULL);
+                      336, 24, 130, 20, hWnd, NULL, NULL, NULL);
     SendMessageW(g_hLblStatusVal, WM_SETFONT, (WPARAM)g_hFontHeader, TRUE);
 
     // HOTKEY:                                F9
     g_hLblHotkeyTitle =
         CreateWindowW(L"STATIC", L"HOTKEY:", WS_CHILD | WS_VISIBLE | SS_LEFT,
-                      176, 54, 100, 20, hWnd, NULL, NULL, NULL);
+                      176, 50, 100, 20, hWnd, NULL, NULL, NULL);
     SendMessageW(g_hLblHotkeyTitle, WM_SETFONT, (WPARAM)g_hFontHeader, TRUE);
 
     g_hLblHotkeyVal =
-        CreateWindowW(L"STATIC", L"F9", WS_CHILD | WS_VISIBLE | SS_RIGHT, 356,
-                      54, 110, 20, hWnd, NULL, NULL, NULL);
+        CreateWindowW(L"STATIC", L"F9", WS_CHILD | WS_VISIBLE | SS_RIGHT, 336,
+                      50, 130, 20, hWnd, NULL, NULL, NULL);
     SendMessageW(g_hLblHotkeyVal, WM_SETFONT, (WPARAM)g_hFontHeader, TRUE);
 
     // Large Modern Start/Stop Action Button
     g_hBtnStart = CreateWindowW(
         L"BUTTON", L"▶  START SAGEBOT", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
-        160, 95, 325, 46, hWnd, (HMENU)ID_BTN_START_STOP, NULL, NULL);
+        160, 86, 325, 42, hWnd, (HMENU)ID_BTN_START_STOP, NULL, NULL);
 
     // Modern Activity Log Box
     g_hEditLog = CreateWindowW(
         L"EDIT", L"",
         WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY,
-        162, 160, 321, 275, hWnd, (HMENU)ID_EDIT_LOG, NULL, NULL);
+        162, 144, 321, 290, hWnd, (HMENU)ID_EDIT_LOG, NULL, NULL);
     SendMessageW(g_hEditLog, WM_SETFONT, (WPARAM)g_hFontMonospace, TRUE);
     SetWindowSubclass(g_hEditLog, EditSubclassProc, 1, 0);
-
-    // ----------------------------------------------------
-    // CHANGELOG TAB CONTROLS
-    // ----------------------------------------------------
 
     g_hEditChangelogs = CreateWindowW(
         L"EDIT", L"", WS_CHILD | ES_MULTILINE | ES_READONLY, 162, 22, 321, 414,
@@ -1718,21 +1064,16 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     SendMessageW(g_hEditChangelogs, WM_SETFONT, (WPARAM)g_hFontMonospace, TRUE);
     SetWindowSubclass(g_hEditChangelogs, EditSubclassProc, 2, 0);
 
-    // ----------------------------------------------------
-    // CHAT TAB CONTROLS (Minimal & Modern)
-    // ----------------------------------------------------
-
     // Header & Subtitle
-    g_hLblChatHeader = CreateWindowW(L"STATIC", L"Chat Automation", WS_CHILD,
+    g_hLblChatHeader = CreateWindowW(L"STATIC", L"Auto Chat", WS_CHILD,
                                      176, 24, 290, 24, hWnd, NULL, NULL, NULL);
     SendMessageW(g_hLblChatHeader, WM_SETFONT, (WPARAM)g_hFontTitle, TRUE);
 
     g_hLblChatDescription = CreateWindowW(
-        L"STATIC", L"Broadcast automated messages during match play.", WS_CHILD,
+        L"STATIC", L"Send a message through in-game chat.", WS_CHILD,
         176, 50, 290, 18, hWnd, NULL, NULL, NULL);
     SendMessageW(g_hLblChatDescription, WM_SETFONT, (WPARAM)g_hFontSmall, TRUE);
 
-    // Row 1: Enable Automation Toggle Switch
     g_hLblChatToggle =
         CreateWindowW(L"STATIC", L"Enable Chat", WS_CHILD | SS_LEFT, 176, 84,
                       180, 20, hWnd, NULL, NULL, NULL);
@@ -1778,25 +1119,21 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     g_hEditChatText = CreateWindowW(
         L"EDIT", L"With great Power comes great Responsibility",
         WS_CHILD | ES_MULTILINE | ES_AUTOVSCROLL | WS_VSCROLL, 176, 200, 290,
-        68, hWnd, (HMENU)ID_EDIT_CHAT_TEXT, NULL, NULL);
+        96, hWnd, (HMENU)ID_EDIT_CHAT_TEXT, NULL, NULL);
     SendMessageW(g_hEditChatText, WM_SETFONT, (WPARAM)g_hFontNormal, TRUE);
     SendMessageW(g_hEditChatText, EM_LIMITTEXT, 500, 0);
     SetWindowSubclass(g_hEditChatText, EditSubclassProc, 3, 0);
 
-    // Row 5: Preset Pills & Save Button
+    // Row 5: Preset Pills
     g_hLblPresets = NULL;
 
     g_hBtnChatExample1 = CreateWindowW(
-        L"BUTTON", L"Uncle Ben", WS_CHILD | BS_OWNERDRAW, 176, 280, 140, 28,
+        L"BUTTON", L"Uncle Ben", WS_CHILD | BS_OWNERDRAW, 176, 308, 140, 28,
         hWnd, (HMENU)ID_BTN_CHAT_EXAMPLE_1, NULL, NULL);
 
     g_hBtnChatExample2 = CreateWindowW(
-        L"BUTTON", L"Wintrading", WS_CHILD | BS_OWNERDRAW, 326, 280, 140, 28,
+        L"BUTTON", L"Wintrading", WS_CHILD | BS_OWNERDRAW, 326, 308, 140, 28,
         hWnd, (HMENU)ID_BTN_CHAT_EXAMPLE_2, NULL, NULL);
-
-    g_hBtnChatSave =
-        CreateWindowW(L"BUTTON", L"Save Settings", WS_CHILD | BS_OWNERDRAW, 176,
-                      318, 290, 34, hWnd, (HMENU)ID_BTN_CHAT_SAVE, NULL, NULL);
 
     {
       wchar_t chat_interval[16];
@@ -1811,8 +1148,77 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     }
 
     // ----------------------------------------------------
-    // AUTO VOTING TAB CONTROLS (Minimal & Modern)
+    // CONFIG TAB CONTROLS (Anti-AFK Method)
     // ----------------------------------------------------
+    // Card 1: Method Selection
+    g_hLblConfigHeader = CreateWindowW(L"STATIC", L"Anti-AFK Method", WS_CHILD,
+                                       176, 26, 290, 22, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblConfigHeader, WM_SETFONT, (WPARAM)g_hFontTitle, TRUE);
+
+    g_hLblConfigSub = CreateWindowW(
+        L"STATIC", L"Choose the automation technique for anti-AFK.", WS_CHILD,
+        176, 50, 290, 16, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblConfigSub, WM_SETFONT, (WPARAM)g_hFontSmall, TRUE);
+
+    g_hRadioModeClick =
+        CreateWindowW(L"BUTTON", L"Click Mode", WS_CHILD | BS_OWNERDRAW, 176,
+                      74, 290, 42, hWnd, (HMENU)ID_RADIO_MODE_CLICK, NULL, NULL);
+
+    g_hRadioModeMove =
+        CreateWindowW(L"BUTTON", L"Hold Mode",
+                      WS_CHILD | BS_OWNERDRAW, 176, 124, 290, 42, hWnd,
+                      (HMENU)ID_RADIO_MODE_HOLD, NULL, NULL);
+
+    // Card 2: Click Mode Parameters
+    g_hLblClickSettingsTitle =
+        CreateWindowW(L"STATIC", L"Click Mode Settings", WS_CHILD, 176,
+                      206, 290, 20, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblClickSettingsTitle, WM_SETFONT, (WPARAM)g_hFontHeader, TRUE);
+
+    g_hLblClickSettingsSub =
+        CreateWindowW(L"STATIC", L"Randomly clicks the selected key.", WS_CHILD,
+                      176, 228, 290, 16, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblClickSettingsSub, WM_SETFONT, (WPARAM)g_hFontSmall, TRUE);
+
+    g_hLblClickKeyTitle =
+        CreateWindowW(L"STATIC", L"Clicking Key", WS_CHILD | SS_LEFT,
+                      176, 260, 180, 22, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblClickKeyTitle, WM_SETFONT, (WPARAM)g_hFontNormal, TRUE);
+
+    wchar_t initAfkKey[32];
+    get_key_name_w(atomic_load(&g_anti_afk_key), initAfkKey, 32);
+    g_hBtnKeyBadge =
+        CreateWindowW(L"BUTTON", initAfkKey, WS_CHILD | BS_OWNERDRAW, 385, 254,
+                      80, 28, hWnd, (HMENU)ID_BTN_KEY_BADGE, NULL, NULL);
+
+    g_hLblIntervalTitle =
+        CreateWindowW(L"STATIC", L"Interval", WS_CHILD | SS_LEFT,
+                      176, 296, 160, 22, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblIntervalTitle, WM_SETFONT, (WPARAM)g_hFontNormal, TRUE);
+
+    g_hBtnDelayBadge =
+        CreateWindowW(L"BUTTON", L"900 - 1300 ms", WS_CHILD | BS_OWNERDRAW, 360, 292,
+                      105, 26, hWnd, (HMENU)ID_BTN_DELAY_BADGE, NULL, NULL);
+
+    g_hLblIntervalNote =
+        CreateWindowW(L"STATIC", L"Interval between clicks is randomized.",
+                      WS_CHILD | SS_LEFT, 176, 322, 290, 16, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblIntervalNote, WM_SETFONT, (WPARAM)g_hFontSmall, TRUE);
+
+    // Slow Mode Section
+    g_hLblSlowModeTitle =
+        CreateWindowW(L"STATIC", L"Slow Mode", WS_CHILD | SS_LEFT,
+                      176, 348, 180, 22, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblSlowModeTitle, WM_SETFONT, (WPARAM)g_hFontNormal, TRUE);
+
+    g_hChkSlowMode =
+        CreateWindowW(L"BUTTON", L"", WS_CHILD | BS_OWNERDRAW,
+                      425, 348, 40, 20, hWnd, (HMENU)ID_CHK_SLOW_MODE, NULL, NULL);
+
+    g_hLblSlowModeDesc =
+        CreateWindowW(L"STATIC", L"When active, sets click interval to 3.7s – 4.2s.",
+                      WS_CHILD | SS_LEFT, 176, 372, 290, 16, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblSlowModeDesc, WM_SETFONT, (WPARAM)g_hFontSmall, TRUE);
 
     g_hLblVoteHeader = CreateWindowW(L"STATIC", L"Auto Voting", WS_CHILD, 176,
                                      24, 290, 24, hWnd, NULL, NULL, NULL);
@@ -1835,37 +1241,41 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         CreateWindowW(L"BUTTON", L"Vote NO (F6)", WS_CHILD | BS_OWNERDRAW, 176,
                       168, 290, 36, hWnd, (HMENU)ID_RADIO_VOTE_NO, NULL, NULL);
 
-    // ----------------------------------------------------
-    // MUSIC PLAYER TAB CONTROLS (Standalone Modern Tab)
-    // ----------------------------------------------------
+    // Music Track Name / Title
+    g_hLblMusicTitle = CreateWindowW(
+        L"STATIC",
+        L"Stereo Madness x Lord Verity x Ice Ice Baby x Rap God x Time of your Life x Eyes Without A Face x We Will Never Die x Somebody's Watching Me x Shut Up and Dance x Beverly Hills x Stayin' Alive x Dancing With Myself",
+        WS_CHILD | SS_LEFT,
+        176, 28, 290, 110, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblMusicTitle, WM_SETFONT, (WPARAM)g_hFontNormal, TRUE);
 
-    // Track Progress Slider (Centered full width under image)
+    // Track Progress Slider (Centered full width under track name)
     g_hSliderMusicPos = CreateWindowW(
         L"SageBotSlider", L"", WS_CHILD,
-        170, 266, 305, 24, hWnd, (HMENU)ID_SLIDER_MUSIC_POS, NULL, NULL);
+        170, 146, 305, 24, hWnd, (HMENU)ID_SLIDER_MUSIC_POS, NULL, NULL);
     SendMessageW(g_hSliderMusicPos, TBM_SETRANGE, TRUE, MAKELPARAM(0, 180));
     SendMessageW(g_hSliderMusicPos, TBM_SETPOS, TRUE, 0);
 
     // Track Timestamp (e.g. 00:00 / 03:20)
     g_hLblMusicTime = CreateWindowW(L"STATIC", L"00:00 / 00:00",
-                                    WS_CHILD | SS_RIGHT, 355, 294, 120, 18,
+                                    WS_CHILD | SS_RIGHT, 355, 174, 120, 18,
                                     hWnd, NULL, NULL, NULL);
     SendMessageW(g_hLblMusicTime, WM_SETFONT, (WPARAM)g_hFontSmall, TRUE);
 
-    // Modern Triangle Play Button (Border-free Icon Play Button at y=318)
+    // Modern Triangle Play Button (Border-free Icon Play Button at y=198)
     g_hBtnMusicPlay = CreateWindowW(
-        L"BUTTON", L"", WS_CHILD | BS_OWNERDRAW, 295, 316, 55, 48, hWnd,
+        L"BUTTON", L"", WS_CHILD | BS_OWNERDRAW, 295, 198, 55, 48, hWnd,
         (HMENU)ID_BTN_MUSIC_PLAY, NULL, NULL);
 
-    // Volume Slider & Label (y=374)
+    // Volume Slider & Label (y=256)
     g_hLblMusicVol = CreateWindowW(L"STATIC", L"Volume: 80%",
-                                   WS_CHILD | SS_LEFT, 174, 376, 96, 18, hWnd,
+                                   WS_CHILD | SS_LEFT, 174, 258, 96, 18, hWnd,
                                    NULL, NULL, NULL);
     SendMessageW(g_hLblMusicVol, WM_SETFONT, (WPARAM)g_hFontSmall, TRUE);
 
     g_hSliderMusicVol = CreateWindowW(
         L"SageBotSlider", L"", WS_CHILD,
-        270, 372, 205, 24, hWnd, (HMENU)ID_SLIDER_MUSIC_VOL, NULL, NULL);
+        270, 254, 205, 24, hWnd, (HMENU)ID_SLIDER_MUSIC_VOL, NULL, NULL);
     SendMessageW(g_hSliderMusicVol, TBM_SETRANGE, TRUE, MAKELPARAM(0, 100));
     SendMessageW(g_hSliderMusicVol, TBM_SETPOS, TRUE, 80);
 
@@ -1895,14 +1305,194 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         CreateWindowW(L"BUTTON", L"F9", WS_CHILD | BS_OWNERDRAW, 385, 84, 80,
                       28, hWnd, (HMENU)ID_BTN_REBIND, NULL, NULL);
 
-    g_hLblSettingsKeyBadge = NULL;
-    g_hLblSettingsNote = NULL;
+    // Updates Section
+    g_hLblUpdateHeader = CreateWindowW(L"STATIC", L"Updates", WS_CHILD, 176,
+                                       136, 290, 24, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblUpdateHeader, WM_SETFONT, (WPARAM)g_hFontTitle, TRUE);
+
+    wchar_t verStr[64];
+    swprintf_s(verStr, 64, L"Current Version: v%s", APP_VERSION);
+    g_hLblUpdateVersion =
+        CreateWindowW(L"STATIC", verStr, WS_CHILD, 176,
+                      164, 290, 18, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblUpdateVersion, WM_SETFONT, (WPARAM)g_hFontSmall, TRUE);
+
+    g_hBtnCheckUpdate =
+        CreateWindowW(L"BUTTON", L"Check for Updates", WS_CHILD | BS_OWNERDRAW,
+                      176, 192, 160, 32, hWnd, (HMENU)ID_BTN_CHECK_UPDATE,
+                      NULL, NULL);
+
+    g_hLblUpdateStatus =
+        CreateWindowW(L"STATIC", L"", WS_CHILD, 176, 232, 290, 18, hWnd,
+                      NULL, NULL, NULL);
+    SendMessageW(g_hLblUpdateStatus, WM_SETFONT, (WPARAM)g_hFontSmall, TRUE);
+
+    // ----------------------------------------------------
+    // STATUS TAB CONTROLS (Live Ingame & Profile Information)
+    // ----------------------------------------------------
+    // Box 1: Player Profile Card
+    g_hLblBox1Header = CreateWindowW(
+        L"STATIC", L"PLAYER PROFILE", WS_CHILD,
+        176, 26, 290, 18, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblBox1Header, WM_SETFONT, (WPARAM)g_hFontHeader, TRUE);
+
+    g_hLblRiotIdTitle = CreateWindowW(
+        L"STATIC", L"Riot ID:", WS_CHILD | SS_LEFT,
+        176, 56, 74, 24, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblRiotIdTitle, WM_SETFONT, (WPARAM)g_hFontStatusLabel, TRUE);
+
+    g_hLblRiotIdVal = CreateWindowW(
+        L"STATIC", L"-", WS_CHILD | SS_RIGHT,
+        252, 56, 216, 24, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblRiotIdVal, WM_SETFONT, (WPARAM)g_hFontStatusValue, TRUE);
+
+    g_hLblRankTitle = CreateWindowW(
+        L"STATIC", L"Rank:", WS_CHILD | SS_LEFT,
+        176, 88, 74, 24, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblRankTitle, WM_SETFONT, (WPARAM)g_hFontStatusLabel, TRUE);
+
+    g_hLblRankVal = CreateWindowW(
+        L"STATIC", L"-", WS_CHILD | SS_RIGHT,
+        252, 88, 216, 24, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblRankVal, WM_SETFONT, (WPARAM)g_hFontStatusValue, TRUE);
+
+    // Box 2: Match Information Card
+    g_hLblBox2Header = CreateWindowW(
+        L"STATIC", L"MATCH INFORMATION", WS_CHILD,
+        176, 148, 290, 18, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblBox2Header, WM_SETFONT, (WPARAM)g_hFontHeader, TRUE);
+
+    g_hLblMapTitle = CreateWindowW(
+        L"STATIC", L"Map:", WS_CHILD | SS_LEFT,
+        176, 176, 108, 24, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblMapTitle, WM_SETFONT, (WPARAM)g_hFontStatusLabel, TRUE);
+
+    g_hLblMapVal = CreateWindowW(
+        L"STATIC", L"-", WS_CHILD | SS_RIGHT,
+        286, 176, 182, 24, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblMapVal, WM_SETFONT, (WPARAM)g_hFontStatusValue, TRUE);
+
+    g_hLblGamemodeTitle = CreateWindowW(
+        L"STATIC", L"Gamemode:", WS_CHILD | SS_LEFT,
+        176, 208, 108, 24, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblGamemodeTitle, WM_SETFONT, (WPARAM)g_hFontStatusLabel, TRUE);
+
+    g_hLblGamemodeVal = CreateWindowW(
+        L"STATIC", L"-", WS_CHILD | SS_RIGHT,
+        286, 208, 182, 24, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblGamemodeVal, WM_SETFONT, (WPARAM)g_hFontStatusValue, TRUE);
+
+    g_hLblPhaseTitle = CreateWindowW(
+        L"STATIC", L"Game Phase:", WS_CHILD | SS_LEFT,
+        176, 240, 108, 24, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblPhaseTitle, WM_SETFONT, (WPARAM)g_hFontStatusLabel, TRUE);
+
+    g_hLblPhaseVal = CreateWindowW(
+        L"STATIC", L"-", WS_CHILD | SS_RIGHT,
+        286, 240, 182, 24, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblPhaseVal, WM_SETFONT, (WPARAM)g_hFontStatusValue, TRUE);
+
+    g_hLblAgentTitle = CreateWindowW(
+        L"STATIC", L"Agent:", WS_CHILD | SS_LEFT,
+        176, 272, 108, 24, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblAgentTitle, WM_SETFONT, (WPARAM)g_hFontStatusLabel, TRUE);
+
+    g_hLblAgentVal = CreateWindowW(
+        L"STATIC", L"-", WS_CHILD | SS_RIGHT,
+        286, 272, 182, 24, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblAgentVal, WM_SETFONT, (WPARAM)g_hFontStatusValue, TRUE);
+
+    g_hLblRoundTitle = CreateWindowW(
+        L"STATIC", L"Round:", WS_CHILD | SS_LEFT,
+        176, 304, 108, 24, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblRoundTitle, WM_SETFONT, (WPARAM)g_hFontStatusLabel, TRUE);
+
+    g_hLblRoundVal = CreateWindowW(
+        L"STATIC", L"- | -", WS_CHILD | SS_RIGHT,
+        286, 304, 182, 24, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblRoundVal, WM_SETFONT, (WPARAM)g_hFontStatusValue, TRUE);
+
+    // ----------------------------------------------------
+    // WEBHOOK TAB CONTROLS (Discord Match Notifications)
+    // ----------------------------------------------------
+    g_hLblWebhookHeader = CreateWindowW(
+        L"STATIC", L"Discord Webhook", WS_CHILD,
+        176, 26, 290, 24, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblWebhookHeader, WM_SETFONT, (WPARAM)g_hFontTitle, TRUE);
+
+    g_hLblWebhookSub = CreateWindowW(
+        L"STATIC", L"Get pinged on Discord when your match concludes.", WS_CHILD,
+        176, 52, 290, 18, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblWebhookSub, WM_SETFONT, (WPARAM)g_hFontSmall, TRUE);
+
+    // Row 1: Channel URL
+    g_hLblWebhookUrl = CreateWindowW(
+        L"STATIC", L"Channel URL", WS_CHILD | SS_LEFT,
+        176, 78, 290, 18, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblWebhookUrl, WM_SETFONT, (WPARAM)g_hFontHeader, TRUE);
+
+    g_hLblWebhookUrlNote = CreateWindowW(
+        L"STATIC", L"Discord Channel -> Integrations -> Webhooks", WS_CHILD | SS_LEFT,
+        176, 98, 290, 16, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblWebhookUrlNote, WM_SETFONT, (WPARAM)g_hFontSmall, TRUE);
+
+    g_hEditWebhookUrl = CreateWindowW(
+        L"EDIT", L"", WS_CHILD | ES_AUTOHSCROLL,
+        176, 122, 290, 22, hWnd, (HMENU)ID_EDIT_WEBHOOK_URL, NULL, NULL);
+    SendMessageW(g_hEditWebhookUrl, WM_SETFONT, (WPARAM)g_hFontNormal, TRUE);
+    SetWindowSubclass(g_hEditWebhookUrl, EditSubclassProc, 4, 0);
+
+    // Row 2: User ID
+    g_hLblWebhookUserId = CreateWindowW(
+        L"STATIC", L"User ID", WS_CHILD | SS_LEFT,
+        176, 154, 290, 18, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblWebhookUserId, WM_SETFONT, (WPARAM)g_hFontHeader, TRUE);
+
+    g_hLblWebhookUserIdNote = CreateWindowW(
+        L"STATIC", L"If User ID is invalid or empty, no @ping will be sent.", WS_CHILD | SS_LEFT,
+        176, 174, 290, 16, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblWebhookUserIdNote, WM_SETFONT, (WPARAM)g_hFontSmall, TRUE);
+
+    g_hEditWebhookUserId = CreateWindowW(
+        L"EDIT", L"", WS_CHILD | ES_AUTOHSCROLL,
+        176, 198, 290, 22, hWnd, (HMENU)ID_EDIT_WEBHOOK_USER_ID, NULL, NULL);
+    SendMessageW(g_hEditWebhookUserId, WM_SETFONT, (WPARAM)g_hFontNormal, TRUE);
+    SetWindowSubclass(g_hEditWebhookUserId, EditSubclassProc, 5, 0);
+
+    g_hLblWebhookHint = CreateWindowW(
+        L"STATIC", L"Tip: Right-click your profile in Discord -> Copy User ID", WS_CHILD | SS_LEFT,
+        176, 228, 290, 16, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblWebhookHint, WM_SETFONT, (WPARAM)g_hFontSmall, TRUE);
+
+    // Action Buttons
+    g_hBtnWebhookSave = CreateWindowW(
+        L"BUTTON", L"💾  Save", WS_CHILD | BS_OWNERDRAW,
+        176, 258, 138, 32, hWnd, (HMENU)ID_BTN_WEBHOOK_SAVE, NULL, NULL);
+
+    g_hBtnWebhookTest = CreateWindowW(
+        L"BUTTON", L"🧪  Test Webhook", WS_CHILD | BS_OWNERDRAW,
+        326, 258, 140, 32, hWnd, (HMENU)ID_BTN_WEBHOOK_TEST, NULL, NULL);
+
+    g_hLblWebhookStatus = CreateWindowW(
+        L"STATIC", L"", WS_CHILD | SS_LEFT,
+        176, 300, 290, 18, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblWebhookStatus, WM_SETFONT, (WPARAM)g_hFontSmall, TRUE);
+
+    // Populate loaded config
+    EnterCriticalSection(&g_webhook_lock);
+    SetWindowTextW(g_hEditWebhookUrl, g_webhook_url);
+    SetWindowTextW(g_hEditWebhookUserId, g_webhook_user_id);
+    LeaveCriticalSection(&g_webhook_lock);
 
     switch_tab(0);
     update_status_ui();
+    SetTimer(hWnd, ID_TIMER_ROUND_UPDATE, 1000, NULL);
 
     append_log_ui(L"[SYSTEM] SageBot initialized.");
     append_log_ui(L"[SYSTEM] Settings loaded from config.ini.");
+
+    // Automatic silent update check on startup
+    check_for_updates_async(0);
 
     g_hHotkeyThread = CreateThread(NULL, 0, hotkey_thread, NULL, 0, NULL);
     return 0;
@@ -1931,13 +1521,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
     // 3. Tab-Specific Background Cards
     if (g_current_tab == 0) {
-      // Main Tab: Status Header Card
-      RECT rcStatusCard = {160, 16, 485, 82};
+      // Main Tab: Status Header Card (enclosing Status, Hotkey)
+      RECT rcStatusCard = {160, 14, 485, 78};
       draw_rounded_rect(hdc, &rcStatusCard, 12, COLOR_CARD_BG,
                         COLOR_CARD_BORDER, 1);
 
       // Main Tab: Activity Log Card
-      RECT rcLogCard = {160, 152, 485, 437};
+      RECT rcLogCard = {160, 136, 485, 439};
       draw_rounded_rect(hdc, &rcLogCard, 12, COLOR_CARD_BG, COLOR_CARD_BORDER,
                         1);
     } else if (g_current_tab == 1) {
@@ -1946,7 +1536,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
       draw_rounded_rect(hdc, &rcCard, 12, COLOR_CARD_BG, COLOR_CARD_BORDER, 1);
     } else if (g_current_tab == 2) {
       // Chat Settings Card (Sleek Modern Surface)
-      RECT rcCard = {160, 14, 485, 364};
+      RECT rcCard = {160, 14, 485, 350};
       draw_rounded_rect(hdc, &rcCard, 12, COLOR_CARD_BG, COLOR_CARD_BORDER, 1);
 
       // Input field backgrounds
@@ -1954,7 +1544,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
       draw_rounded_rect(hdc, &rcIntervalBox, 6, COLOR_INPUT_BG,
                         COLOR_CARD_BORDER, 1);
 
-      RECT rcTextBox = {172, 196, 469, 272};
+      RECT rcTextBox = {172, 196, 469, 300};
       draw_rounded_rect(hdc, &rcTextBox, 6, COLOR_INPUT_BG, COLOR_CARD_BORDER,
                         1);
     } else if (g_current_tab == 3) {
@@ -1962,47 +1552,45 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
       RECT rcCard = {160, 14, 485, 220};
       draw_rounded_rect(hdc, &rcCard, 12, COLOR_CARD_BG, COLOR_CARD_BORDER, 1);
     } else if (g_current_tab == 4) {
-      // Settings Card (Minimal & Slim)
-      RECT rcCard = {160, 14, 485, 130};
-      draw_rounded_rect(hdc, &rcCard, 12, COLOR_CARD_BG, COLOR_CARD_BORDER, 1);
+      // Settings Cards (Hotkey Card & Update Card)
+      RECT rcKeyCard = {160, 14, 485, 124};
+      draw_rounded_rect(hdc, &rcKeyCard, 12, COLOR_CARD_BG, COLOR_CARD_BORDER, 1);
+
+      RECT rcUpdateCard = {160, 130, 485, 260};
+      draw_rounded_rect(hdc, &rcUpdateCard, 12, COLOR_CARD_BG, COLOR_CARD_BORDER, 1);
     } else if (g_current_tab == 5) {
       // Music Player Card (Sleek Modern Surface)
-      RECT rcCard = {160, 10, 485, 415};
+      RECT rcCard = {160, 14, 485, 304};
       draw_rounded_rect(hdc, &rcCard, 12, COLOR_CARD_BG, COLOR_CARD_BORDER, 1);
+    } else if (g_current_tab == 6) {
+      // Config: Method Selection Card (Top Card)
+      RECT rcMethodCard = {160, 14, 485, 180};
+      draw_rounded_rect(hdc, &rcMethodCard, 12, COLOR_CARD_BG, COLOR_CARD_BORDER, 1);
 
-      // Centered Huge Album Art (x=187, y=24, w=270, h=230)
-      int artX = 187;
-      int artY = 24;
-      int artW = 270;
-      int artH = 230;
+      // Config: Settings Card (Bottom Card)
+      int mode = atomic_load(&g_anti_afk_mode);
+      int bottomY = (mode == 1) ? 342 : 402;
+      RECT rcParamsCard = {160, 194, 485, bottomY};
+      draw_rounded_rect(hdc, &rcParamsCard, 12, COLOR_CARD_BG, COLOR_CARD_BORDER, 1);
+    } else if (g_current_tab == 7) {
+      // Status Tab: Box 1 (Player Profile Card)
+      RECT rcProfileCard = {160, 16, 485, 124};
+      draw_rounded_rect(hdc, &rcProfileCard, 12, COLOR_CARD_BG, COLOR_CARD_BORDER, 1);
 
-      if (g_hBmpMusicCover) {
-        HDC hdcMem = CreateCompatibleDC(hdc);
-        HBITMAP hOldBmp = (HBITMAP)SelectObject(hdcMem, g_hBmpMusicCover);
-        BitBlt(hdc, artX, artY, artW, artH, hdcMem, 0, 0, SRCCOPY);
-        SelectObject(hdcMem, hOldBmp);
-        DeleteDC(hdcMem);
+      // Status Tab: Box 2 (Match Information Card)
+      RECT rcMatchCard = {160, 138, 485, 340};
+      draw_rounded_rect(hdc, &rcMatchCard, 12, COLOR_CARD_BG, COLOR_CARD_BORDER, 1);
+    } else if (g_current_tab == 8) {
+      // Webhook Tab: Discord Webhook Card
+      RECT rcWebhookCard = {160, 14, 485, 336};
+      draw_rounded_rect(hdc, &rcWebhookCard, 12, COLOR_CARD_BG, COLOR_CARD_BORDER, 1);
 
-        RECT rcArtBorder = {artX - 1, artY - 1, artX + artW + 1,
-                            artY + artH + 1};
-        HPEN hPenArt = CreatePen(PS_SOLID, 1, RGB(138, 92, 246));
-        HPEN hOldPenArt = (HPEN)SelectObject(hdc, hPenArt);
-        HBRUSH hOldBrArt = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
-        RoundRect(hdc, rcArtBorder.left, rcArtBorder.top, rcArtBorder.right,
-                  rcArtBorder.bottom, 10, 10);
-        SelectObject(hdc, hOldBrArt);
-        SelectObject(hdc, hOldPenArt);
-        DeleteObject(hPenArt);
-      } else {
-        // Fallback decorative album square
-        RECT rcCover = {artX, artY, artX + artW, artY + artH};
-        draw_rounded_rect(hdc, &rcCover, 10, RGB(22, 22, 30),
-                          RGB(138, 92, 246), 1);
-        SelectObject(hdc, g_hFontTitle);
-        SetTextColor(hdc, RGB(167, 139, 250));
-        DrawTextW(hdc, L"🎵", -1, &rcCover,
-                  DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-      }
+      // Input field backgrounds
+      RECT rcUrlBox = {172, 118, 470, 148};
+      draw_rounded_rect(hdc, &rcUrlBox, 6, COLOR_INPUT_BG, COLOR_CARD_BORDER, 1);
+
+      RECT rcIdBox = {172, 194, 470, 224};
+      draw_rounded_rect(hdc, &rcIdBox, 6, COLOR_INPUT_BG, COLOR_CARD_BORDER, 1);
     }
 
     // 4. Toast Notification Badge (Bottom-Right Corner)
@@ -2043,6 +1631,14 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
       switch_tab(0);
       break;
 
+    case ID_NAV_STATUS:
+      switch_tab(7);
+      break;
+
+    case ID_NAV_CONFIG:
+      switch_tab(6);
+      break;
+
     case ID_NAV_CHAT:
       switch_tab(2);
       break;
@@ -2053,6 +1649,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
     case ID_NAV_MUSIC:
       switch_tab(5);
+      break;
+
+    case ID_NAV_WEBHOOK:
+      switch_tab(8);
       break;
 
     case ID_NAV_SETTINGS:
@@ -2071,11 +1671,33 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
       break;
 
     case ID_BTN_REBIND:
-      if (!atomic_load(&g_is_rebinding)) {
-        for (int vk = 8; vk <= 254; vk++)
-          GetAsyncKeyState(vk);
-        atomic_store(&g_is_rebinding, 1);
+      if (atomic_load(&g_is_rebinding)) {
+        atomic_store(&g_is_rebinding, 0);
         update_status_ui();
+      } else {
+        atomic_store(&g_is_rebinding_afk, 0);
+        atomic_store(&g_is_rebinding, 1);
+        trigger_rebind_capture();
+        update_status_ui();
+      }
+      break;
+
+    case ID_BTN_KEY_BADGE:
+      if (atomic_load(&g_is_rebinding_afk)) {
+        atomic_store(&g_is_rebinding_afk, 0);
+        update_status_ui();
+      } else {
+        atomic_store(&g_is_rebinding, 0);
+        atomic_store(&g_is_rebinding_afk, 1);
+        trigger_rebind_capture();
+        update_status_ui();
+      }
+      break;
+
+    case ID_BTN_CHECK_UPDATE:
+      if (!atomic_load(&g_is_updating)) {
+        SetWindowTextW(g_hLblUpdateStatus, L"Checking for updates...");
+        check_for_updates_async(1);
       }
       break;
 
@@ -2106,8 +1728,46 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
       send_gui_log(L"[SETTINGS] Auto-Vote set to NO (F6).");
       break;
 
+    case ID_RADIO_MODE_CLICK:
+      atomic_store(&g_anti_afk_mode, 0);
+      save_config();
+      update_config_mode_ui();
+      send_gui_log(L"[CONFIG] Anti-AFK Method set to Click Mode.");
+      break;
+
+    case ID_RADIO_MODE_HOLD:
+      atomic_store(&g_anti_afk_mode, 1);
+      save_config();
+      update_config_mode_ui();
+      send_gui_log(L"[CONFIG] Anti-AFK Method set to Hold Mode.");
+      break;
+
+    case ID_CHK_SLOW_MODE:
+    case ID_BTN_DELAY_BADGE: {
+      int cur = atomic_load(&g_slow_mode);
+      int next = cur ? 0 : 1;
+      atomic_store(&g_slow_mode, next);
+      save_config();
+      InvalidateRect(g_hChkSlowMode, NULL, TRUE);
+      InvalidateRect(g_hBtnDelayBadge, NULL, TRUE);
+      if (next) {
+        send_gui_log(L"[CONFIG] Slow Mode activated: interval changed to 3.7s - 4.2s");
+      } else {
+        send_gui_log(L"[CONFIG] Slow Mode deactivated: interval returned to normal (900 – 1300 ms).");
+      }
+      break;
+    }
+
     case ID_CHK_CHAT: {
-      int new_mode = (atomic_load(&g_chat_mode) == 1) ? 0 : 1;
+      int cur_mode = atomic_load(&g_chat_mode);
+      int new_mode = (cur_mode == 1) ? 0 : 1;
+      if (new_mode == 1) {
+        MessageBoxW(
+            hWnd,
+            L"Warning: Spamming Chat can lead to ingame ban for botting/Text Abuse.",
+            L"Warning",
+            MB_ICONWARNING | MB_OK);
+      }
       atomic_store(&g_chat_mode, new_mode);
       save_config();
       InvalidateRect(g_hChkChat, NULL, TRUE);
@@ -2148,48 +1808,53 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
       break;
     }
 
-    case ID_BTN_CHAT_SAVE: {
-      wchar_t interval_text[32];
-      wchar_t chat_text[512];
-      GetWindowTextW(g_hEditChatInterval, interval_text, 32);
-      long interval = wcstol(interval_text, NULL, 10);
-      if (interval < 1 || interval > 86400) {
-        interval = 180;
-        SetWindowTextW(g_hEditChatInterval, L"180");
-        MessageBoxW(hWnd, L"Enter a time between 1 and 86400 seconds.",
-                    L"Invalid chat interval", MB_ICONWARNING | MB_OK);
+    case ID_EDIT_CHAT_INTERVAL:
+      if (HIWORD(wParam) == EN_CHANGE) {
+        wchar_t interval_text[32];
+        GetWindowTextW(g_hEditChatInterval, interval_text, 32);
+        long interval = wcstol(interval_text, NULL, 10);
+        if (interval >= 1 && interval <= 86400) {
+          atomic_store(&g_chat_interval, (int)interval);
+          save_config();
+        }
+      } else if (HIWORD(wParam) == EN_KILLFOCUS) {
+        wchar_t interval_text[32];
+        GetWindowTextW(g_hEditChatInterval, interval_text, 32);
+        long interval = wcstol(interval_text, NULL, 10);
+        if (interval < 1 || interval > 86400) {
+          interval = 180;
+          SetWindowTextW(g_hEditChatInterval, L"180");
+        }
+        atomic_store(&g_chat_interval, (int)interval);
+        save_config();
       }
-      GetWindowTextW(g_hEditChatText, chat_text, 512);
-      if (chat_text[0] == L'\0') {
-        MessageBoxW(hWnd, L"Enter a message before saving.",
-                    L"Empty chat message", MB_ICONWARNING | MB_OK);
-        break;
-      }
-      atomic_store(&g_chat_interval, (int)interval);
-      EnterCriticalSection(&g_chat_lock);
-      wcscpy_s(g_chat_text, 512, chat_text);
-      LeaveCriticalSection(&g_chat_lock);
-      save_config();
-      send_gui_log(L"[CHAT] Chat settings saved.");
-      trigger_toast(hWnd, L"Saved!");
       break;
-    }
 
     case ID_EDIT_CHAT_TEXT:
       if (HIWORD(wParam) == EN_CHANGE) {
         update_char_count_ui();
+        wchar_t chat_text[512];
+        GetWindowTextW(g_hEditChatText, chat_text, 512);
+        EnterCriticalSection(&g_chat_lock);
+        wcscpy_s(g_chat_text, 512, chat_text);
+        LeaveCriticalSection(&g_chat_lock);
+        save_config();
       }
       break;
 
     case ID_BTN_CHAT_EXAMPLE_1:
       SetWindowTextW(g_hEditChatText,
-                     L"With great Power comes great Responsibility.");
+                     L"With great Power comes great Responsibility");
       update_char_count_ui();
+      EnterCriticalSection(&g_chat_lock);
+      wcscpy_s(g_chat_text, 512,
+               L"With great Power comes great Responsibility");
+      LeaveCriticalSection(&g_chat_lock);
+      save_config();
       break;
 
-    case ID_BTN_CHAT_EXAMPLE_2:
-      SetWindowTextW(
-          g_hEditChatText,
+    case ID_BTN_CHAT_EXAMPLE_2: {
+      const wchar_t *preset2 =
           L"Wintrading refers to any actions that a player or group of players "
           L"may take in order to fix the outcome of a match, usually to boost "
           L"a player’s MMR, rank, or account level. Wintrading undermines the "
@@ -2197,8 +1862,74 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
           L"ranked play by predetermining the results of a match. "
           L"Additionally, players who find themselves in a fixed game are "
           L"thrust into a deeply negative experience over which they have no "
-          L"control.");
+          L"control.";
+      SetWindowTextW(g_hEditChatText, preset2);
       update_char_count_ui();
+      EnterCriticalSection(&g_chat_lock);
+      wcscpy_s(g_chat_text, 512, preset2);
+      LeaveCriticalSection(&g_chat_lock);
+      save_config();
+      break;
+    }
+
+    case ID_BTN_WEBHOOK_SAVE: {
+      wchar_t url[512] = {0};
+      wchar_t uid[64] = {0};
+      GetWindowTextW(g_hEditWebhookUrl, url, 512);
+      GetWindowTextW(g_hEditWebhookUserId, uid, 64);
+      EnterCriticalSection(&g_webhook_lock);
+      wcscpy_s(g_webhook_url, 512, url);
+      wcscpy_s(g_webhook_user_id, 64, uid);
+      LeaveCriticalSection(&g_webhook_lock);
+      save_config();
+      SetWindowTextW(g_hLblWebhookStatus, L"✓ Webhook settings saved.");
+      trigger_toast(hWnd, L"Saved");
+      send_gui_log(L"[WEBHOOK] Settings saved to config.ini.");
+      break;
+    }
+
+    case ID_BTN_WEBHOOK_TEST: {
+      wchar_t url[512] = {0};
+      wchar_t uid[64] = {0};
+      GetWindowTextW(g_hEditWebhookUrl, url, 512);
+      GetWindowTextW(g_hEditWebhookUserId, uid, 64);
+      EnterCriticalSection(&g_webhook_lock);
+      wcscpy_s(g_webhook_url, 512, url);
+      wcscpy_s(g_webhook_user_id, 64, uid);
+      LeaveCriticalSection(&g_webhook_lock);
+      save_config();
+
+      if (url[0] == L'\0') {
+        SetWindowTextW(g_hLblWebhookStatus, L"Please enter a Webhook URL first.");
+        send_gui_log(L"[WEBHOOK] Please enter a Webhook URL first.");
+      } else {
+        SetWindowTextW(g_hLblWebhookStatus, L"Sending test notification to Discord...");
+        webhook_send_test(url, uid);
+        trigger_toast(hWnd, L"Test Sent");
+      }
+      break;
+    }
+
+    case ID_EDIT_WEBHOOK_URL:
+      if (HIWORD(wParam) == EN_CHANGE) {
+        wchar_t url[512] = {0};
+        GetWindowTextW(g_hEditWebhookUrl, url, 512);
+        EnterCriticalSection(&g_webhook_lock);
+        wcscpy_s(g_webhook_url, 512, url);
+        LeaveCriticalSection(&g_webhook_lock);
+        save_config();
+      }
+      break;
+
+    case ID_EDIT_WEBHOOK_USER_ID:
+      if (HIWORD(wParam) == EN_CHANGE) {
+        wchar_t uid[64] = {0};
+        GetWindowTextW(g_hEditWebhookUserId, uid, 64);
+        EnterCriticalSection(&g_webhook_lock);
+        wcscpy_s(g_webhook_user_id, 64, uid);
+        LeaveCriticalSection(&g_webhook_lock);
+        save_config();
+      }
       break;
     }
     return 0;
@@ -2214,6 +1945,72 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
       }
     } else {
       update_status_ui();
+      if (g_current_tab == 7) {
+        update_status_tab_ui();
+      }
+    }
+    return 0;
+  }
+
+  case WM_APP_UPDATE_CHECK_RESULT: {
+    int is_manual = (int)wParam;
+    int status = (int)lParam; // 0 = error, 1 = newer version available, 2 = up-to-date
+
+    if (status == 1) {
+      // Newer version available!
+      wchar_t prompt[256];
+      swprintf_s(prompt, 256,
+                 L"A new version (%s) of SageBot is available!\n\nWould you like to download and update now?",
+                 g_latest_version_tag);
+
+      if (g_hLblUpdateStatus) {
+        wchar_t stBuf[128];
+        swprintf_s(stBuf, 128, L"Update available: %s", g_latest_version_tag);
+        SetWindowTextW(g_hLblUpdateStatus, stBuf);
+      }
+
+      int res = MessageBoxW(hWnd, prompt, L"Update Available",
+                            MB_ICONINFORMATION | MB_YESNO | MB_DEFBUTTON1);
+      if (res == IDYES) {
+        start_download_update();
+      }
+    } else if (status == 2) {
+      if (g_hLblUpdateStatus) {
+        SetWindowTextW(g_hLblUpdateStatus, L"You are up to date.");
+      }
+      if (is_manual) {
+        MessageBoxW(hWnd, L"You are already running the latest version of SageBot.",
+                    L"No Updates", MB_ICONINFORMATION | MB_OK);
+      }
+    } else {
+      if (g_hLblUpdateStatus) {
+        SetWindowTextW(g_hLblUpdateStatus, L"Failed to check for updates.");
+      }
+      if (is_manual) {
+        MessageBoxW(hWnd, L"Unable to connect to GitHub releases.\nPlease check your internet connection.",
+                    L"Update Check Failed", MB_ICONWARNING | MB_OK);
+      }
+    }
+    return 0;
+  }
+
+  case WM_APP_UPDATE_DOWNLOAD_DONE: {
+    int success = (int)wParam;
+    atomic_store(&g_is_updating, 0);
+
+    if (success) {
+      if (g_hLblUpdateStatus) {
+        SetWindowTextW(g_hLblUpdateStatus, L"Update complete! Restarting...");
+      }
+      MessageBoxW(hWnd, L"Update downloaded successfully!\nSageBot will now restart to apply the update.",
+                  L"Updating", MB_ICONINFORMATION | MB_OK);
+      apply_update_and_restart();
+    } else {
+      if (g_hLblUpdateStatus) {
+        SetWindowTextW(g_hLblUpdateStatus, L"Update download failed.");
+      }
+      MessageBoxW(hWnd, L"Failed to download the update.\nPlease try again later or download from GitHub.",
+                  L"Update Failed", MB_ICONERROR | MB_OK);
     }
     return 0;
   }
@@ -2251,6 +2048,20 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
       if (g_music_playing) {
         music_update_progress();
       }
+    } else if (wParam == ID_TIMER_ROUND_UPDATE) {
+      wchar_t roundText[64];
+      get_round_display_text(roundText, 64);
+      if (g_hLblRoundVal) {
+        wchar_t curText[64];
+        GetWindowTextW(g_hLblRoundVal, curText, 64);
+        if (wcscmp(curText, roundText) != 0) {
+          SetWindowTextW(g_hLblRoundVal, roundText);
+          InvalidateRect(g_hLblRoundVal, NULL, TRUE);
+        }
+      }
+      if (g_current_tab == 7) {
+        update_status_tab_ui();
+      }
     }
     return 0;
   }
@@ -2280,23 +2091,81 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
       return (INT_PTR)g_hCardBgBrush;
     }
 
-    if (hCtl == g_hLblStatusTitle || hCtl == g_hLblHotkeyTitle) {
+    if (hCtl == g_hLblRoundVal) {
+      SetTextColor(hdcStatic, RGB(167, 139, 250)); // Sleek Light Purple (#a78bfa)
+      return (INT_PTR)g_hCardBgBrush;
+    }
+
+    if (hCtl == g_hLblStatusTitle || hCtl == g_hLblHotkeyTitle || hCtl == g_hLblRoundTitle) {
       SetTextColor(hdcStatic, COLOR_TEXT_SECONDARY);
       return (INT_PTR)g_hCardBgBrush;
     }
 
+    if (hCtl == g_hLblRiotIdVal) {
+      SetTextColor(hdcStatic, RGB(255, 255, 255));
+      return (INT_PTR)g_hCardBgBrush;
+    }
+
+    if (hCtl == g_hLblRankVal) {
+      SetTextColor(hdcStatic, RGB(245, 158, 11)); // Amber/Gold
+      return (INT_PTR)g_hCardBgBrush;
+    }
+
+    if (hCtl == g_hLblMapVal) {
+      SetTextColor(hdcStatic, RGB(52, 211, 153)); // Emerald
+      return (INT_PTR)g_hCardBgBrush;
+    }
+
+    if (hCtl == g_hLblGamemodeVal) {
+      SetTextColor(hdcStatic, RGB(96, 165, 250)); // Sky Blue
+      return (INT_PTR)g_hCardBgBrush;
+    }
+
+    if (hCtl == g_hLblPhaseVal) {
+      SetTextColor(hdcStatic, RGB(244, 114, 182)); // Rose
+      return (INT_PTR)g_hCardBgBrush;
+    }
+
+    if (hCtl == g_hLblAgentVal) {
+      SetTextColor(hdcStatic, RGB(167, 139, 250)); // Sleek Purple
+      return (INT_PTR)g_hCardBgBrush;
+    }
+
+    if (hCtl == g_hLblBox1Header || hCtl == g_hLblBox2Header) {
+      SetTextColor(hdcStatic, RGB(167, 139, 250));
+      return (INT_PTR)g_hCardBgBrush;
+    }
+
+    if (hCtl == g_hLblRiotIdTitle || hCtl == g_hLblRankTitle ||
+        hCtl == g_hLblMapTitle || hCtl == g_hLblGamemodeTitle ||
+        hCtl == g_hLblPhaseTitle || hCtl == g_hLblAgentTitle) {
+      SetTextColor(hdcStatic, COLOR_TEXT_SECONDARY);
+      return (INT_PTR)g_hCardBgBrush;
+    }
+
+    if (hCtl == g_hLblWebhookStatus) {
+      SetTextColor(hdcStatic, RGB(167, 139, 250)); // Soft purple
+      return (INT_PTR)g_hCardBgBrush;
+    }
+
     if (hCtl == g_hLblChatHeader || hCtl == g_hLblVoteHeader ||
+        hCtl == g_hLblConfigHeader || hCtl == g_hLblClickSettingsTitle ||
         hCtl == g_hLblSettingsHeader || hCtl == g_hLblMusicHeader ||
-        hCtl == g_hLblMusicTitle) {
+        hCtl == g_hLblMusicTitle || hCtl == g_hLblWebhookHeader ||
+        hCtl == g_hLblWebhookUrl || hCtl == g_hLblWebhookUserId) {
       SetTextColor(hdcStatic, COLOR_TEXT_PRIMARY);
       return (INT_PTR)g_hCardBgBrush;
     }
 
     if (hCtl == g_hLblChatDescription || hCtl == g_hLblSettingsHelp ||
         hCtl == g_hLblPresets || hCtl == g_hLblVoteSub ||
+        hCtl == g_hLblConfigSub || hCtl == g_hLblClickSettingsSub ||
+        hCtl == g_hLblIntervalNote || hCtl == g_hLblSlowModeDesc ||
         hCtl == g_hLblChatCharCount || hCtl == g_hLblMusicSub ||
         hCtl == g_hLblMusicArtist || hCtl == g_hLblMusicTime ||
-        hCtl == g_hLblMusicVol) {
+        hCtl == g_hLblMusicVol || hCtl == g_hLblWebhookSub ||
+        hCtl == g_hLblWebhookUrlNote || hCtl == g_hLblWebhookUserIdNote ||
+        hCtl == g_hLblWebhookHint) {
       SetTextColor(hdcStatic, COLOR_TEXT_MUTED);
       return (INT_PTR)g_hCardBgBrush;
     }
@@ -2304,6 +2173,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (hCtl == g_hChkChat || hCtl == g_hLblChatToggle ||
         hCtl == g_hLblChatChannel || hCtl == g_hRadioVoteOff ||
         hCtl == g_hRadioVoteYes || hCtl == g_hRadioVoteNo ||
+        hCtl == g_hLblClickKeyTitle || hCtl == g_hLblIntervalTitle ||
+        hCtl == g_hLblSlowModeTitle || hCtl == g_hChkSlowMode ||
         hCtl == g_hLblSettingsKeyTitle) {
       SetTextColor(hdcStatic, COLOR_TEXT_PRIMARY);
       return (INT_PTR)g_hCardBgBrush;
@@ -2317,7 +2188,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     HDC hdcEdit = (HDC)wParam;
     HWND hCtl = (HWND)lParam;
 
-    if (hCtl == g_hEditChatInterval || hCtl == g_hEditChatText) {
+    if (hCtl == g_hEditChatInterval || hCtl == g_hEditChatText ||
+        hCtl == g_hEditWebhookUrl || hCtl == g_hEditWebhookUserId) {
       SetBkColor(hdcEdit, COLOR_INPUT_BG);
       SetTextColor(hdcEdit, COLOR_TEXT_PRIMARY);
       return (INT_PTR)g_hInputBgBrush;
@@ -2331,6 +2203,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
   case WM_DESTROY: {
     atomic_store(&g_status, 0);
     atomic_store(&g_listener, 0);
+    atomic_store(&g_is_rebinding, 0);
+    atomic_store(&g_is_rebinding_afk, 0);
+    round_tracker_cleanup();
+    KillTimer(hWnd, ID_TIMER_ROUND_UPDATE);
     music_cleanup();
 
     if (g_hAppIcon) {
@@ -2368,6 +2244,24 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
   icex.dwSize = sizeof(INITCOMMONCONTROLSEX);
   icex.dwICC = ICC_STANDARD_CLASSES | ICC_PROGRESS_CLASS;
   InitCommonControlsEx(&icex);
+  // Single Instance Protection
+  HANDLE hMutex = CreateMutexW(NULL, TRUE, L"SageBot_SingleInstance_Mutex");
+  if (GetLastError() == ERROR_ALREADY_EXISTS) {
+    if (hMutex) {
+      CloseHandle(hMutex);
+    }
+    HWND hExistingWnd = FindWindowW(L"SageBotGUIClass", NULL);
+    if (hExistingWnd) {
+      if (IsIconic(hExistingWnd)) {
+        ShowWindow(hExistingWnd, SW_RESTORE);
+      } else {
+        ShowWindow(hExistingWnd, SW_SHOW);
+      }
+      SetForegroundWindow(hExistingWnd);
+    }
+    return 0;
+  }
+
   OleInitialize(NULL);
 
   srand((unsigned int)time(NULL));
@@ -2452,5 +2346,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     DispatchMessageW(&msg);
   }
 
+  if (hMutex) {
+    CloseHandle(hMutex);
+  }
+
+  OleUninitialize();
   return (int)msg.wParam;
 }
