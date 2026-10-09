@@ -1,4 +1,5 @@
 #include "config.h"
+#include "agent_locker.h"
 
 void init_config_path(void) {
   DWORD len = GetModuleFileNameW(NULL, g_config_path, MAX_PATH);
@@ -47,10 +48,23 @@ void save_config(void) {
   WritePrivateProfileStringW(L"Chat", L"Text", g_chat_text, g_config_path);
   LeaveCriticalSection(&g_chat_lock);
 
+  swprintf_s(buf, 32, L"%d", atomic_load(&g_webhook_enabled));
+  WritePrivateProfileStringW(L"Webhook", L"Enabled", buf, g_config_path);
+
   EnterCriticalSection(&g_webhook_lock);
   WritePrivateProfileStringW(L"Webhook", L"Url", g_webhook_url, g_config_path);
   WritePrivateProfileStringW(L"Webhook", L"UserId", g_webhook_user_id, g_config_path);
   LeaveCriticalSection(&g_webhook_lock);
+
+  swprintf_s(buf, 32, L"%d", atomic_load(&g_instalock_enabled));
+  WritePrivateProfileStringW(L"Agents", L"Instalock", buf, g_config_path);
+
+  swprintf_s(buf, 32, L"%d", atomic_load(&g_starter_fallback_enabled));
+  WritePrivateProfileStringW(L"Agents", L"StarterFallback", buf, g_config_path);
+
+  wchar_t agents_str[512] = {0};
+  agent_selection_to_config_string(agents_str, 512);
+  WritePrivateProfileStringW(L"Agents", L"SelectedAgents", agents_str, g_config_path);
 }
 
 void load_config(void) {
@@ -105,6 +119,9 @@ void load_config(void) {
   wcscpy_s(g_chat_text, 512, chat_text);
   LeaveCriticalSection(&g_chat_lock);
 
+  int webhook_enabled = GetPrivateProfileIntW(L"Webhook", L"Enabled", 1, g_config_path);
+  atomic_store(&g_webhook_enabled, webhook_enabled);
+
   wchar_t webhook_url[512] = {0};
   wchar_t webhook_user_id[64] = {0};
   GetPrivateProfileStringW(L"Webhook", L"Url", L"", webhook_url, 512, g_config_path);
@@ -113,4 +130,13 @@ void load_config(void) {
   wcscpy_s(g_webhook_url, 512, webhook_url);
   wcscpy_s(g_webhook_user_id, 64, webhook_user_id);
   LeaveCriticalSection(&g_webhook_lock);
+
+  int instalock = GetPrivateProfileIntW(L"Agents", L"Instalock", 0, g_config_path);
+  int starter_fallback = GetPrivateProfileIntW(L"Agents", L"StarterFallback", 0, g_config_path);
+  atomic_store(&g_instalock_enabled, instalock);
+  atomic_store(&g_starter_fallback_enabled, starter_fallback);
+
+  wchar_t agents_str[512] = {0};
+  GetPrivateProfileStringW(L"Agents", L"SelectedAgents", L"", agents_str, 512, g_config_path);
+  agent_selection_from_config_string(agents_str);
 }

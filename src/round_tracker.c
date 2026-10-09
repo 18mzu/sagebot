@@ -1,5 +1,6 @@
 #include "round_tracker.h"
 #include "webhook.h"
+#include "agent_locker.h"
 
 static HANDLE g_hTrackerThread = NULL;
 static atomic_int g_tracker_running = 0;
@@ -571,6 +572,7 @@ static DWORD WINAPI round_tracker_thread_proc(LPVOID param) {
                     if (strstr(decoded, "\"sessionLoopState\":\"INGAME\"") != NULL) {
                       in_game = 1;
                       g_queue_start_tick = 0;
+                      agent_locker_reset_session();
                       char *pAlly = strstr(decoded, "\"partyOwnerMatchScoreAllyTeam\":");
                       if (pAlly) {
                         char *pCol = strchr(pAlly, ':');
@@ -597,6 +599,7 @@ static DWORD WINAPI round_tracker_thread_proc(LPVOID param) {
                         swprintf_s(new_phase, 64, L"In Queue (%02u:%02u)", elapsed / 60, elapsed % 60);
                       } else {
                         g_queue_start_tick = 0;
+                        agent_locker_reset_session();
                         wcscpy_s(new_display, 64, L"Lobby | -");
                         wcscpy_s(new_phase, 64, L"In Lobby");
                       }
@@ -612,6 +615,7 @@ static DWORD WINAPI round_tracker_thread_proc(LPVOID param) {
                       round_num = 0;
                       resolve_agent_from_log(new_agent, 64);
                       found_state = 1;
+                      agent_locker_on_pregame_tick(port, password, g_cached_puuid);
                     } else if (strstr(decoded, "\"sessionLoopState\"") != NULL) {
                       g_queue_start_tick = 0;
                       wcscpy_s(new_display, 64, L"In Queue | -");

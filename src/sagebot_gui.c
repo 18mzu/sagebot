@@ -6,11 +6,13 @@
 #include "updater.h"
 #include "round_tracker.h"
 #include "webhook.h"
+#include "agent_locker.h"
 
 // Global State Variables
 HWND g_hWnd = NULL;
 static HWND g_hNavMain = NULL;
 static HWND g_hNavConfig = NULL;
+static HWND g_hNavAgents = NULL;
 static HWND g_hNavChat = NULL;
 static HWND g_hNavAutoVoting = NULL;
 static HWND g_hNavMusic = NULL;
@@ -114,10 +116,28 @@ static HWND g_hLblWebhookHint = NULL;
 static HWND g_hBtnWebhookSave = NULL;
 static HWND g_hBtnWebhookTest = NULL;
 static HWND g_hLblWebhookStatus = NULL;
+static HWND g_hChkWebhook = NULL;
+static HWND g_hLblWebhookToggle = NULL;
+
+// Agents Tab Controls
+static HWND g_hLblAgentsHeader = NULL;
+static HWND g_hLblAgentsSub = NULL;
+static HWND g_hBtnAgentsClear = NULL;
+static HWND g_hListAgents = NULL;
+static HWND g_hLblAgentsPriorityVal = NULL;
+static HWND g_hLblAgentsAutoHeader = NULL;
+static HWND g_hLblInstalockTitle = NULL;
+static HWND g_hChkInstalock = NULL;
+static HWND g_hLblInstalockDesc = NULL;
+static HWND g_hLblStarterFallbackTitle = NULL;
+static HWND g_hChkStarterFallback = NULL;
+static HWND g_hLblStarterFallbackDesc = NULL;
+static HWND g_hLblAgentsAutoSave = NULL;
 
 wchar_t g_webhook_url[512] = L"";
 wchar_t g_webhook_user_id[64] = L"";
 CRITICAL_SECTION g_webhook_lock;
+atomic_int g_webhook_enabled = 1;
 
 // Styling Brushes & Fonts
 static HBRUSH g_hBaseBgBrush = NULL;
@@ -498,14 +518,14 @@ static COLORREF get_agent_color(const wchar_t *text) {
   // Controllers
   if (wcsstr(text, L"Brimstone")) return RGB(227, 101, 40);  // Orbital Tactical Orange
   if (wcsstr(text, L"Viper"))     return RGB(43, 230, 110);  // Toxic Acid Green
-  if (wcsstr(text, L"Omen"))      return RGB(91, 79, 150);   // Shrouded Shadow Indigo
+  if (wcsstr(text, L"Omen"))      return RGB(30, 80, 216);   // Deep Void Blue
   if (wcsstr(text, L"Astra"))     return RGB(163, 75, 216);  // Cosmic Astral Purple
   if (wcsstr(text, L"Harbor"))    return RGB(17, 165, 184);  // Tidal Aqua Cyan
-  if (wcsstr(text, L"Clove"))     return RGB(216, 127, 227); // Petal Lilac
+  if (wcsstr(text, L"Clove"))     return RGB(255, 122, 184); // Energetic Pastel Pink
   // Duelists
-  if (wcsstr(text, L"Jett"))      return RGB(103, 229, 255); // Cloud Sky Blue
+  if (wcsstr(text, L"Jett"))      return RGB(255, 255, 255); // Wind Pure White
   if (wcsstr(text, L"Phoenix"))   return RGB(255, 75, 43);   // Solar Flare Orange
-  if (wcsstr(text, L"Reyna"))     return RGB(186, 24, 186);  // Empress Leer Magenta
+  if (wcsstr(text, L"Reyna"))     return RGB(138, 28, 158);  // Dark Empress Purple
   if (wcsstr(text, L"Raze"))      return RGB(255, 124, 42);  // Neon Tangerine
   if (wcsstr(text, L"Yoru"))      return RGB(40, 90, 235);   // Dimensional Drift Azure
   if (wcsstr(text, L"Neon"))      return RGB(0, 240, 255);   // Bioelectric Cyan
@@ -521,7 +541,7 @@ static COLORREF get_agent_color(const wchar_t *text) {
   // Sentinels
   if (wcsstr(text, L"Sage"))      return RGB(47, 229, 168);  // Jade Mint
   if (wcsstr(text, L"Killjoy"))   return RGB(255, 222, 0);   // Canary Yellow
-  if (wcsstr(text, L"Cypher"))    return RGB(203, 163, 104); // Moroccan Sand Gold
+  if (wcsstr(text, L"Cypher"))    return RGB(207, 214, 224); // Trenchcoat Off-White / Silver Grey
   if (wcsstr(text, L"Chamber"))   return RGB(209, 165, 69);  // French Gilded Gold
   if (wcsstr(text, L"Deadlock"))  return RGB(118, 152, 179); // Glacial Steel Blue
   if (wcsstr(text, L"Vyse"))      return RGB(158, 116, 162); // Rose Quicksilver Steel
@@ -596,6 +616,8 @@ static void show_status_controls(int show) {
 static void show_webhook_controls(int show) {
   int command = show ? SW_SHOW : SW_HIDE;
   ShowWindow(g_hLblWebhookHeader, command);
+  ShowWindow(g_hChkWebhook, command);
+  ShowWindow(g_hLblWebhookToggle, command);
   ShowWindow(g_hLblWebhookSub, command);
   ShowWindow(g_hLblWebhookUrl, command);
   ShowWindow(g_hLblWebhookUrlNote, command);
@@ -607,6 +629,43 @@ static void show_webhook_controls(int show) {
   ShowWindow(g_hBtnWebhookSave, command);
   ShowWindow(g_hBtnWebhookTest, command);
   ShowWindow(g_hLblWebhookStatus, command);
+}
+
+static void update_agents_tab_ui(void) {
+  if (!g_hListAgents) return;
+
+  wchar_t prioStr[512] = {0};
+  agent_selection_get_priority_string(prioStr, 512);
+  SetWindowTextW(g_hLblAgentsPriorityVal, prioStr);
+
+  InvalidateRect(g_hListAgents, NULL, TRUE);
+  InvalidateRect(g_hChkInstalock, NULL, TRUE);
+  InvalidateRect(g_hChkStarterFallback, NULL, TRUE);
+  InvalidateRect(g_hWnd, NULL, TRUE);
+}
+
+static void show_agents_controls(int show) {
+  int command = show ? SW_SHOW : SW_HIDE;
+  ShowWindow(g_hLblAgentsHeader, command);
+  ShowWindow(g_hBtnAgentsClear, command);
+  ShowWindow(g_hLblAgentsSub, command);
+  ShowWindow(g_hListAgents, command);
+  ShowWindow(g_hLblAgentsPriorityVal, command);
+
+  ShowWindow(g_hLblAgentsAutoHeader, command);
+  ShowWindow(g_hLblInstalockTitle, command);
+  ShowWindow(g_hChkInstalock, command);
+  ShowWindow(g_hLblInstalockDesc, command);
+
+  ShowWindow(g_hLblStarterFallbackTitle, command);
+  ShowWindow(g_hChkStarterFallback, command);
+  ShowWindow(g_hLblStarterFallbackDesc, command);
+
+  ShowWindow(g_hLblAgentsAutoSave, command);
+
+  if (show) {
+    update_agents_tab_ui();
+  }
 }
 
 static void switch_tab(int tab_id) {
@@ -623,6 +682,7 @@ static void switch_tab(int tab_id) {
   show_config_controls(tab_id == 6);
   show_status_controls(tab_id == 7);
   show_webhook_controls(tab_id == 8);
+  show_agents_controls(tab_id == 9);
 
   if (tab_id == 1) {
     load_changelog_ui();
@@ -633,6 +693,7 @@ static void switch_tab(int tab_id) {
   InvalidateRect(g_hNavMain, NULL, TRUE);
   InvalidateRect(g_hNavStatus, NULL, TRUE);
   InvalidateRect(g_hNavConfig, NULL, TRUE);
+  InvalidateRect(g_hNavAgents, NULL, TRUE);
   InvalidateRect(g_hNavChat, NULL, TRUE);
   InvalidateRect(g_hNavAutoVoting, NULL, TRUE);
   InvalidateRect(g_hNavMusic, NULL, TRUE);
@@ -653,7 +714,7 @@ static void handle_draw_item(HWND hWnd, const DRAWITEMSTRUCT *pDIS) {
 
   // 1. Sidebar Navigation Buttons
   if (id == ID_NAV_CHANGELOGS || id == ID_NAV_MAIN || id == ID_NAV_STATUS ||
-      id == ID_NAV_CONFIG || id == ID_NAV_CHAT || id == ID_NAV_AUTO_VOTING ||
+      id == ID_NAV_CONFIG || id == ID_NAV_AGENTS || id == ID_NAV_CHAT || id == ID_NAV_AUTO_VOTING ||
       id == ID_NAV_MUSIC || id == ID_NAV_WEBHOOK || id == ID_NAV_SETTINGS) {
     int tab_index = 0;
     const wchar_t *text = L"";
@@ -670,6 +731,10 @@ static void handle_draw_item(HWND hWnd, const DRAWITEMSTRUCT *pDIS) {
     case ID_NAV_CONFIG:
       tab_index = 6;
       text = L"🛠️  Config";
+      break;
+    case ID_NAV_AGENTS:
+      tab_index = 9;
+      text = L"👥  Agents";
       break;
     case ID_NAV_CHAT:
       tab_index = 2;
@@ -857,10 +922,21 @@ static void handle_draw_item(HWND hWnd, const DRAWITEMSTRUCT *pDIS) {
   }
 
   // 6. Modern On/Off Slider Switch Toggle
-  if (id == ID_CHK_CHAT || id == ID_CHK_SLOW_MODE) {
-    int is_on = (id == ID_CHK_CHAT)
-                    ? (atomic_load(&g_chat_mode) == 1)
-                    : (atomic_load(&g_slow_mode) == 1);
+  if (id == ID_CHK_CHAT || id == ID_CHK_SLOW_MODE ||
+      id == ID_CHK_INSTALOCK || id == ID_CHK_STARTER_FALLBACK ||
+      id == ID_CHK_WEBHOOK) {
+    int is_on = 0;
+    if (id == ID_CHK_CHAT) {
+      is_on = (atomic_load(&g_chat_mode) == 1);
+    } else if (id == ID_CHK_SLOW_MODE) {
+      is_on = (atomic_load(&g_slow_mode) == 1);
+    } else if (id == ID_CHK_INSTALOCK) {
+      is_on = (atomic_load(&g_instalock_enabled) == 1);
+    } else if (id == ID_CHK_STARTER_FALLBACK) {
+      is_on = (atomic_load(&g_starter_fallback_enabled) == 1);
+    } else if (id == ID_CHK_WEBHOOK) {
+      is_on = (atomic_load(&g_webhook_enabled) == 1);
+    }
     COLORREF trackBg = is_on ? RGB(34, 197, 94) : RGB(50, 50, 65);
     COLORREF trackBorder = is_on ? RGB(74, 222, 128) : RGB(70, 70, 90);
 
@@ -1029,6 +1105,276 @@ static void handle_draw_item(HWND hWnd, const DRAWITEMSTRUCT *pDIS) {
               DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     return;
   }
+
+  // 12. Agents Clear Button
+  if (id == ID_BTN_AGENTS_CLEAR) {
+    COLORREF bgCol = isSelected ? RGB(60, 24, 28) : RGB(36, 18, 22);
+    COLORREF borderCol = isSelected ? RGB(239, 68, 68) : RGB(185, 28, 28);
+    draw_rounded_rect(hdc, &rc, 5, bgCol, borderCol, 1);
+    SelectObject(hdc, g_hFontSmall);
+    SetTextColor(hdc, isSelected ? RGB(255, 255, 255) : RGB(248, 113, 113));
+    DrawTextW(hdc, L"✕ Clear", -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    return;
+  }
+
+}
+
+// ----------------------------------------------------
+// Smooth-Scrolling Agent Roster Custom Window Procedure
+// ----------------------------------------------------
+#define ID_TIMER_AGENT_SCROLL 1099
+#define AGENT_ROW_H 30
+#define AGENT_ROW_GAP 2
+#define AGENT_ROW_STEP (AGENT_ROW_H + AGENT_ROW_GAP)
+
+static float s_agentScrollY = 0.0f;
+static float s_agentTargetScrollY = 0.0f;
+static BOOL s_agentIsDraggingThumb = FALSE;
+static int s_agentDragStartY = 0;
+static float s_agentDragStartScrollY = 0.0f;
+static int s_agentHoverIdx = -1;
+
+LRESULT CALLBACK AgentScrollListProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+  switch (uMsg) {
+  case WM_CREATE:
+    s_agentScrollY = 0.0f;
+    s_agentTargetScrollY = 0.0f;
+    s_agentIsDraggingThumb = FALSE;
+    s_agentHoverIdx = -1;
+    return 0;
+
+  case WM_ERASEBKGND:
+    return 1;
+
+  case WM_MOUSEWHEEL: {
+    int zDelta = GET_WHEEL_DELTA_WPARAM(wParam);
+    RECT rc;
+    GetClientRect(hWnd, &rc);
+    int height = rc.bottom - rc.top;
+    float totalH = (float)(get_agent_count() * AGENT_ROW_STEP + 4);
+    float maxScroll = totalH - (float)height;
+    if (maxScroll < 0.0f) maxScroll = 0.0f;
+
+    s_agentTargetScrollY -= ((float)zDelta / (float)WHEEL_DELTA) * 52.0f;
+    if (s_agentTargetScrollY < 0.0f) s_agentTargetScrollY = 0.0f;
+    if (s_agentTargetScrollY > maxScroll) s_agentTargetScrollY = maxScroll;
+
+    SetTimer(hWnd, ID_TIMER_AGENT_SCROLL, 16, NULL);
+    return 0;
+  }
+
+  case WM_TIMER: {
+    if (wParam == ID_TIMER_AGENT_SCROLL) {
+      float diff = s_agentTargetScrollY - s_agentScrollY;
+      if (fabsf(diff) < 0.4f) {
+        s_agentScrollY = s_agentTargetScrollY;
+        KillTimer(hWnd, ID_TIMER_AGENT_SCROLL);
+      } else {
+        s_agentScrollY += diff * 0.28f;
+      }
+      InvalidateRect(hWnd, NULL, FALSE);
+    }
+    return 0;
+  }
+
+  case WM_MOUSEMOVE: {
+    int mx = LOWORD(lParam);
+    int my = HIWORD(lParam);
+    RECT rc;
+    GetClientRect(hWnd, &rc);
+    int height = rc.bottom - rc.top;
+    float totalH = (float)(get_agent_count() * AGENT_ROW_STEP + 4);
+    float maxScroll = totalH - (float)height;
+    if (maxScroll < 0.0f) maxScroll = 0.0f;
+
+    if (s_agentIsDraggingThumb && maxScroll > 0.0f) {
+      int deltaY = my - s_agentDragStartY;
+      int thumbHeight = (int)((float)height / totalH * (float)height);
+      if (thumbHeight < 24) thumbHeight = 24;
+      int trackHeight = height - thumbHeight;
+      if (trackHeight > 0) {
+        float scrollPerPixel = maxScroll / (float)trackHeight;
+        s_agentTargetScrollY = s_agentDragStartScrollY + (float)deltaY * scrollPerPixel;
+        if (s_agentTargetScrollY < 0.0f) s_agentTargetScrollY = 0.0f;
+        if (s_agentTargetScrollY > maxScroll) s_agentTargetScrollY = maxScroll;
+        s_agentScrollY = s_agentTargetScrollY;
+        InvalidateRect(hWnd, NULL, FALSE);
+      }
+      return 0;
+    }
+
+    int oldHover = s_agentHoverIdx;
+    if (mx < rc.right - 10) {
+      int itemIdx = (int)(((float)my + s_agentScrollY - 2.0f) / (float)AGENT_ROW_STEP);
+      if (itemIdx >= 0 && itemIdx < get_agent_count()) {
+        s_agentHoverIdx = itemIdx;
+      } else {
+        s_agentHoverIdx = -1;
+      }
+    } else {
+      s_agentHoverIdx = -1;
+    }
+
+    if (s_agentHoverIdx != oldHover) {
+      InvalidateRect(hWnd, NULL, FALSE);
+    }
+
+    TRACKMOUSEEVENT tme = {sizeof(tme), TME_LEAVE, hWnd, 0};
+    TrackMouseEvent(&tme);
+    return 0;
+  }
+
+  case WM_MOUSELEAVE: {
+    if (s_agentHoverIdx != -1) {
+      s_agentHoverIdx = -1;
+      InvalidateRect(hWnd, NULL, FALSE);
+    }
+    return 0;
+  }
+
+  case WM_LBUTTONDOWN: {
+    int mx = LOWORD(lParam);
+    int my = HIWORD(lParam);
+    RECT rc;
+    GetClientRect(hWnd, &rc);
+    int height = rc.bottom - rc.top;
+    float totalH = (float)(get_agent_count() * AGENT_ROW_STEP + 4);
+    float maxScroll = totalH - (float)height;
+    if (maxScroll < 0.0f) maxScroll = 0.0f;
+
+    if (mx >= rc.right - 10 && maxScroll > 0.0f) {
+      s_agentIsDraggingThumb = TRUE;
+      s_agentDragStartY = my;
+      s_agentDragStartScrollY = s_agentScrollY;
+      SetCapture(hWnd);
+      InvalidateRect(hWnd, NULL, FALSE);
+      return 0;
+    }
+
+    int itemIdx = (int)(((float)my + s_agentScrollY - 2.0f) / (float)AGENT_ROW_STEP);
+    if (itemIdx >= 0 && itemIdx < get_agent_count()) {
+      agent_selection_toggle(itemIdx);
+      update_agents_tab_ui();
+      save_config();
+      InvalidateRect(hWnd, NULL, FALSE);
+    }
+    return 0;
+  }
+
+  case WM_LBUTTONUP: {
+    if (s_agentIsDraggingThumb) {
+      s_agentIsDraggingThumb = FALSE;
+      ReleaseCapture();
+      InvalidateRect(hWnd, NULL, FALSE);
+    }
+    return 0;
+  }
+
+  case WM_PAINT: {
+    PAINTSTRUCT ps;
+    HDC hdc = BeginPaint(hWnd, &ps);
+    RECT rc;
+    GetClientRect(hWnd, &rc);
+    int width = rc.right - rc.left;
+    int height = rc.bottom - rc.top;
+
+    HDC memDC = CreateCompatibleDC(hdc);
+    HBITMAP memBmp = CreateCompatibleBitmap(hdc, width, height);
+    HBITMAP oldBmp = (HBITMAP)SelectObject(memDC, memBmp);
+
+    HBRUSH bgBr = CreateSolidBrush(RGB(18, 18, 24));
+    FillRect(memDC, &rc, bgBr);
+    DeleteObject(bgBr);
+
+    SetBkMode(memDC, TRANSPARENT);
+
+    float totalH = (float)(get_agent_count() * AGENT_ROW_STEP + 4);
+    float maxScroll = totalH - (float)height;
+    if (maxScroll < 0.0f) maxScroll = 0.0f;
+
+    int agentCount = get_agent_count();
+    for (int i = 0; i < agentCount; ++i) {
+      const AgentInfo *agent = get_agent_by_index(i);
+      if (!agent) continue;
+
+      int rowY = (int)(2 + i * AGENT_ROW_STEP - s_agentScrollY);
+      if (rowY + AGENT_ROW_H < 0 || rowY > height) {
+        continue;
+      }
+
+      RECT rcRow = {3, rowY, width - 12, rowY + AGENT_ROW_H};
+
+      int rank = agent_selection_get_rank(i);
+      BOOL isHovered = (s_agentHoverIdx == i);
+
+      COLORREF rowBg, rowBorder;
+      if (rank > 0) {
+        rowBg = isHovered ? RGB(45, 34, 68) : RGB(34, 26, 52);
+        rowBorder = RGB(139, 92, 246);
+      } else if (isHovered) {
+        rowBg = RGB(30, 30, 40);
+        rowBorder = RGB(70, 70, 90);
+      } else {
+        rowBg = RGB(22, 22, 28);
+        rowBorder = RGB(30, 30, 38);
+      }
+
+      draw_rounded_rect(memDC, &rcRow, 6, rowBg, rowBorder, rank > 0 ? 2 : 1);
+
+      int cy = (rcRow.top + rcRow.bottom) / 2;
+
+      if (rank > 0) {
+        RECT rcBadge = {rcRow.left + 7, cy - 9, rcRow.left + 25, cy + 9};
+        draw_rounded_rect(memDC, &rcBadge, 9, RGB(124, 58, 237), RGB(167, 139, 250), 1);
+
+        wchar_t rankBuf[8];
+        swprintf_s(rankBuf, 8, L"%d", rank);
+        SelectObject(memDC, g_hFontSmall);
+        SetTextColor(memDC, RGB(255, 255, 255));
+        DrawTextW(memDC, rankBuf, -1, &rcBadge, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+      } else {
+        RECT rcDot = {rcRow.left + 12, cy - 4, rcRow.left + 20, cy + 4};
+        draw_rounded_rect(memDC, &rcDot, 4, RGB(26, 26, 34), RGB(70, 70, 85), 1);
+      }
+
+      COLORREF nameColor = get_agent_color(agent->name);
+      SelectObject(memDC, rank > 0 ? g_hFontHeader : g_hFontNormal);
+      SetTextColor(memDC, nameColor);
+      RECT rcName = {rcRow.left + 33, rcRow.top, rcRow.right - 68, rcRow.bottom};
+      DrawTextW(memDC, agent->name, -1, &rcName, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
+      if (agent->is_starter) {
+        RECT rcTag = {rcRow.right - 64, cy - 8, rcRow.right - 6, cy + 8};
+        draw_rounded_rect(memDC, &rcTag, 4, RGB(24, 32, 48), RGB(59, 130, 246), 1);
+        SelectObject(memDC, g_hFontSmall);
+        SetTextColor(memDC, RGB(147, 197, 253));
+        DrawTextW(memDC, L"STARTER", -1, &rcTag, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+      }
+    }
+
+    if (maxScroll > 0.0f) {
+      int barX = width - 7;
+      int barWidth = 4;
+      int thumbHeight = (int)((float)height / totalH * (float)height);
+      if (thumbHeight < 24) thumbHeight = 24;
+
+      int thumbY = (int)((s_agentScrollY / maxScroll) * (float)(height - thumbHeight));
+      RECT rcThumb = {barX, thumbY + 1, barX + barWidth, thumbY + thumbHeight - 1};
+
+      COLORREF thumbCol = s_agentIsDraggingThumb ? RGB(167, 139, 250) : RGB(80, 80, 100);
+      draw_rounded_rect(memDC, &rcThumb, 2, thumbCol, thumbCol, 0);
+    }
+
+    BitBlt(hdc, 0, 0, width, height, memDC, 0, 0, SRCCOPY);
+
+    SelectObject(memDC, oldBmp);
+    DeleteObject(memBmp);
+    DeleteDC(memDC);
+    EndPaint(hWnd, &ps);
+    return 0;
+  }
+  }
+  return DefWindowProcW(hWnd, uMsg, wParam, lParam);
 }
 
 // Window Procedure
@@ -1095,37 +1441,42 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                                WS_CHILD | WS_VISIBLE | BS_OWNERDRAW, 12, 16,
                                124, 36, hWnd, (HMENU)ID_NAV_MAIN, NULL, NULL);
 
-    // STATUS Tab Button (Between Main and Config)
+    // STATUS Tab Button
     g_hNavStatus = CreateWindowW(L"BUTTON", L"📊  Status",
                                  WS_CHILD | WS_VISIBLE | BS_OWNERDRAW, 12, 58,
                                  124, 36, hWnd, (HMENU)ID_NAV_STATUS, NULL, NULL);
 
-    // CONFIG Tab Button (Between Status and Chat)
+    // CONFIG Tab Button
     g_hNavConfig = CreateWindowW(L"BUTTON", L"🛠️  Config",
                                  WS_CHILD | WS_VISIBLE | BS_OWNERDRAW, 12, 100,
                                  124, 36, hWnd, (HMENU)ID_NAV_CONFIG, NULL, NULL);
 
+    // AGENTS Tab Button (Between Config and Chat)
+    g_hNavAgents = CreateWindowW(L"BUTTON", L"👥  Agents",
+                                 WS_CHILD | WS_VISIBLE | BS_OWNERDRAW, 12, 142,
+                                 124, 36, hWnd, (HMENU)ID_NAV_AGENTS, NULL, NULL);
+
     // Chat Tab Button
     g_hNavChat = CreateWindowW(L"BUTTON", L"💬  Chat",
-                               WS_CHILD | WS_VISIBLE | BS_OWNERDRAW, 12, 142,
+                               WS_CHILD | WS_VISIBLE | BS_OWNERDRAW, 12, 184,
                                124, 36, hWnd, (HMENU)ID_NAV_CHAT, NULL, NULL);
 
     // Auto Voting Tab Button
     g_hNavAutoVoting = CreateWindowW(
         L"BUTTON", L"🗳️  Auto Voting", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW, 12,
-        184, 124, 36, hWnd, (HMENU)ID_NAV_AUTO_VOTING, NULL, NULL);
+        226, 124, 36, hWnd, (HMENU)ID_NAV_AUTO_VOTING, NULL, NULL);
 
     // Music Player Tab Button
     g_hNavMusic = CreateWindowW(L"BUTTON", L"🎵  Music",
-                                WS_CHILD | WS_VISIBLE | BS_OWNERDRAW, 12, 226,
+                                WS_CHILD | WS_VISIBLE | BS_OWNERDRAW, 12, 268,
                                 124, 36, hWnd, (HMENU)ID_NAV_MUSIC, NULL, NULL);
 
     // WEBHOOK Tab Button
     g_hNavWebhook = CreateWindowW(
         L"BUTTON", L"🔔  Webhook", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW, 12,
-        268, 124, 36, hWnd, (HMENU)ID_NAV_WEBHOOK, NULL, NULL);
+        310, 124, 36, hWnd, (HMENU)ID_NAV_WEBHOOK, NULL, NULL);
 
-    // CHANGELOG Tab Button (Positioned right above Settings)
+    // CHANGELOG Tab Button
     g_hNavChangelogs = CreateWindowW(
         L"BUTTON", L"📝  Changelog", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW, 12,
         358, 124, 36, hWnd, (HMENU)ID_NAV_CHANGELOGS, NULL, NULL);
@@ -1524,8 +1875,17 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     // ----------------------------------------------------
     g_hLblWebhookHeader = CreateWindowW(
         L"STATIC", L"Discord Webhook", WS_CHILD,
-        176, 26, 290, 24, hWnd, NULL, NULL, NULL);
+        176, 26, 210, 24, hWnd, NULL, NULL, NULL);
     SendMessageW(g_hLblWebhookHeader, WM_SETFONT, (WPARAM)g_hFontTitle, TRUE);
+
+    g_hLblWebhookToggle = CreateWindowW(
+        L"STATIC", L"Enable", WS_CHILD | SS_RIGHT,
+        340, 28, 76, 18, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblWebhookToggle, WM_SETFONT, (WPARAM)g_hFontHeader, TRUE);
+
+    g_hChkWebhook = CreateWindowW(
+        L"BUTTON", L"", WS_CHILD | BS_OWNERDRAW,
+        422, 26, 44, 22, hWnd, (HMENU)ID_CHK_WEBHOOK, NULL, NULL);
 
     g_hLblWebhookSub = CreateWindowW(
         L"STATIC", L"Get pinged on Discord when your match concludes.", WS_CHILD,
@@ -1590,6 +1950,70 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     SetWindowTextW(g_hEditWebhookUrl, g_webhook_url);
     SetWindowTextW(g_hEditWebhookUserId, g_webhook_user_id);
     LeaveCriticalSection(&g_webhook_lock);
+
+    // ----------------------------------------------------
+    // AGENTS TAB CONTROLS (Agent Selection & Instalock)
+    // ----------------------------------------------------
+    // Card 1: Agent Priority Roster
+    g_hLblAgentsHeader = CreateWindowW(
+        L"STATIC", L"AGENT SELECTION", WS_CHILD,
+        174, 22, 230, 18, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblAgentsHeader, WM_SETFONT, (WPARAM)g_hFontHeader, TRUE);
+
+    g_hBtnAgentsClear = CreateWindowW(
+        L"BUTTON", L"✕ Clear", WS_CHILD | BS_OWNERDRAW,
+        420, 20, 52, 20, hWnd, (HMENU)ID_BTN_AGENTS_CLEAR, NULL, NULL);
+
+    g_hLblAgentsSub = CreateWindowW(
+        L"STATIC", L"Click agents to queue in order of priority", WS_CHILD,
+        174, 42, 296, 16, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblAgentsSub, WM_SETFONT, (WPARAM)g_hFontSmall, TRUE);
+
+    g_hListAgents = CreateWindowExW(
+        0, L"AgentScrollList", L"",
+        WS_CHILD,
+        172, 62, 301, 146, hWnd, (HMENU)ID_LIST_AGENTS, NULL, NULL);
+
+    g_hLblAgentsPriorityVal = CreateWindowW(
+        L"STATIC", L"In Queue: None (Click agents above to queue)", WS_CHILD | SS_LEFT,
+        178, 222, 288, 18, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblAgentsPriorityVal, WM_SETFONT, (WPARAM)g_hFontNormal, TRUE);
+
+    // Card 2: Automation & Locking
+    g_hLblAgentsAutoHeader = CreateWindowW(
+        L"STATIC", L"Settings", WS_CHILD,
+        174, 272, 296, 18, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblAgentsAutoHeader, WM_SETFONT, (WPARAM)g_hFontHeader, TRUE);
+
+    g_hLblInstalockTitle = CreateWindowW(
+        L"STATIC", L"Instalock", WS_CHILD,
+        174, 296, 240, 18, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblInstalockTitle, WM_SETFONT, (WPARAM)g_hFontHeader, TRUE);
+
+    g_hChkInstalock = CreateWindowW(
+        L"BUTTON", L"", WS_CHILD | BS_OWNERDRAW,
+        426, 294, 44, 22, hWnd, (HMENU)ID_CHK_INSTALOCK, NULL, NULL);
+
+    g_hLblInstalockDesc = CreateWindowW(
+        L"STATIC",
+        L"Auto-locks highest available priority agent in Pre-Game.",
+        WS_CHILD, 174, 316, 296, 26, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblInstalockDesc, WM_SETFONT, (WPARAM)g_hFontSmall, TRUE);
+
+    g_hLblStarterFallbackTitle = CreateWindowW(
+        L"STATIC", L"Starter Fallback", WS_CHILD,
+        174, 348, 240, 18, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblStarterFallbackTitle, WM_SETFONT, (WPARAM)g_hFontHeader, TRUE);
+
+    g_hChkStarterFallback = CreateWindowW(
+        L"BUTTON", L"", WS_CHILD | BS_OWNERDRAW,
+        426, 346, 44, 22, hWnd, (HMENU)ID_CHK_STARTER_FALLBACK, NULL, NULL);
+
+    g_hLblStarterFallbackDesc = CreateWindowW(
+        L"STATIC",
+        L"If chosen agents fail, locks Starter Agents.",
+        WS_CHILD, 174, 368, 296, 26, hWnd, NULL, NULL, NULL);
+    SendMessageW(g_hLblStarterFallbackDesc, WM_SETFONT, (WPARAM)g_hFontSmall, TRUE);
 
     switch_tab(0);
     update_status_ui();
@@ -1698,6 +2122,18 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
       RECT rcIdBox = {172, 194, 470, 224};
       draw_rounded_rect(hdc, &rcIdBox, 6, COLOR_INPUT_BG, COLOR_CARD_BORDER, 1);
+    } else if (g_current_tab == 9) {
+      // Agents Tab - Card 1: Agent Priority Roster
+      RECT rcRosterCard = {160, 14, 485, 256};
+      draw_rounded_rect(hdc, &rcRosterCard, 12, COLOR_CARD_BG, COLOR_CARD_BORDER, 1);
+
+      // Priority Queue Box inside Card 1
+      RECT rcPrioBox = {172, 216, 473, 246};
+      draw_rounded_rect(hdc, &rcPrioBox, 6, COLOR_INPUT_BG, COLOR_CARD_BORDER, 1);
+
+      // Agents Tab - Card 2: Automation & Options
+      RECT rcAutoCard = {160, 264, 485, 437};
+      draw_rounded_rect(hdc, &rcAutoCard, 12, COLOR_CARD_BG, COLOR_CARD_BORDER, 1);
     }
 
     // 4. Toast Notification Badge (Bottom-Right Corner)
@@ -1765,6 +2201,61 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     case ID_NAV_SETTINGS:
       switch_tab(4);
       break;
+
+    case ID_NAV_AGENTS:
+      switch_tab(9);
+      break;
+
+    case ID_CHK_WEBHOOK: {
+      int cur = atomic_load(&g_webhook_enabled);
+      atomic_store(&g_webhook_enabled, !cur);
+      save_config();
+      InvalidateRect(g_hChkWebhook, NULL, TRUE);
+      InvalidateRect(g_hLblWebhookToggle, NULL, TRUE);
+      trigger_toast(hWnd, !cur ? L"Webhook Enabled" : L"Webhook Disabled");
+      break;
+    }
+
+    case ID_BTN_AGENTS_CLEAR: {
+      agent_selection_clear();
+      update_agents_tab_ui();
+      save_config();
+      break;
+    }
+
+    case ID_CHK_INSTALOCK: {
+      int is_currently_on = atomic_load(&g_instalock_enabled);
+      if (!is_currently_on) {
+        int res = MessageBoxW(
+            hWnd,
+            L"⚠️ RIOT GAMES TERMS OF SERVICE NOTICE\n\n"
+            L"Automated agent locking tools carry a risk of account penalties or bans under Riot Games' Terms of Service.\n\n"
+            L"Note: If multiple agents are selected, SageBot will attempt to lock them in order of priority.\n\n"
+            L"Do you wish to proceed and enable Instalock?",
+            L"Instalock Warning & Terms Disclaimer",
+            MB_ICONWARNING | MB_YESNO | MB_DEFBUTTON2);
+
+        if (res == IDYES) {
+          atomic_store(&g_instalock_enabled, 1);
+          save_config();
+        } else {
+          atomic_store(&g_instalock_enabled, 0);
+        }
+      } else {
+        atomic_store(&g_instalock_enabled, 0);
+        save_config();
+      }
+      InvalidateRect(g_hChkInstalock, NULL, TRUE);
+      break;
+    }
+
+    case ID_CHK_STARTER_FALLBACK: {
+      int cur = atomic_load(&g_starter_fallback_enabled);
+      atomic_store(&g_starter_fallback_enabled, !cur);
+      save_config();
+      InvalidateRect(g_hChkStarterFallback, NULL, TRUE);
+      break;
+    }
 
     case ID_BTN_MUSIC_PLAY:
       music_toggle();
@@ -2182,12 +2673,51 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     return 0;
   }
 
+  case WM_CTLCOLORLISTBOX: {
+    HDC hdcList = (HDC)wParam;
+    SetBkColor(hdcList, RGB(26, 26, 32));
+    SetTextColor(hdcList, RGB(241, 245, 249));
+    return (INT_PTR)g_hInputBgBrush;
+  }
+
   case WM_CTLCOLORSTATIC:
   case WM_CTLCOLORBTN: {
     HDC hdcStatic = (HDC)wParam;
     HWND hCtl = (HWND)lParam;
 
     SetBkMode(hdcStatic, TRANSPARENT);
+
+    if (hCtl == g_hLblAgentsHeader || hCtl == g_hLblAgentsAutoHeader) {
+      SetTextColor(hdcStatic, RGB(167, 139, 250)); // Soft purple
+      return (INT_PTR)g_hCardBgBrush;
+    }
+
+    if (hCtl == g_hLblInstalockTitle || hCtl == g_hLblStarterFallbackTitle) {
+      SetTextColor(hdcStatic, RGB(255, 255, 255)); // Crisp white
+      return (INT_PTR)g_hCardBgBrush;
+    }
+
+    if (hCtl == g_hLblAgentsPriorityVal) {
+      SetTextColor(hdcStatic, RGB(147, 197, 253)); // Soft crystal blue
+      return (INT_PTR)g_hInputBgBrush;
+    }
+
+    if (hCtl == g_hLblAgentsAutoSave) {
+      SetTextColor(hdcStatic, RGB(52, 211, 153)); // Neon emerald
+      return (INT_PTR)g_hCardBgBrush;
+    }
+
+    if (hCtl == g_hLblAgentsSub || hCtl == g_hLblInstalockDesc ||
+        hCtl == g_hLblStarterFallbackDesc) {
+      SetTextColor(hdcStatic, COLOR_TEXT_SECONDARY);
+      return (INT_PTR)g_hCardBgBrush;
+    }
+
+    if (hCtl == g_hLblWebhookToggle) {
+      int is_on = atomic_load(&g_webhook_enabled);
+      SetTextColor(hdcStatic, is_on ? RGB(52, 211, 153) : COLOR_TEXT_SECONDARY);
+      return (INT_PTR)g_hCardBgBrush;
+    }
 
     if (hCtl == g_hLblStatusVal || hCtl == g_hLblHotkeyVal) {
       if (atomic_load(&g_status)) {
@@ -2395,6 +2925,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
   wcSlider.hCursor = LoadCursor(NULL, IDC_HAND);
   wcSlider.lpszClassName = L"SageBotSlider";
   RegisterClassExW(&wcSlider);
+
+  WNDCLASSEXW wcAgentList = {0};
+  wcAgentList.cbSize = sizeof(WNDCLASSEXW);
+  wcAgentList.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;
+  wcAgentList.lpfnWndProc = AgentScrollListProc;
+  wcAgentList.hInstance = hInstance;
+  wcAgentList.hCursor = LoadCursor(NULL, IDC_ARROW);
+  wcAgentList.lpszClassName = L"AgentScrollList";
+  RegisterClassExW(&wcAgentList);
 
   WNDCLASSEXW wc = {0};
   wc.cbSize = sizeof(WNDCLASSEXW);

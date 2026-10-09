@@ -1,8 +1,7 @@
-[v2.4]
-- Improved update handling with cmd.
-- Updated GetAsyncKeyState() for better usage.
-- Implemented lockfile. Added Player Profile and Match Info.
-- New music updated.
-- added Discord Webhook
+[v2.5]
+- added Agents tab.
+- added Agent Select, Instalock and Fallback.
+- SageBot now auto stops when the game concludes (has been added in v2.4 but forgor to mentioned)
+- added Webhook toggle.
 
-HUGE UPDATE GNG
+Probably needs an UI revamp.

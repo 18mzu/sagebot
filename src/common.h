@@ -20,6 +20,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <math.h>
 #include <uxtheme.h>
 #include <wininet.h>
 #include <olectl.h>
@@ -72,6 +73,7 @@
 #define ID_NAV_MUSIC 1005
 #define ID_NAV_WEBHOOK 1008
 #define ID_NAV_SETTINGS 1004
+#define ID_NAV_AGENTS 1009
 
 #define ID_RADIO_MODE_CLICK 1070
 #define ID_RADIO_MODE_HOLD 1071
@@ -84,6 +86,12 @@
 #define ID_EDIT_WEBHOOK_USER_ID 1081
 #define ID_BTN_WEBHOOK_SAVE 1082
 #define ID_BTN_WEBHOOK_TEST 1083
+#define ID_CHK_WEBHOOK 1084
+
+#define ID_LIST_AGENTS 1090
+#define ID_CHK_INSTALOCK 1091
+#define ID_CHK_STARTER_FALLBACK 1092
+#define ID_BTN_AGENTS_CLEAR 1093
 
 #define ID_BTN_START_STOP 1010
 #define ID_EDIT_LOG 1011
@@ -165,6 +173,7 @@ extern int g_current_tab;
 extern wchar_t g_webhook_url[512];
 extern wchar_t g_webhook_user_id[64];
 extern CRITICAL_SECTION g_webhook_lock;
+extern atomic_int g_webhook_enabled;
 
 extern wchar_t g_config_path[MAX_PATH];
 

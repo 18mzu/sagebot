@@ -238,8 +238,8 @@ void webhook_trigger_match_end(const wchar_t *map_name, const wchar_t *agent_nam
   wcscpy_s(user_id, 64, g_webhook_user_id);
   LeaveCriticalSection(&g_webhook_lock);
 
-  // If no URL configured, skip silently
-  if (!url[0]) return;
+  // If webhook is disabled or no URL configured, skip silently
+  if (!atomic_load(&g_webhook_enabled) || !url[0]) return;
 
   char clean_id[32] = {0};
   int has_valid_user = is_valid_discord_user_id(user_id, clean_id, sizeof(clean_id));
