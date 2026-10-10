@@ -353,7 +353,39 @@ export default function App() {
                     }, 4000);
                   }
                 }
+
+                // 2. Auto Vote (F5/F6 for Surrender and Overtime) 10 seconds after round starts
+                const isOvertime = res.score_ally >= 12 && res.score_enemy >= 12;
+                if (isOvertime) {
+                  if (configRef.current.auto_overtime_vote_mode !== 0) {
+                    setTimeout(() => {
+                      if (!runningRef.current) return;
+                      if (configRef.current.auto_overtime_vote_mode === 1) {
+                        invoke("trigger_vote", { voteYes: true });
+                        addLog(`[VOTING] Overtime Round: Auto-voted DRAW (F5) [10s mark].`);
+                      } else if (configRef.current.auto_overtime_vote_mode === 2) {
+                        invoke("trigger_vote", { voteYes: false });
+                        addLog(`[VOTING] Overtime Round: Auto-voted CONTINUE (F6) [10s mark].`);
+                      }
+                    }, 10000);
+                  }
+                } else {
+                  if (configRef.current.auto_vote_mode !== 0) {
+                    setTimeout(() => {
+                      if (!runningRef.current) return;
+                      if (configRef.current.auto_vote_mode === 1) {
+                        invoke("trigger_vote", { voteYes: true });
+                        addLog(`[VOTING] Round ${currentRound}: Auto-voted YES (F5) [10s mark].`);
+                      } else if (configRef.current.auto_vote_mode === 2) {
+                        invoke("trigger_vote", { voteYes: false });
+                        addLog(`[VOTING] Round ${currentRound}: Auto-voted NO (F6) [10s mark].`);
+                      }
+                    }, 10000);
+                  }
+                }
               }
+            } else {
+              lastScoreSumRef.current = -1;
             }
           } else {
             // VALORANT is either not running or still on loading screen
@@ -550,22 +582,6 @@ export default function App() {
       if (config.anti_afk_mode === 0) {
         invoke("trigger_key_press", { key });
         addLog(`${key} #${count++}`);
-      }
-
-      // Auto-Vote Action (Surrender & Overtime)
-      const isOvertime = status.score_ally >= 12 && status.score_enemy >= 12;
-      if (isOvertime) {
-        if (config.auto_overtime_vote_mode === 1) {
-          invoke("trigger_vote", { voteYes: true }); // F5 - DRAW
-        } else if (config.auto_overtime_vote_mode === 2) {
-          invoke("trigger_vote", { voteYes: false }); // F6 - CONTINUE
-        }
-      } else {
-        if (config.auto_vote_mode === 1) {
-          invoke("trigger_vote", { voteYes: true }); // F5
-        } else if (config.auto_vote_mode === 2) {
-          invoke("trigger_vote", { voteYes: false }); // F6
-        }
       }
 
       // Auto-Chat Action (avoids colliding with /ff surrender initiate)
@@ -1782,7 +1798,7 @@ export default function App() {
                 <div className="card">
                   <div className="pane-title">Auto Surrender</div>
                   <div className="pane-subtitle">
-                    Automatically cast match surrender votes when initiated.
+                    Automatically casts surrender vote (F5/F6) 10 seconds after round start.
                   </div>
 
                   <div className="control-row" style={{ marginTop: "14px" }}>
@@ -1829,7 +1845,7 @@ export default function App() {
                 <div className="card" style={{ marginTop: "12px" }}>
                   <div className="pane-title">Auto Overtime Voting</div>
                   <div className="pane-subtitle">
-                    Automatically cast votes during overtime match point.
+                    Automatically casts overtime vote (DRAW/CONTINUE) 10 seconds after overtime round start.
                   </div>
 
                   <div className="control-row" style={{ marginTop: "14px" }}>
