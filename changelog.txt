@@ -8,3 +8,4 @@
 - Added auto Focus on Game, Auto Queue and Always on Top.
 - Added Auto Derank (BETA).
 - Updated Auto Voting logic.
+- Added Discord Invite

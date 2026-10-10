@@ -133,12 +133,24 @@ body, html, #root {
 
 .version-pill {
   font-size: 10px;
-  font-weight: 600;
-  padding: 2px 7px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid var(--border-subtle);
+  font-weight: 700;
+  padding: 1.5px 7px;
+  background: rgba(16, 185, 129, 0.16);
+  border: 1px solid rgba(16, 185, 129, 0.4);
   border-radius: var(--radius-full);
-  color: var(--text-muted);
+  color: #34d399;
+  letter-spacing: 0.4px;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.version-pill:hover {
+  background: rgba(16, 185, 129, 0.25);
+  border-color: rgba(16, 185, 129, 0.6);
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.35);
 }
 
 .titlebar-right {
@@ -1225,6 +1237,13 @@ input:checked + .slider:before {
   border-color: var(--accent-purple-glow);
   color: #ffffff;
   box-shadow: 0 0 10px rgba(124, 58, 237, 0.35);
+}
+
+.footer-btn-discord:hover {
+  background: rgba(88, 101, 242, 0.25);
+  border-color: #5865f2;
+  color: #ffffff;
+  box-shadow: 0 0 10px rgba(88, 101, 242, 0.45);
 }
 
 .footer-right {
