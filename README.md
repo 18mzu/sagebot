@@ -10,8 +10,7 @@ SageBot is an external, multi-purpose, anti-afk tool for VALORANT.
 
 ![desccomp](assets/proofcomp.jpeg)
 
-![showcases](assets/showcase1.png)
-![showcases](assets/showcase2.png)
+![showcases](assets/showcase.png)
 
 ## How to use?
 1. [Download here.](https://github.com/18mzu/sagebot/releases)
