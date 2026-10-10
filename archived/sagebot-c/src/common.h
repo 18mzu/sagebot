@@ -54,7 +54,7 @@
 #define CHANGELOG_FILE "changelog.txt"
 
 // Version & Updater
-#define APP_VERSION L"2.4"
+#define APP_VERSION L"2.5"
 #define GITHUB_API_URL L"https://api.github.com/repos/18mzu/sagebot/releases/latest"
 
 // Custom Windows Messages
