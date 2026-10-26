@@ -3,6 +3,9 @@ mod config;
 mod webhook;
 mod agents_data;
 mod locker;
+mod tracker;
+mod storefront;
+mod discord_bot;
 
 use config::AppConfig;
 use valorant::{
@@ -11,8 +14,11 @@ use valorant::{
 };
 use agents_data::{AgentInfo, get_all_agents};
 use serde::Serialize;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::State;
+
+pub static IS_BOT_RUNNING: AtomicBool = AtomicBool::new(false);
 
 #[derive(Serialize, Default)]
 pub struct StatusResponse {
@@ -28,11 +34,16 @@ pub struct StatusResponse {
     pub puuid: Option<String>,
     pub match_state: String,
     pub rank_name: String,
+    pub rank_tier: u32,
+    pub rank_rr: i64,
     pub map_name: String,
     pub gamemode: String,
     pub score_ally: i32,
     pub score_enemy: i32,
     pub current_agent: String,
+    pub match_id: Option<String>,
+    pub server_name: String,
+    pub wallet: Option<tracker::WalletBalances>,
 }
 
 pub struct AppState {
@@ -74,12 +85,15 @@ async fn get_client_status() -> Result<StatusResponse, String> {
                     let mut player_tag = None;
                     let mut puuid_val = None;
                     let mut rank_name = "Unranked".to_string();
+                    let mut rank_tier = 0;
                     let mut map_name = "-".to_string();
                     let mut gamemode = "-".to_string();
                     let mut match_state = if game_live { "In Lobby".to_string() } else { "OFFLINE".to_string() };
                     let mut score_ally = 0;
                     let mut score_enemy = 0;
-                    let mut current_agent = valorant::resolve_agent_from_log();
+                    let mut current_agent = "-".to_string();
+                    let mut current_match_id: Option<String> = None;
+                    let mut server_name = String::new();
 
                     // 1. Fetch PUUID from /entitlements/v1/token (primary Riot Client endpoint)
                     if let Ok(ent) = client.get_entitlements().await {
@@ -88,16 +102,20 @@ async fn get_client_status() -> Result<StatusResponse, String> {
                         }
                     }
 
-                    // 2. Fallback to /chat/v1/session if entitlements had no subject
-                    if puuid_val.is_none() {
-                        if let Ok(session) = client.get_session().await {
+                    // 2. Fetch player identity and session details from /chat/v1/session
+                    if let Ok(session) = client.get_session().await {
+                        if puuid_val.is_none() {
                             if let Some(p) = session.get("puuid").and_then(|v| v.as_str()) {
                                 puuid_val = Some(p.to_string());
                             }
-                            if let Some(name) = session.get("game_name").and_then(|v| v.as_str()) {
+                        }
+                        if let Some(name) = session.get("game_name").and_then(|v| v.as_str()) {
+                            if !name.is_empty() {
                                 player_name = Some(name.to_string());
                             }
-                            if let Some(tag) = session.get("game_tag").and_then(|v| v.as_str()) {
+                        }
+                        if let Some(tag) = session.get("game_tag").and_then(|v| v.as_str()) {
+                            if !tag.is_empty() {
                                 player_tag = Some(tag.to_string());
                             }
                         }
@@ -108,7 +126,47 @@ async fn get_client_status() -> Result<StatusResponse, String> {
                         if let Ok(pregame) = client.get_pregame_player(p).await {
                             if let Some(mid) = pregame.get("MatchID").and_then(|v| v.as_str()) {
                                 if !mid.is_empty() {
+                                    current_match_id = Some(mid.to_string());
                                     match_state = "Agent Select".to_string();
+                                    if let Ok(pmatch) = client.get_pregame_match(mid).await {
+                                        if let Some(raw_map) = pmatch.get("MapID").and_then(|v| v.as_str()) {
+                                            let resolved = valorant::resolve_map_name(raw_map);
+                                            if resolved != "-" {
+                                                map_name = resolved;
+                                            }
+                                        }
+                                        if let Some(queue) = pmatch.get("QueueID").and_then(|v| v.as_str()) {
+                                            let resolved_mode = valorant::resolve_gamemode(queue, "", false);
+                                            if resolved_mode != "-" {
+                                                gamemode = resolved_mode;
+                                            }
+                                        }
+                                        if let Some(pod) = pmatch.get("GamePodID").and_then(|v| v.as_str()) {
+                                            let s = tracker::parse_gamepod_to_server_name(pod);
+                                            if !s.is_empty() {
+                                                server_name = s;
+                                            }
+                                        }
+                                        // Extract locked agent during Agent Select from pmatch
+                                        if let Some(teams) = pmatch.get("Teams").and_then(|t| t.as_array()) {
+                                            for team in teams {
+                                                if let Some(players) = team.get("Players").and_then(|pl| pl.as_array()) {
+                                                    for player in players {
+                                                        if player.get("Subject").and_then(|s| s.as_str()) == Some(p.as_str()) {
+                                                            if let Some(char_id) = player.get("CharacterID").and_then(|c| c.as_str()) {
+                                                                if !char_id.is_empty() {
+                                                                    let resolved_agent = valorant::resolve_agent_name_by_id(char_id);
+                                                                    if resolved_agent != "-" && !resolved_agent.is_empty() {
+                                                                        current_agent = resolved_agent;
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -130,23 +188,91 @@ async fn get_client_status() -> Result<StatusResponse, String> {
                         if details.gamemode != "-" {
                             gamemode = details.gamemode;
                         }
-                        if details.rank_name != "Unranked" {
+                        if !details.rank_name.is_empty() && details.rank_name != "-" {
                             rank_name = details.rank_name;
+                            rank_tier = details.rank_tier;
                         }
                         if match_state != "Agent Select" && details.match_state != "LOBBY" {
                             match_state = details.match_state;
                         }
                         score_ally = details.score_ally;
                         score_enemy = details.score_enemy;
-                        if details.agent_name != "-" {
-                            current_agent = details.agent_name;
+                        if match_state == "In Game" {
+                            if details.agent_name != "-" {
+                                current_agent = details.agent_name;
+                            }
+                        } else if match_state != "Agent Select" {
+                            current_agent = "-".to_string();
+                        }
+                    }
+
+                    // 4b. If still in lobby, check direct authoritative GLZ party state to detect In Queue
+                    if match_state == "In Lobby" || match_state == "LOBBY" {
+                        if let Some(ref p) = puuid_val {
+                            if let Ok(p_state) = client.get_player_party_state(p).await {
+                                let p_upper = p_state.to_uppercase();
+                                if p_upper.contains("MATCHMAKING") || p_upper.contains("STARTING") || p_upper.contains("QUEUE") {
+                                    match_state = "In Queue".to_string();
+                                }
+                            }
+                        }
+                    }
+
+                    // 5. If match_id not yet resolved, check core-game player
+                    if current_match_id.is_none() {
+                        if let Some(ref p) = puuid_val {
+                            if let Ok(coregame) = client.get_coregame_player(p).await {
+                                if let Some(mid) = coregame.get("MatchID").and_then(|v| v.as_str()) {
+                                    if !mid.is_empty() {
+                                        current_match_id = Some(mid.to_string());
+                                        if let Ok(cmatch) = client.get_coregame_match(mid).await {
+                                            if let Some(pod) = cmatch.get("GamePodID").and_then(|v| v.as_str()) {
+                                                let s = tracker::parse_gamepod_to_server_name(pod);
+                                                if !s.is_empty() {
+                                                    server_name = s;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
 
                     let is_game_ready = game_live
-                        && player_name.is_some()
-                        && gamemode != "-"
-                        && rank_name != "-";
+                        && (player_name.is_some() || puuid_val.is_some() || match_state != "OFFLINE");
+
+                    let wallet = if let Some(ref p) = puuid_val {
+                        tracker::get_cached_or_fetch_wallet(p).await
+                    } else {
+                        None
+                    };
+
+                    if server_name.is_empty() {
+                        if let Some(ref p) = puuid_val {
+                            if let Ok((access_token, jwt)) = client.get_riot_tokens().await {
+                                let glz_host = valorant::discover_glz_host();
+                                let client_version = valorant::discover_client_version();
+                                if let Ok(req_client) = reqwest::Client::builder().danger_accept_invalid_certs(true).build() {
+                                    server_name = tracker::get_cached_or_fetch_lobby_server(
+                                        &req_client,
+                                        &access_token,
+                                        &jwt,
+                                        p,
+                                        &glz_host,
+                                        &client_version,
+                                    ).await;
+                                }
+                            }
+                        }
+                    }
+
+                    let mut rank_rr: i64 = -1;
+                    if let Some(ref p) = puuid_val {
+                        if let Some(rr) = tracker::get_cached_or_fetch_player_rr(p).await {
+                            rank_rr = rr;
+                        }
+                    }
 
                     Ok(StatusResponse {
                         is_connected: true,
@@ -161,11 +287,16 @@ async fn get_client_status() -> Result<StatusResponse, String> {
                         puuid: puuid_val,
                         match_state,
                         rank_name,
+                        rank_tier,
+                        rank_rr,
                         map_name,
                         gamemode,
                         score_ally,
                         score_enemy,
                         current_agent,
+                        match_id: current_match_id,
+                        server_name,
+                        wallet,
                     })
                 }
                 Err(e) => Ok(StatusResponse {
@@ -203,8 +334,64 @@ async fn fetch_owned_agents() -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
-async fn test_discord_webhook(url: String, user_id: String) -> Result<String, String> {
-    webhook::send_discord_test(&url, &user_id).await
+async fn test_discord_webhook(url: String, user_id: String, bot_token: Option<String>) -> Result<String, String> {
+    webhook::send_discord_test(&url, bot_token.as_deref().unwrap_or(""), &user_id).await
+}
+
+#[tauri::command]
+async fn test_discord_bot(token: String, owner_id: String) -> Result<String, String> {
+    let tok = token.trim();
+    if tok.is_empty() {
+        return Err("Bot Token cannot be empty".to_string());
+    }
+    let client = reqwest::Client::new();
+    let resp = client.get("https://discord.com/api/v10/users/@me")
+        .header("Authorization", format!("Bot {}", tok))
+        .send().await
+        .map_err(|e| format!("Network error: {}", e))?;
+
+    if resp.status().is_success() {
+        if let Ok(json) = resp.json::<serde_json::Value>().await {
+            let username = json.get("username").and_then(|u| u.as_str()).unwrap_or("SageBot");
+            if !owner_id.trim().is_empty() {
+                let _ = webhook::send_bot_dm(tok, &owner_id, "🤖 **SageBot Connected!** Discord Bot DM notifications are linked.").await;
+            }
+            return Ok(format!("Connected as @{}", username));
+        }
+        Ok("Token verified successfully!".to_string())
+    } else {
+        Err(format!("Discord rejected token (HTTP {})", resp.status()))
+    }
+}
+
+#[tauri::command]
+async fn send_webhook_event(
+    message: Option<String>,
+    title: Option<String>,
+    description: Option<String>,
+    _color: Option<u32>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let text = message
+        .or(description)
+        .or(title)
+        .unwrap_or_default();
+    if text.is_empty() {
+        return Ok(());
+    }
+    let (url, bot_token, user_id, enabled) = {
+        if let Ok(cfg) = state.config.lock() {
+            let uid = if !cfg.discord_bot_owner_id.is_empty() { cfg.discord_bot_owner_id.clone() } else { cfg.webhook_user_id.clone() };
+            let is_enabled = cfg.webhook_enabled || cfg.discord_bot_enabled;
+            (cfg.webhook_url.clone(), cfg.discord_bot_token.clone(), uid, is_enabled)
+        } else {
+            return Ok(());
+        }
+    };
+    if enabled && (!url.is_empty() || (!bot_token.is_empty() && !user_id.is_empty())) {
+        webhook::send_unified_discord_notification(&url, &bot_token, &user_id, &text).await?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -234,24 +421,66 @@ async fn lock_agent_now(agent_id: String) -> Result<String, String> {
     }
 }
 
+static APP_HANDLE: std::sync::OnceLock<tauri::AppHandle> = std::sync::OnceLock::new();
+
+pub fn remote_set_bot_running(running: bool) {
+    IS_BOT_RUNNING.store(running, Ordering::SeqCst);
+    if !running {
+        valorant::IS_INGAME_WITH_AGENT.store(false, Ordering::SeqCst);
+    }
+    if let Some(app) = APP_HANDLE.get() {
+        use tauri::Emitter;
+        let _ = app.emit("bot-remote-toggle", serde_json::json!({ "running": running }));
+    }
+}
+
+#[tauri::command]
+fn set_bot_running(running: bool) {
+    remote_set_bot_running(running);
+}
+
+#[tauri::command]
+fn set_ingame_focus_state(in_game_with_agent: bool, _auto_focus: bool) {
+    if !IS_BOT_RUNNING.load(Ordering::Relaxed) {
+        valorant::IS_INGAME_WITH_AGENT.store(false, Ordering::SeqCst);
+        return;
+    }
+    valorant::IS_INGAME_WITH_AGENT.store(in_game_with_agent, Ordering::SeqCst);
+    if in_game_with_agent && !valorant::is_valorant_focused() {
+        valorant::focus_valorant_window();
+    }
+}
+
 #[tauri::command]
 fn trigger_anti_afk_action(mode: String) {
+    if !IS_BOT_RUNNING.load(Ordering::Relaxed) { return; }
+    if !valorant::IS_INGAME_WITH_AGENT.load(Ordering::Relaxed) { return; }
+    if !valorant::is_valorant_focused() { return; }
     simulate_anti_afk_action(&mode);
 }
 
 #[tauri::command]
 fn trigger_vote(vote_yes: bool) {
+    if !IS_BOT_RUNNING.load(Ordering::Relaxed) { return; }
+    if !valorant::IS_INGAME_WITH_AGENT.load(Ordering::Relaxed) { return; }
+    if !valorant::is_valorant_focused() { return; }
     simulate_vote_key(vote_yes);
 }
 
 #[tauri::command]
 fn trigger_key_press(key: String) {
+    if !IS_BOT_RUNNING.load(Ordering::Relaxed) { return; }
+    if !valorant::IS_INGAME_WITH_AGENT.load(Ordering::Relaxed) { return; }
+    if !valorant::is_valorant_focused() { return; }
     let vk = config::key_name_to_vk(&key);
     valorant::send_key_press(vk);
 }
 
 #[tauri::command]
 fn trigger_key_down(key: String) {
+    if !IS_BOT_RUNNING.load(Ordering::Relaxed) { return; }
+    if !valorant::IS_INGAME_WITH_AGENT.load(Ordering::Relaxed) { return; }
+    if !valorant::is_valorant_focused() { return; }
     let vk = config::key_name_to_vk(&key);
     valorant::send_key_down(vk);
 }
@@ -264,7 +493,23 @@ fn trigger_key_up(key: String) {
 
 #[tauri::command]
 fn trigger_chat_send(channel: u32, text: String) {
+    if !IS_BOT_RUNNING.load(Ordering::Relaxed) { return; }
+    if !valorant::IS_INGAME_WITH_AGENT.load(Ordering::Relaxed) { return; }
+    if !valorant::is_valorant_focused() { return; }
     valorant::send_chat_message(channel, &text);
+}
+
+#[tauri::command]
+fn trigger_comms_sequence(hotkey: String, first_num: u32, second_num: u32) {
+    if !IS_BOT_RUNNING.load(Ordering::Relaxed) { return; }
+    if !valorant::IS_INGAME_WITH_AGENT.load(Ordering::Relaxed) { return; }
+    if !valorant::is_valorant_focused() { return; }
+    let hotkey_vk = config::key_name_to_vk(&hotkey);
+    let first_vk = 0x30 + (first_num.clamp(1, 4) as u8);
+    let second_vk = 0x30 + (second_num.clamp(1, 6) as u8);
+    std::thread::spawn(move || {
+        valorant::send_comms_sequence(hotkey_vk, first_vk, second_vk);
+    });
 }
 
 #[tauri::command]
@@ -273,35 +518,243 @@ fn check_hotkey_pressed(key: String) -> bool {
     valorant::is_key_pressed(vk)
 }
 
+fn start_global_hotkey_listener(config_state: Arc<Mutex<AppConfig>>) {
+    std::thread::spawn(move || {
+        let mut was_down = false;
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(60));
+            let key = {
+                if let Ok(cfg) = config_state.lock() {
+                    cfg.hotkey.clone()
+                } else {
+                    "F9".to_string()
+                }
+            };
+            let vk = config::key_name_to_vk(&key);
+            let is_down = valorant::is_key_pressed(vk);
+            if is_down && !was_down {
+                if let Some(app) = APP_HANDLE.get() {
+                    use tauri::Emitter;
+                    let _ = app.emit("global-hotkey-press", ());
+                }
+            }
+            was_down = is_down;
+        }
+    });
+}
+
+#[tauri::command]
+fn check_valorant_focused() -> bool {
+    valorant::is_valorant_focused()
+}
+
 #[tauri::command]
 fn get_changelog() -> String {
     if let Ok(content) = std::fs::read_to_string("changelog.txt") {
         return content;
     }
-    "[v3.0]\r\n- Upgraded to modern desktop architecture (SageBot 3.0).\r\n- Accurate real-time VALORANT process detection.\r\n- Single-instance enforcement (brings existing instance to focus).\r\n- Smooth window dragging on custom titlebar.\r\n- Redesigned sidebar with quick-access icon buttons for Settings and Changelogs.\r\n- Custom icons support.\r\n\r\n[v2.5]\r\n- added Agents tab.\r\n- added Agent Select, Instalock and Fallback.\r\n- SageBot now auto stops when the game concludes (has been added in v2.4 but forgor to mentioned)\r\n- added Webhook toggle.\r\n\r\nProbably needs an UI revamp.".to_string()
+    "[v3.4.1]\r\n- Eliminated 50-60 FPS performance drain: optimized process and window detection with zero-snapshot atomic caching.\r\n- Native background hotkey listener: eliminated continuous IPC polling.\r\n- Throttled background locker and monitor loops when in-game or idle.\r\n- Seamless Auto Initiate Surrender: strictly spams for 10s only and pauses Anti-AFK to prevent input collision.\r\n- Set background process priority to ensure game execution takes full precedence.\r\n\r\n[v3.4]\r\n- Upgraded Live Match Tracker with balanced column centering.\r\n- Squeezed weapon skin names to clean skin titles (e.g. Evori Dreamwings, Reaver).\r\n- Color-coded Win Rate: Green (>50%), Neutral (40-50%), Red (<40%).\r\n- Compact 1020x700 dashboard window size with full-tab vertical scrolling.\r\n- Discord Webhook notification on Rank change.\r\n- Rate limit toast notifications with countdown.\r\n- Rounded party indicator capsules aligned to team divider bars.\r\n\r\n[v3.0]\r\n- Upgraded to modern desktop architecture (SageBot 3.0).\r\n- Accurate real-time VALORANT process detection.\r\n- Single-instance enforcement.\r\n- Smooth window dragging on custom titlebar.\r\n\r\n[v2.5]\r\n- added Agents tab.\r\n- added Agent Select, Instalock and Fallback.\r\n- added Webhook notifications.".to_string()
+}
+
+#[derive(Serialize, Clone, Debug, Default)]
+pub struct UpdateInfo {
+    pub available: bool,
+    pub current_version: String,
+    pub latest_version: String,
+    pub release_notes: String,
+    pub download_url: String,
+    pub release_url: String,
+}
+
+fn is_newer_version(cur: &str, latest: &str) -> bool {
+    let cur = cur.trim_start_matches(|c| c == 'v' || c == 'V');
+    let latest = latest.trim_start_matches(|c| c == 'v' || c == 'V');
+
+    let parse_parts = |s: &str| -> Vec<u32> {
+        s.split('.')
+            .map(|p| p.chars().take_while(|c| c.is_ascii_digit()).collect::<String>())
+            .filter_map(|p| p.parse::<u32>().ok())
+            .collect()
+    };
+
+    let cur_parts = parse_parts(cur);
+    let latest_parts = parse_parts(latest);
+
+    for i in 0..std::cmp::max(cur_parts.len(), latest_parts.len()) {
+        let c = cur_parts.get(i).copied().unwrap_or(0);
+        let l = latest_parts.get(i).copied().unwrap_or(0);
+        if l != c {
+            return l > c;
+        }
+    }
+    false
 }
 
 #[tauri::command]
-async fn check_for_updates() -> Result<String, String> {
+async fn check_for_updates() -> Result<UpdateInfo, String> {
+    const CURRENT_VERSION: &str = "3.4.1";
+
     let client = reqwest::Client::builder()
-        .user_agent("SageBot/3.0")
+        .user_agent(format!("SageBot/{}", CURRENT_VERSION))
         .build()
         .map_err(|e| e.to_string())?;
 
-    match client.get("https://api.github.com/repos/18mzu/sagebot/releases/latest").send().await {
-        Ok(resp) => {
-            if let Ok(json) = resp.json::<serde_json::Value>().await {
-                if let Some(tag) = json.get("tag_name").and_then(|v| v.as_str()) {
-                    if tag == "v3.0" || tag == "3.0" {
-                        return Ok("You are running the latest version: v3.0".to_string());
-                    } else {
-                        return Ok(format!("A newer version is available: {}", tag));
+    let resp = client
+        .get("https://api.github.com/repos/18mzu/sagebot/releases/latest")
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+
+    let tag = json.get("tag_name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let body = json.get("body").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let release_url = json.get("html_url").and_then(|v| v.as_str()).unwrap_or("https://github.com/18mzu/sagebot/releases/latest").to_string();
+
+    let mut download_url = String::new();
+    if let Some(assets) = json.get("assets").and_then(|v| v.as_array()) {
+        // 1. Exact match for sagebot.exe
+        for a in assets {
+            if let Some(name) = a.get("name").and_then(|v| v.as_str()) {
+                if name.eq_ignore_ascii_case("sagebot.exe") {
+                    if let Some(url) = a.get("browser_download_url").and_then(|v| v.as_str()) {
+                        download_url = url.to_string();
+                        break;
                     }
                 }
             }
-            Ok("You are running the latest version: v3.0".to_string())
         }
-        Err(_) => Ok("Could not connect to update server. You are on v3.0".to_string())
+        // 2. Fallback to any sagebot-named exe
+        if download_url.is_empty() {
+            for a in assets {
+                if let Some(name) = a.get("name").and_then(|v| v.as_str()) {
+                    if name.ends_with(".exe") && (name.contains("SageBot") || name.contains("sagebot")) {
+                        if let Some(url) = a.get("browser_download_url").and_then(|v| v.as_str()) {
+                            download_url = url.to_string();
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        if download_url.is_empty() {
+            for a in assets {
+                if let Some(name) = a.get("name").and_then(|v| v.as_str()) {
+                    if name.ends_with(".exe") {
+                        if let Some(url) = a.get("browser_download_url").and_then(|v| v.as_str()) {
+                            download_url = url.to_string();
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let is_newer = is_newer_version(CURRENT_VERSION, &tag);
+
+    Ok(UpdateInfo {
+        available: is_newer,
+        current_version: CURRENT_VERSION.to_string(),
+        latest_version: tag,
+        release_notes: body,
+        download_url,
+        release_url,
+    })
+}
+
+#[tauri::command]
+async fn apply_update(app: tauri::AppHandle, download_url: String) -> Result<(), String> {
+    use std::io::Write;
+    use tauri::Emitter;
+
+    if download_url.is_empty() {
+        return Err("Download URL is empty".to_string());
+    }
+
+    let client = reqwest::Client::builder()
+        .user_agent("SageBot-Updater")
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let mut resp = client.get(&download_url).send().await.map_err(|e| e.to_string())?;
+
+    if !resp.status().is_success() {
+        return Err(format!("Download failed with HTTP status: {}", resp.status()));
+    }
+
+    let total_size = resp.content_length().unwrap_or(0);
+
+    let current_exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let temp_exe = current_exe.with_extension("update_temp.exe");
+
+    let mut file = std::fs::File::create(&temp_exe).map_err(|e| e.to_string())?;
+    let mut downloaded: u64 = 0;
+
+    let _ = app.emit("update-progress", 0u32);
+
+    while let Some(chunk) = resp.chunk().await.map_err(|e| e.to_string())? {
+        file.write_all(&chunk).map_err(|e| e.to_string())?;
+        downloaded += chunk.len() as u64;
+        if total_size > 0 {
+            let percent = (((downloaded as f64) / (total_size as f64)) * 100.0) as u32;
+            let _ = app.emit("update-progress", percent.min(99));
+        }
+    }
+    file.flush().map_err(|e| e.to_string())?;
+    drop(file);
+
+    if downloaded < 1_000_000 {
+        let _ = std::fs::remove_file(&temp_exe);
+        return Err("Downloaded update file is too small or incomplete".to_string());
+    }
+
+    let _ = app.emit("update-progress", 100u32);
+
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+    let current_clean = normalize_windows_path(&current_exe);
+    let temp_clean = normalize_windows_path(&temp_exe);
+
+    // Write a standalone updater batch file in TEMP directory
+    let bat_file = std::env::temp_dir().join(format!("sagebot_updater_{}.bat", std::process::id()));
+    let bat_clean = normalize_windows_path(&bat_file);
+
+    let bat_script = format!(
+        "@echo off\r\n\
+        timeout /t 1 /nobreak > nul\r\n\
+        :retry\r\n\
+        move /y \"{}\" \"{}\" > nul 2>&1\r\n\
+        if errorlevel 1 (\r\n\
+            timeout /t 1 /nobreak > nul\r\n\
+            goto retry\r\n\
+        )\r\n\
+        start \"\" \"{}\"\r\n\
+        del \"%~f0\"\r\n",
+        temp_clean, current_clean, current_clean
+    );
+
+    let _ = std::fs::write(&bat_clean, bat_script);
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        let _ = std::process::Command::new("cmd.exe")
+            .args(["/c", &bat_clean])
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn();
+    }
+
+    std::process::exit(0);
+}
+
+fn normalize_windows_path(p: &std::path::Path) -> String {
+    let s = p.to_string_lossy().to_string();
+    if let Some(stripped) = s.strip_prefix(r"\\?\") {
+        stripped.to_string()
+    } else {
+        s
     }
 }
 
@@ -334,19 +787,28 @@ async fn resize_to_gate(window: tauri::Window) {
 
 #[tauri::command]
 async fn resize_to_dashboard(window: tauri::Window) {
-    let _ = window.set_min_size(Some(tauri::Size::Logical(tauri::LogicalSize { width: 860.0, height: 600.0 })));
-    let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize { width: 960.0, height: 680.0 }));
+    let _ = window.set_min_size(Some(tauri::Size::Logical(tauri::LogicalSize { width: 920.0, height: 620.0 })));
+    let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize { width: 1020.0, height: 700.0 }));
     let _ = window.center();
 }
 
 #[tauri::command]
-async fn start_competitive_queue() -> Result<bool, String> {
+async fn start_matchmaking_queue(queue_mode: Option<String>) -> Result<bool, String> {
+    if !IS_BOT_RUNNING.load(Ordering::Relaxed) {
+        return Ok(false);
+    }
+    let mode = queue_mode.unwrap_or_else(|| "competitive".to_string());
     if let Ok(lockfile) = LockfileData::read_from_disk() {
         if let Ok(client) = ValorantClient::new(lockfile) {
-            return client.start_competitive_queue().await;
+            return client.start_queue(&mode).await;
         }
     }
     Err("VALORANT client not available".to_string())
+}
+
+#[tauri::command]
+async fn start_competitive_queue() -> Result<bool, String> {
+    start_matchmaking_queue(Some("competitive".to_string())).await
 }
 
 #[tauri::command]
@@ -357,6 +819,65 @@ fn set_always_on_top(window: tauri::Window, always_on_top: bool) {
 #[tauri::command]
 fn focus_valorant_window() {
     valorant::focus_valorant_window();
+}
+
+#[tauri::command]
+async fn get_live_match_roster() -> Result<tracker::LiveMatchRoster, String> {
+    let lockfile = LockfileData::read_from_disk()?;
+    let client = ValorantClient::new(lockfile)?;
+    let (access_token, jwt) = client.get_riot_tokens().await?;
+    let ent = client.get_entitlements().await?;
+    let puuid = ent.get("subject")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "Failed to obtain PUUID from entitlements".to_string())?;
+
+    let glz_host = valorant::discover_glz_host();
+    let client_version = valorant::discover_client_version();
+
+    let presences = client.get_presences().await.ok();
+
+    let http_client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    tracker::get_live_match_roster_internal(
+        &http_client,
+        &access_token,
+        &jwt,
+        puuid,
+        &glz_host,
+        &client_version,
+        presences.as_ref(),
+    ).await
+}
+
+#[tauri::command]
+async fn get_latest_completed_match_score() -> Result<tracker::LatestMatchResult, String> {
+    let lockfile = LockfileData::read_from_disk()?;
+    let client = ValorantClient::new(lockfile)?;
+    let (access_token, jwt) = client.get_riot_tokens().await?;
+    let ent = client.get_entitlements().await?;
+    let puuid = ent.get("subject")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "Failed to obtain PUUID from entitlements".to_string())?;
+
+    let glz_host = valorant::discover_glz_host();
+    let client_version = valorant::discover_client_version();
+
+    let http_client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    tracker::fetch_latest_completed_match_internal(
+        &http_client,
+        &access_token,
+        &jwt,
+        puuid,
+        &glz_host,
+        &client_version,
+    ).await
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -426,7 +947,20 @@ pub fn run() {
     // Launch background locker worker
     locker::start_background_locker(Arc::clone(&initial_config));
 
+    // Launch background self-hosted Discord bot worker
+    discord_bot::start_discord_bot_service(Arc::clone(&initial_config));
+
+    // Launch continuous VALORANT window focus monitor
+    valorant::start_focus_monitor();
+
+    // Launch native global hotkey listener (eliminates JS IPC polling overhead)
+    start_global_hotkey_listener(Arc::clone(&initial_config));
+
     tauri::Builder::default()
+        .setup(|app| {
+            let _ = APP_HANDLE.set(app.handle().clone());
+            Ok(())
+        })
         .manage(AppState {
             config: initial_config,
         })
@@ -438,6 +972,9 @@ pub fn run() {
             get_client_status,
             fetch_owned_agents,
             test_discord_webhook,
+            test_discord_bot,
+            set_bot_running,
+            set_ingame_focus_state,
             lock_agent_now,
             trigger_anti_afk_action,
             trigger_vote,
@@ -448,6 +985,7 @@ pub fn run() {
             check_hotkey_pressed,
             get_changelog,
             check_for_updates,
+            apply_update,
             minimize_window,
             close_window,
             start_dragging_window,
@@ -456,7 +994,14 @@ pub fn run() {
             resize_to_dashboard,
             set_always_on_top,
             focus_valorant_window,
-            start_competitive_queue
+            check_valorant_focused,
+            trigger_comms_sequence,
+            start_competitive_queue,
+            start_matchmaking_queue,
+            send_webhook_event,
+            get_live_match_roster,
+            get_latest_completed_match_score,
+            storefront::get_storefront
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

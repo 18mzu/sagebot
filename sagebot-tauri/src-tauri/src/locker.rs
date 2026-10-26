@@ -1,6 +1,6 @@
 use crate::config::AppConfig;
 use crate::valorant::{discover_client_version, discover_glz_host, LockfileData, ValorantClient};
-use crate::webhook::send_match_notification;
+use crate::webhook::send_unified_discord_notification;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -11,10 +11,21 @@ pub fn start_background_locker(config_state: Arc<Mutex<AppConfig>>) {
         let mut match_detected_time: Option<std::time::Instant> = None;
 
         loop {
-            tokio::time::sleep(Duration::from_millis(1000)).await;
+            // Adaptive sleep: throttle down to 3000ms when live in-game with agent or 2500ms when idle
+            let is_bot_active = crate::IS_BOT_RUNNING.load(std::sync::atomic::Ordering::Relaxed);
+            let is_ingame = crate::valorant::IS_INGAME_WITH_AGENT.load(std::sync::atomic::Ordering::Relaxed);
+            let sleep_ms = if !is_bot_active {
+                2500
+            } else if is_ingame {
+                3000
+            } else {
+                1000
+            };
+            tokio::time::sleep(Duration::from_millis(sleep_ms)).await;
 
-            let (agents_enabled, instalock, lock_delay, fallback, selected_agents, webhook_url, webhook_user_id, webhook_enabled) = {
+            let (agents_enabled, instalock, lock_delay, fallback, selected_agents, webhook_url, webhook_user_id, webhook_enabled, webhook_notify_agent_select, bot_token) = {
                 if let Ok(cfg) = config_state.lock() {
+                    let uid = if !cfg.discord_bot_owner_id.is_empty() { cfg.discord_bot_owner_id.clone() } else { cfg.webhook_user_id.clone() };
                     (
                         cfg.agents_enabled,
                         cfg.instalock_enabled,
@@ -22,13 +33,28 @@ pub fn start_background_locker(config_state: Arc<Mutex<AppConfig>>) {
                         cfg.starter_fallback_enabled,
                         cfg.selected_agents.clone(),
                         cfg.webhook_url.clone(),
-                        cfg.webhook_user_id.clone(),
-                        cfg.webhook_enabled,
+                        uid,
+                        cfg.webhook_enabled || cfg.discord_bot_enabled,
+                        cfg.webhook_notify_agent_select,
+                        cfg.discord_bot_token.clone(),
                     )
                 } else {
                     continue;
                 }
             };
+
+            // Ensure locker only executes when SageBot is actively running
+            if !is_bot_active {
+                has_locked_in_match = false;
+                last_match_id.clear();
+                match_detected_time = None;
+                continue;
+            }
+
+            // If already in-game, skip pregame queries
+            if is_ingame {
+                continue;
+            }
 
             // Run locker if either agent selection is enabled (with queued agents) OR starter fallback is enabled
             let has_custom_agents = agents_enabled && !selected_agents.is_empty();
@@ -61,7 +87,7 @@ pub fn start_background_locker(config_state: Arc<Mutex<AppConfig>>) {
                 None => continue,
             };
 
-            let (mut access_token, mut jwt) = match client.get_riot_tokens().await {
+            let (access_token, jwt) = match client.get_riot_tokens().await {
                 Ok(t) => t,
                 Err(_) => continue,
             };
@@ -114,12 +140,8 @@ pub fn start_background_locker(config_state: Arc<Mutex<AppConfig>>) {
                     let elapsed = t0.elapsed();
                     let target_duration = Duration::from_secs(effective_delay_secs);
                     if elapsed < target_duration {
-                        tokio::time::sleep(target_duration - elapsed).await;
-                        // Refresh tokens after sleep to avoid expiration
-                        if let Ok(fresh_tokens) = client.get_riot_tokens().await {
-                            access_token = fresh_tokens.0;
-                            jwt = fresh_tokens.1;
-                        }
+                        // Recheck every tick until target delay has elapsed
+                        continue;
                     }
                 }
             }
@@ -134,7 +156,7 @@ pub fn start_background_locker(config_state: Arc<Mutex<AppConfig>>) {
                     if let Ok(success) = client.lock_agent_glz(&match_id, agent_id, &access_token, &jwt, &glz_host, &client_version).await {
                         if success {
                             locked = true;
-                            locked_agent_id = agent_id.clone();
+                            locked_agent_id = agent_id.to_string();
                             break;
                         }
                     }
@@ -166,14 +188,14 @@ pub fn start_background_locker(config_state: Arc<Mutex<AppConfig>>) {
 
             if locked {
                 has_locked_in_match = true;
-                if webhook_enabled && !webhook_url.is_empty() {
-                    let desc = format!("Successfully locked agent `{}` in match `{}`", locked_agent_id, match_id);
-                    let _ = send_match_notification(
+                if webhook_enabled && webhook_notify_agent_select && (!webhook_url.is_empty() || (!bot_token.is_empty() && !webhook_user_id.is_empty())) {
+                    let agent_name = crate::valorant::resolve_agent_name_by_id(&locked_agent_id);
+                    let desc = format!("Successfully locked **{}**!", agent_name);
+                    let _ = send_unified_discord_notification(
                         &webhook_url,
+                        &bot_token,
                         &webhook_user_id,
-                        "⚡ Agent Locked In!",
                         &desc,
-                        0x10B981,
                     ).await;
                 }
             }

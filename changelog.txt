@@ -1,11 +1,3 @@
-[v3.0]
-- UI revamped. Say hi to Tauri, React, TS and Vite!
-- Goodbye C. Welcome Rust.
-- Completely revamped Agent Select.
-- Sagebot so broke 😩
-- Increased Chat Interval to 3600 seconds.
-- Added Overtime Voting and Auto Initiate Surrender.
-- Added auto Focus on Game, Auto Queue and Always on Top.
-- Added Auto Derank (BETA).
-- Updated Auto Voting logic.
-- Added Discord Invite
+[v3.4.1]
+- improved Performance
+- improved Auto Initiate Surrender

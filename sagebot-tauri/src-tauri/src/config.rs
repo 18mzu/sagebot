@@ -22,16 +22,39 @@ pub struct AppConfig {
     pub webhook_enabled: bool,        // Default true
     pub webhook_url: String,
     pub webhook_user_id: String,
+    pub webhook_notify_disconnect: bool,
+    pub webhook_notify_agent_select: bool,
+    pub webhook_notify_queue: bool,
+    pub webhook_notify_match_start: bool,
+    pub webhook_notify_match_concludes: bool,
+    #[serde(default = "default_true")]
+    pub webhook_notify_rank_change: bool,
     pub agents_enabled: bool,         // Master toggle for Agents Selection
     pub instalock_enabled: bool,
-    pub lock_delay: u64,              // 0 = Instant, or wait N seconds before locking
+    pub lock_delay: u64,              // In seconds (5 to 70)
     pub starter_fallback_enabled: bool,
     pub selected_agents: Vec<String>,
     pub music_volume: u32,            // 0 - 100
     pub auto_focus_game: bool,
     pub always_on_top: bool,
     pub auto_derank_enabled: bool,
+    pub auto_derank_target_rank: String,
+    pub auto_derank_match_limit: u32, // 0 = unlimited
     pub auto_queue_enabled: bool,
+    pub auto_queue_mode: String,      // competitive, unrated, swiftplay, spikerush, deathmatch, hurm, ggteam
+    pub comms_hotkey: String,
+    pub comms_first_num: u32,
+    pub comms_second_num: u32,
+    pub comms_random: bool,
+    pub comms_delay: u64,
+    pub custom_macro_json: String,
+    pub discord_bot_enabled: bool,
+    pub discord_bot_token: String,
+    pub discord_bot_owner_id: String,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for AppConfig {
@@ -55,16 +78,34 @@ impl Default for AppConfig {
             webhook_enabled: true,
             webhook_url: String::new(),
             webhook_user_id: String::new(),
+            webhook_notify_disconnect: true,
+            webhook_notify_agent_select: true,
+            webhook_notify_queue: true,
+            webhook_notify_match_start: true,
+            webhook_notify_match_concludes: true,
+            webhook_notify_rank_change: true,
             agents_enabled: true,
             instalock_enabled: false,
-            lock_delay: 0,
+            lock_delay: 20,
             starter_fallback_enabled: false,
             selected_agents: Vec::new(),
             music_volume: 80,
             auto_focus_game: false,
             always_on_top: false,
             auto_derank_enabled: false,
+            auto_derank_target_rank: String::new(),
+            auto_derank_match_limit: 0,
             auto_queue_enabled: false,
+            auto_queue_mode: "competitive".to_string(),
+            comms_hotkey: ".".to_string(),
+            comms_first_num: 3,
+            comms_second_num: 6,
+            comms_random: false,
+            comms_delay: 5,
+            custom_macro_json: String::new(),
+            discord_bot_enabled: false,
+            discord_bot_token: String::new(),
+            discord_bot_owner_id: String::new(),
         }
     }
 }
@@ -72,6 +113,9 @@ impl Default for AppConfig {
 pub fn key_name_to_vk(name: &str) -> u8 {
     let upper = name.to_uppercase();
     match upper.as_str() {
+        "LCLICK" | "LEFT CLICK" | "MOUSE" | "CLICK" | "LMB" | "MOUSE1" => 0x01,
+        "RCLICK" | "RIGHT CLICK" | "RMB" | "MOUSE2" => 0x02,
+        "MCLICK" | "MIDDLE CLICK" | "MMB" | "MOUSE3" => 0x04,
         "F1" => 0x70,
         "F2" => 0x71,
         "F3" => 0x72,
@@ -88,13 +132,43 @@ pub fn key_name_to_vk(name: &str) -> u8 {
         "SPACE" => 0x20,
         "ENTER" | "RETURN" => 0x0D,
         "ESC" | "ESCAPE" => 0x1B,
-        s if s.len() == 1 => s.bytes().next().unwrap(),
+        "." | "PERIOD" | "OEM_PERIOD" => 0xBE,
+        "," | "COMMA" | "OEM_COMMA" => 0xBC,
+        "/" | "SLASH" => 0xBF,
+        ";" | "SEMICOLON" => 0xBA,
+        "[" | "OPEN_BRACKET" => 0xDB,
+        "]" | "CLOSE_BRACKET" => 0xDD,
+        "'" | "QUOTE" => 0xDE,
+        "-" | "MINUS" => 0xBD,
+        "=" | "EQUALS" => 0xBB,
+        "\\" | "BACKSLASH" => 0xDC,
+        "SHIFT" => 0x10,
+        "CTRL" | "CONTROL" => 0x11,
+        "ALT" => 0x12,
+        "CAPSLOCK" => 0x14,
+        "BACKSPACE" => 0x08,
+        "DELETE" => 0x2E,
+        "UP" | "ARROWUP" => 0x26,
+        "DOWN" | "ARROWDOWN" => 0x28,
+        "LEFT" | "ARROWLEFT" => 0x25,
+        "RIGHT" | "ARROWRIGHT" => 0x27,
+        s if s.len() == 1 => {
+            let b = s.bytes().next().unwrap();
+            if (b >= b'a' && b <= b'z') || (b >= b'A' && b <= b'Z') {
+                b.to_ascii_uppercase()
+            } else {
+                b
+            }
+        }
         _ => 0x78, // default F9
     }
 }
 
 pub fn vk_to_key_name(vk: u8) -> String {
     match vk {
+        0x01 => "LClick".to_string(),
+        0x02 => "RClick".to_string(),
+        0x04 => "MClick".to_string(),
         0x70 => "F1".to_string(),
         0x71 => "F2".to_string(),
         0x72 => "F3".to_string(),
@@ -111,6 +185,12 @@ pub fn vk_to_key_name(vk: u8) -> String {
         0x20 => "Space".to_string(),
         0x0D => "Enter".to_string(),
         0x1B => "Esc".to_string(),
+        0xBE => ".".to_string(),
+        0xBC => ",".to_string(),
+        0xBF => "/".to_string(),
+        0x10 => "Shift".to_string(),
+        0x11 => "Ctrl".to_string(),
+        0x12 => "Alt".to_string(),
         b if (b >= b'A' && b <= b'Z') || (b >= b'0' && b <= b'9') => {
             (b as char).to_string()
         }
@@ -134,7 +214,15 @@ impl AppConfig {
     pub fn load() -> Self {
         let mut cfg = Self::default();
 
-        // 1. Try reading config.ini (C code compatibility)
+        // 1. Primary: Read modern config.json (preserves all settings including comms, macros, autofocus)
+        let path = Self::config_path();
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            if let Ok(json_cfg) = serde_json::from_str::<AppConfig>(&content) {
+                cfg = json_cfg;
+            }
+        }
+
+        // 2. Secondary: If config.ini exists, overlay C legacy values
         let ini_p = Self::ini_path();
         if ini_p.exists() {
             if let Ok(content) = std::fs::read_to_string(&ini_p) {
@@ -173,6 +261,29 @@ impl AppConfig {
                             }
                             ("antiafk", "slowmode") => {
                                 cfg.anti_afk_slow_mode = val == "1";
+                            }
+                            ("antiafk", "commshotkey") => {
+                                if !val.is_empty() {
+                                    cfg.comms_hotkey = val.to_string();
+                                }
+                            }
+                            ("antiafk", "commsfirstnum") => {
+                                if let Ok(n) = val.parse::<u32>() {
+                                    cfg.comms_first_num = n;
+                                }
+                            }
+                            ("antiafk", "commssecondnum") => {
+                                if let Ok(n) = val.parse::<u32>() {
+                                    cfg.comms_second_num = n;
+                                }
+                            }
+                            ("antiafk", "commsrandom") => {
+                                cfg.comms_random = val == "1";
+                            }
+                            ("antiafk", "commsdelay") => {
+                                if let Ok(d) = val.parse::<u64>() {
+                                    cfg.comms_delay = d;
+                                }
                             }
                             ("chat", "enabled") => {
                                 cfg.chat_enabled = val == "1";
@@ -225,15 +336,6 @@ impl AppConfig {
                         }
                     }
                 }
-                return cfg;
-            }
-        }
-
-        // 2. Fallback to reading config.json
-        let path = Self::config_path();
-        if let Ok(content) = std::fs::read_to_string(&path) {
-            if let Ok(json_cfg) = serde_json::from_str::<AppConfig>(&content) {
-                return json_cfg;
             }
         }
 
@@ -247,7 +349,7 @@ impl AppConfig {
             .map_err(|e| format!("Serialization error: {}", e))?;
         let _ = std::fs::write(&path, json);
 
-        // 2. Write config.ini in exact C structure
+        // 2. Write config.ini in exact C structure (with comms settings)
         let ini_p = Self::ini_path();
         let hotkey_vk = key_name_to_vk(&self.hotkey);
         let afk_vk = key_name_to_vk(&self.anti_afk_key);
@@ -268,6 +370,11 @@ impl AppConfig {
             Method={}\r\n\
             Key={}\r\n\
             SlowMode={}\r\n\
+            CommsHotkey={}\r\n\
+            CommsFirstNum={}\r\n\
+            CommsSecondNum={}\r\n\
+            CommsRandom={}\r\n\
+            CommsDelay={}\r\n\
             \r\n\
             [Webhook]\r\n\
             Url={}\r\n\
@@ -289,6 +396,11 @@ impl AppConfig {
             self.anti_afk_mode,
             afk_vk,
             if self.anti_afk_slow_mode { 1 } else { 0 },
+            self.comms_hotkey,
+            self.comms_first_num,
+            self.comms_second_num,
+            if self.comms_random { 1 } else { 0 },
+            self.comms_delay,
             self.webhook_url,
             self.webhook_user_id,
             if self.webhook_enabled { 1 } else { 0 },
