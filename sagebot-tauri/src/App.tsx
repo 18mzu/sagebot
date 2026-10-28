@@ -33,6 +33,7 @@ import {
   Bot,
   Eye,
   GripVertical,
+  History,
 } from "lucide-react";
 import "./App.css";
 
@@ -240,6 +241,18 @@ interface StatusResponse {
   };
 }
 
+interface RecentMatchDetail {
+  result: string;
+  rr_change: number;
+  map_name: string;
+  tier_after: number;
+  tier_name: string;
+  rr_after: number;
+  performance_bonus: number;
+  match_id: string;
+  timestamp: number;
+}
+
 interface TrackedPlayer {
   puuid: string;
   name: string;
@@ -261,6 +274,7 @@ interface TrackedPlayer {
   weapon_skins?: Record<string, string>;
   all_skins: string[];
   recent_games?: string[];
+  recent_matches?: RecentMatchDetail[];
   party_tag?: string;
   is_incognito: boolean;
   is_self: boolean;
@@ -466,6 +480,25 @@ export default function App() {
   // Live Match Tracker State
   const [roster, setRoster] = useState<LiveMatchRoster | null>(null);
   const [isTrackerLoading, setIsTrackerLoading] = useState<boolean>(false);
+  const [selectedPlayerMatches, setSelectedPlayerMatches] = useState<{
+    player: TrackedPlayer;
+    matches: RecentMatchDetail[];
+  } | null>(null);
+
+  const formatMatchTime = (timestampMs: number): string => {
+    if (!timestampMs || timestampMs === 0) return "";
+    const now = Date.now();
+    const diffSec = Math.max(0, Math.floor((now - timestampMs) / 1000));
+    if (diffSec < 60) return "Just now";
+    const diffMin = Math.floor(diffSec / 60);
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffHours = Math.floor(diffMin / 60);
+    if (diffHours < 24) return `${diffHours}h ago`;
+    const diffDays = Math.floor(diffHours / 24);
+    if (diffDays === 1) return "Yesterday";
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return new Date(timestampMs).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  };
   const [selectedWeaponSkin, setSelectedWeaponSkin] = useState<string>("vandal");
   const [showSkinDropdown, setShowSkinDropdown] = useState<boolean>(false);
   const [draggedAgentIdx, setDraggedAgentIdx] = useState<number | null>(null);
@@ -2933,19 +2966,35 @@ export default function App() {
           </div>
         </td>
 
-        {/* 5 RECENT GAMES TREND (Centered) */}
+        {/* 5 RECENT GAMES TREND (Centered & Clickable for full details) */}
         <td style={{ textAlign: "center" }}>
-          <div className="tracker-recent-games-col centered">
+          <div
+            className="tracker-recent-games-col centered"
+            style={{ cursor: player.recent_matches && player.recent_matches.length > 0 ? "pointer" : "default" }}
+            onClick={() => {
+              if (player.recent_matches && player.recent_matches.length > 0) {
+                setSelectedPlayerMatches({ player, matches: player.recent_matches });
+              }
+            }}
+          >
             {player.recent_games && player.recent_games.length > 0 ? (
-              player.recent_games.map((res, idx) => (
-                <span
-                  key={idx}
-                  className={`recent-game-pill pill-${res.toLowerCase()}`}
-                  data-tooltip={res === "W" ? "Victory" : res === "L" ? "Defeat" : "Draw"}
-                >
-                  {res}
-                </span>
-              ))
+              player.recent_games.map((res, idx) => {
+                const detail = player.recent_matches?.[idx];
+                const rrStr = detail ? (detail.rr_change > 0 ? `+${detail.rr_change}` : `${detail.rr_change}`) : "";
+                const tooltipText = detail
+                  ? `${detail.result === "W" ? "Victory" : detail.result === "L" ? "Defeat" : "Draw"} (${rrStr} RR) • ${detail.map_name || "Competitive"}${detail.tier_name ? ` • ${detail.tier_name}` : ""}`
+                  : (res === "W" ? "Victory" : res === "L" ? "Defeat" : "Draw");
+
+                return (
+                  <span
+                    key={idx}
+                    className={`recent-game-pill pill-${res.toLowerCase()}`}
+                    data-tooltip={tooltipText}
+                  >
+                    {res}
+                  </span>
+                );
+              })
             ) : (
               <span className="tracker-val-muted">—</span>
             )}
@@ -6174,6 +6223,163 @@ export default function App() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* Recent Matches Detailed History Modal */}
+      {selectedPlayerMatches && (
+        <div className="modal-backdrop" onClick={() => setSelectedPlayerMatches(null)}>
+          <div
+            className="modal-card recent-matches-modal-card"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: "560px", width: "95%" }}
+          >
+            <div className="modal-header" style={{ justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <History size={20} color="#38bdf8" />
+                <div style={{ display: "flex", flexDirection: "column", textAlign: "left" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <span style={{ fontSize: "15px", fontWeight: 700, color: "#f8fafc" }}>
+                      {selectedPlayerMatches.player.name}
+                    </span>
+                    {selectedPlayerMatches.player.is_self && (
+                      <span className="tracker-party-badge" style={{ background: "rgba(56, 189, 248, 0.2)", color: "#38bdf8" }}>YOU</span>
+                    )}
+                  </div>
+                  <span style={{ fontSize: "12px", color: "#94a3b8" }}>
+                    {selectedPlayerMatches.player.agent_name || "Unknown Agent"} • {selectedPlayerMatches.player.current_rank_name || "Unranked"} ({selectedPlayerMatches.player.current_rr} RR)
+                  </span>
+                </div>
+              </div>
+              <button
+                className="modal-close-btn"
+                onClick={() => setSelectedPlayerMatches(null)}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  color: "#94a3b8",
+                  cursor: "pointer",
+                  fontSize: "18px",
+                  padding: "4px 8px",
+                  borderRadius: "4px"
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="modal-body" style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: "10px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                <span style={{ fontSize: "12px", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                  Recent Competitive Matches ({selectedPlayerMatches.matches.length})
+                </span>
+                <span style={{ fontSize: "11px", color: "#64748b" }}>
+                  Click outside to close
+                </span>
+              </div>
+
+              {selectedPlayerMatches.matches.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "28px 0", color: "#64748b", fontSize: "13px" }}>
+                  No recent competitive games recorded in the last 20 matches.
+                </div>
+              ) : (
+                <div className="recent-matches-list" style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                  {selectedPlayerMatches.matches.map((m, idx) => {
+                    const isWin = m.result === "W";
+                    const isLoss = m.result === "L";
+                    const rrColor = isWin ? "#34d399" : isLoss ? "#fb7185" : "#cbd5e1";
+                    const rrBg = isWin ? "rgba(16, 185, 129, 0.12)" : isLoss ? "rgba(244, 63, 94, 0.12)" : "rgba(148, 163, 184, 0.12)";
+                    const rrBorder = isWin ? "rgba(16, 185, 129, 0.3)" : isLoss ? "rgba(244, 63, 94, 0.3)" : "rgba(148, 163, 184, 0.25)";
+                    const sign = m.rr_change > 0 ? "+" : "";
+
+                    return (
+                      <div
+                        key={m.match_id || idx}
+                        className="recent-match-card"
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          padding: "10px 14px",
+                          borderRadius: "8px",
+                          background: "rgba(255, 255, 255, 0.03)",
+                          border: `1px solid ${rrBorder}`,
+                          boxShadow: "0 2px 6px rgba(0,0,0,0.2)"
+                        }}
+                      >
+                        {/* Result badge + Map name */}
+                        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                          <span
+                            className={`recent-game-pill pill-${m.result.toLowerCase()}`}
+                            style={{ width: "28px", height: "24px", fontSize: "11px", fontWeight: 800 }}
+                          >
+                            {m.result}
+                          </span>
+                          <div style={{ display: "flex", flexDirection: "column" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                              <span style={{ fontWeight: 700, fontSize: "14px", color: "#f8fafc" }}>
+                                {m.map_name || "Competitive Match"}
+                              </span>
+                              {m.performance_bonus > 0 && (
+                                <span
+                                  style={{
+                                    fontSize: "10px",
+                                    fontWeight: 700,
+                                    padding: "1px 5px",
+                                    borderRadius: "3px",
+                                    background: "rgba(234, 179, 8, 0.2)",
+                                    color: "#facc15",
+                                    border: "1px solid rgba(234, 179, 8, 0.4)",
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: "3px"
+                                  }}
+                                  title={`Performance Bonus: +${m.performance_bonus} RR`}
+                                >
+                                  ★ +{m.performance_bonus}
+                                </span>
+                              )}
+                            </div>
+                            <span style={{ fontSize: "11px", color: "#94a3b8" }}>
+                              {m.tier_name ? `${m.tier_name} • ${m.rr_after} RR` : `${m.rr_after} RR`}
+                              {m.timestamp > 0 && ` • ${formatMatchTime(m.timestamp)}`}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* RR Delta */}
+                        <div
+                          style={{
+                            padding: "4px 10px",
+                            borderRadius: "6px",
+                            background: rrBg,
+                            border: `1px solid ${rrBorder}`,
+                            fontWeight: 800,
+                            fontSize: "13px",
+                            color: rrColor,
+                            letterSpacing: "0.3px",
+                            minWidth: "65px",
+                            textAlign: "center"
+                          }}
+                        >
+                          {sign}{m.rr_change} RR
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="modal-actions" style={{ padding: "12px 20px" }}>
+              <button
+                className="modal-btn secondary"
+                onClick={() => setSelectedPlayerMatches(null)}
+                style={{ width: "100%" }}
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

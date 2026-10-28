@@ -162,6 +162,19 @@ pub async fn get_cached_or_fetch_player_rr(puuid: &str) -> Option<i64> {
     None
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct RecentMatchDetail {
+    pub result: String,           // "W", "L", "D"
+    pub rr_change: i64,           // e.g. 21, -14, 0
+    pub map_name: String,         // e.g. "Lotus", "Sunset", "Abyss"
+    pub tier_after: u32,
+    pub tier_name: String,        // e.g. "Silver 2"
+    pub rr_after: i64,
+    pub performance_bonus: i64,
+    pub match_id: String,
+    pub timestamp: u64,           // unix timestamp in ms (MatchStartTime)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrackedPlayer {
     pub puuid: String,
@@ -179,6 +192,7 @@ pub struct TrackedPlayer {
     pub win_rate: f64,              // Win rate %
     pub total_games: u32,           // Total competitive games recorded
     pub recent_games: Vec<String>,  // Up to 5 recent games: "W", "L", "D"
+    pub recent_matches: Vec<RecentMatchDetail>, // Detailed recent matches
     pub primary_skin: String,       // Primary weapon skin
     pub weapon_skins: HashMap<String, String>, // All 21 weapon skins
     pub all_skins: Vec<String>,     // Equipped major skins
@@ -494,6 +508,7 @@ pub struct CachedPlayerData {
     pub win_rate: f64,
     pub total_games: u32,
     pub recent_games: Vec<String>,
+    pub recent_matches: Vec<RecentMatchDetail>,
 }
 
 static PLAYER_DATA_CACHE: std::sync::OnceLock<Arc<RwLock<HashMap<String, (CachedPlayerData, std::time::Instant)>>>> = std::sync::OnceLock::new();
@@ -722,9 +737,10 @@ async fn fetch_player_full_stats(
 
     tokio::time::sleep(std::time::Duration::from_millis(40)).await;
 
-    // 5. Fetch 5 Recent Competitive Games
+    // 5. Fetch Recent Competitive Games (query up to 20 to extract 5 competitive games)
     let mut recent_games = Vec::new();
-    let comp_url = format!("https://{}/mmr/v1/players/{}/competitiveupdates?startIndex=0&endIndex=5", pd_host, puuid);
+    let mut recent_matches = Vec::new();
+    let comp_url = format!("https://{}/mmr/v1/players/{}/competitiveupdates?startIndex=0&endIndex=20", pd_host, puuid);
     let mut comp_req = client.get(&comp_url)
         .header("Authorization", format!("Bearer {}", access_token))
         .header("X-Riot-Entitlements-JWT", jwt)
@@ -748,14 +764,43 @@ async fn fetch_player_full_stats(
         if let Ok(c_json) = c_resp.json::<serde_json::Value>().await {
             if let Some(matches) = c_json.get("Matches").and_then(|m| m.as_array()) {
                 for m in matches {
+                    let queue_id = m.get("QueueID").and_then(|s| s.as_str()).unwrap_or("");
+                    if queue_id != "competitive" {
+                        continue;
+                    }
                     let rr_earned = m.get("RankedRatingEarned").and_then(|r| r.as_i64()).unwrap_or(0);
                     let movement = m.get("CompetitiveMovement").and_then(|s| s.as_str()).unwrap_or("");
-                    if rr_earned > 0 || movement == "INCREASE" {
-                        recent_games.push("W".to_string());
+                    let result = if rr_earned > 0 || movement == "INCREASE" {
+                        "W".to_string()
                     } else if rr_earned < 0 || movement == "DECREASE" {
-                        recent_games.push("L".to_string());
+                        "L".to_string()
                     } else {
-                        recent_games.push("D".to_string());
+                        "D".to_string()
+                    };
+
+                    let perf_bonus = m.get("RankedRatingPerformanceBonus").and_then(|r| r.as_i64()).unwrap_or(0);
+                    let tier_after = m.get("TierAfterUpdate").and_then(|r| r.as_u64()).unwrap_or(0) as u32;
+                    let rr_after = m.get("RankedRatingAfterUpdate").and_then(|r| r.as_i64()).unwrap_or(0);
+                    let map_id = m.get("MapID").and_then(|s| s.as_str()).unwrap_or("");
+                    let map_name = crate::valorant::resolve_map_name(map_id);
+                    let match_id = m.get("MatchID").and_then(|s| s.as_str()).unwrap_or("").to_string();
+                    let timestamp = m.get("MatchStartTime").and_then(|r| r.as_u64()).unwrap_or(0);
+
+                    recent_games.push(result.clone());
+                    recent_matches.push(RecentMatchDetail {
+                        result,
+                        rr_change: rr_earned,
+                        map_name,
+                        tier_after,
+                        tier_name: get_rank_name(tier_after).to_string(),
+                        rr_after,
+                        performance_bonus: perf_bonus,
+                        match_id,
+                        timestamp,
+                    });
+
+                    if recent_matches.len() >= 5 {
+                        break;
                     }
                 }
             }
@@ -772,6 +817,7 @@ async fn fetch_player_full_stats(
         win_rate,
         total_games,
         recent_games,
+        recent_matches,
     };
 
     // Store in cache
@@ -1476,6 +1522,7 @@ async fn parse_coregame_roster(
                 win_rate: pdata.win_rate,
                 total_games: pdata.total_games,
                 recent_games: pdata.recent_games,
+                recent_matches: pdata.recent_matches,
                 primary_skin,
                 weapon_skins,
                 all_skins,
@@ -1714,6 +1761,7 @@ async fn parse_pregame_roster(
                 win_rate: pdata.win_rate,
                 total_games: pdata.total_games,
                 recent_games: pdata.recent_games,
+                recent_matches: pdata.recent_matches,
                 primary_skin,
                 weapon_skins,
                 all_skins,

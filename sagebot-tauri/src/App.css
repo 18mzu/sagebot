@@ -3015,6 +3015,13 @@ input[type="number"] {
   align-items: center;
   justify-content: center;
   gap: 5px;
+  transition: opacity 0.15s ease;
+}
+
+.tracker-recent-games-col:hover .recent-game-pill {
+  transform: translateY(-1px);
+  filter: brightness(1.15);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
 }
 
 .recent-game-pill {
@@ -3029,7 +3036,8 @@ input[type="number"] {
   font-weight: 800;
   line-height: 1;
   user-select: none;
-  cursor: default;
+  cursor: pointer;
+  transition: transform 0.15s ease, filter 0.15s ease, box-shadow 0.15s ease;
 }
 
 .recent-game-pill.pill-w {
@@ -3048,6 +3056,15 @@ input[type="number"] {
   background: rgba(148, 163, 184, 0.2);
   color: #cbd5e1;
   border: 1px solid rgba(148, 163, 184, 0.35);
+}
+
+.recent-match-card {
+  transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+
+.recent-match-card:hover {
+  background: rgba(255, 255, 255, 0.05) !important;
+  transform: translateX(2px);
 }
 
 
