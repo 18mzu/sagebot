@@ -2800,6 +2800,28 @@ input[type="number"] {
   box-shadow: 0 0 8px rgba(139, 92, 246, 0.25);
 }
 
+.tracker-avatar-level-badge {
+  position: absolute;
+  bottom: -3px;
+  right: -3px;
+  background: rgba(15, 23, 42, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  color: #cbd5e1;
+  font-size: 8px;
+  font-weight: 800;
+  padding: 0 3px;
+  min-width: 14px;
+  height: 12px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+  pointer-events: none;
+  z-index: 2;
+}
+
 .tracker-agent-img {
   width: 100%;
   height: 100%;
@@ -2841,13 +2863,19 @@ input[type="number"] {
   font-weight: 600;
   color: #f1f5f9;
   max-width: 200px;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+  position: relative;
+  cursor: default;
 }
 
 .tracker-gamename {
   color: #f8fafc;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-block;
+  vertical-align: bottom;
 }
 
 .tracker-tagline {
@@ -2859,6 +2887,41 @@ input[type="number"] {
   font-size: 9.5px;
   color: #94a3b8;
   font-weight: 500;
+}
+
+.tracker-player-rank-subline {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 1px;
+  cursor: default;
+}
+
+.tracker-rank-img-mini {
+  width: 13px;
+  height: 13px;
+  object-fit: contain;
+  flex-shrink: 0;
+  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.6));
+}
+
+.tracker-rank-text-mini {
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.tracker-rank-dot-mini {
+  color: #64748b;
+  font-size: 10px;
+}
+
+.tracker-rank-rr-mini {
+  font-size: 10px;
+  font-weight: 600;
+  color: #94a3b8;
+  white-space: nowrap;
 }
 
 .tracker-player-badges {
@@ -3002,7 +3065,8 @@ input[type="number"] {
   color: #94a3b8;
 }
 
-.tracker-peak-season {
+.tracker-peak-season,
+.tracker-season-tag {
   font-size: 9.5px;
   color: #94a3b8;
   font-weight: 500;
@@ -3056,6 +3120,20 @@ input[type="number"] {
   background: rgba(148, 163, 184, 0.2);
   color: #cbd5e1;
   border: 1px solid rgba(148, 163, 184, 0.35);
+}
+
+.recent-game-pill.pill-rankup {
+  background: rgba(234, 179, 8, 0.25);
+  color: #facc15;
+  border: 1px solid rgba(234, 179, 8, 0.6);
+  box-shadow: 0 0 6px rgba(234, 179, 8, 0.2);
+}
+
+.recent-game-pill.pill-derank {
+  background: rgba(168, 85, 247, 0.25);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.6);
+  box-shadow: 0 0 6px rgba(168, 85, 247, 0.2);
 }
 
 .recent-match-card {
@@ -4177,5 +4255,7 @@ input[type="number"] {
   font-weight: 600;
   color: #cbd5e1;
 }
+
+
 
 

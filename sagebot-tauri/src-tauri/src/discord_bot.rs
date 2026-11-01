@@ -424,21 +424,27 @@ async fn handle_interaction(
     let _ = client.post(&resp_url).json(&serde_json::json!({ "type": 5 })).send().await;
 
     let app_id = data.get("application_id").and_then(|a| a.as_str()).unwrap_or("");
-    let followup_url = format!("https://discord.com/api/v10/webhooks/{}/{}", app_id, interaction_token);
+    let original_msg_url = format!("https://discord.com/api/v10/webhooks/{}/{}/messages/@original", app_id, interaction_token);
 
     match command_name {
         "ss" => {
             match capture_valorant_screenshot() {
                 Ok(jpeg_bytes) => {
                     let form = reqwest::multipart::Form::new()
-                        .part("file[0]", reqwest::multipart::Part::bytes(jpeg_bytes)
+                        .part("files[0]", reqwest::multipart::Part::bytes(jpeg_bytes)
                             .file_name("valorant.jpg")
-                            .mime_str("image/jpeg").unwrap());
+                            .mime_str("image/jpeg").unwrap())
+                        .text("payload_json", serde_json::json!({
+                            "attachments": [{ "id": 0, "filename": "valorant.jpg" }]
+                        }).to_string());
 
-                    let _ = client.post(&followup_url).multipart(form).send().await;
+                    let res = client.patch(&original_msg_url).multipart(form).send().await;
+                    if let Ok(r) = res {
+                        println!("[DiscordBot] /ss PATCH resp: {}", r.status());
+                    }
                 }
                 Err(e) => {
-                    let _ = client.post(&followup_url).json(&serde_json::json!({
+                    let _ = client.patch(&original_msg_url).json(&serde_json::json!({
                         "content": format!("Screenshot Failed: {}", e)
                     })).send().await;
                 }
@@ -446,20 +452,20 @@ async fn handle_interaction(
         }
         "status" => {
             let status_msg = get_live_status_summary().await;
-            let _ = client.post(&followup_url).json(&serde_json::json!({
+            let _ = client.patch(&original_msg_url).json(&serde_json::json!({
                 "content": status_msg
             })).send().await;
         }
         "start" => {
             crate::remote_set_bot_running(true);
-            let _ = client.post(&followup_url).json(&serde_json::json!({
-                "content": "SageBot started."
+            let _ = client.patch(&original_msg_url).json(&serde_json::json!({
+                "content": "✅ SageBot started."
             })).send().await;
         }
         "stop" => {
             crate::remote_set_bot_running(false);
-            let _ = client.post(&followup_url).json(&serde_json::json!({
-                "content": "SageBot stoped."
+            let _ = client.patch(&original_msg_url).json(&serde_json::json!({
+                "content": "⏸️ SageBot stopped."
             })).send().await;
         }
         _ => {}
@@ -496,14 +502,20 @@ async fn handle_message_create(
         match capture_valorant_screenshot() {
             Ok(jpeg_bytes) => {
                 let form = reqwest::multipart::Form::new()
-                    .part("file[0]", reqwest::multipart::Part::bytes(jpeg_bytes)
+                    .part("files[0]", reqwest::multipart::Part::bytes(jpeg_bytes)
                         .file_name("valorant.jpg")
-                        .mime_str("image/jpeg").unwrap());
+                        .mime_str("image/jpeg").unwrap())
+                    .text("payload_json", serde_json::json!({
+                        "attachments": [{ "id": 0, "filename": "valorant.jpg" }]
+                    }).to_string());
 
-                let _ = client.post(&msg_url)
+                let res = client.post(&msg_url)
                     .header("Authorization", auth_header)
                     .multipart(form)
                     .send().await;
+                if let Ok(r) = res {
+                    println!("[DiscordBot] text ss resp: {}", r.status());
+                }
             }
             Err(e) => {
                 let _ = client.post(&msg_url)
@@ -574,7 +586,12 @@ async fn get_live_status_summary() -> String {
     };
 
     let score_str = if status.score_ally > 0 || status.score_enemy > 0 {
-        format!("Score: Round {} ({} - {})\n", status.score_ally + status.score_enemy + 1, status.score_ally, status.score_enemy)
+        let gm = status.gamemode.to_lowercase();
+        if gm.contains("deathmatch") || gm.contains("hurm") {
+            format!("Score: {} - {}\n", status.score_ally, status.score_enemy)
+        } else {
+            format!("Score: Round {} ({} - {})\n", status.score_ally + status.score_enemy + 1, status.score_ally, status.score_enemy)
+        }
     } else {
         String::new()
     };

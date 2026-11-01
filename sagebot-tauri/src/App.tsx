@@ -37,7 +37,7 @@ import {
 } from "lucide-react";
 import "./App.css";
 
-const APP_VERSION = "3.4.1";
+const APP_VERSION = "3.6";
 
 const COMMS_CATEGORIES = [
   {
@@ -130,7 +130,7 @@ const WEAPON_SKIN_GROUPS = [
   {
     category: "Melee",
     weapons: [
-      { id: "melee", label: "Knife / Melee" },
+      { id: "melee", label: "Melee" },
     ],
   },
 ];
@@ -183,15 +183,18 @@ interface AppConfig {
   webhook_url: string;
   webhook_user_id: string;
   webhook_notify_disconnect?: boolean;
+  webhook_notify_status?: boolean;
   webhook_notify_agent_select?: boolean;
   webhook_notify_queue?: boolean;
   webhook_notify_match_start?: boolean;
   webhook_notify_match_concludes?: boolean;
   webhook_notify_rank_change?: boolean;
+  auto_reconnect?: boolean;
   agents_enabled: boolean;
   instalock_enabled: boolean;
   lock_delay: number;
   starter_fallback_enabled: boolean;
+  lock_random_agent?: boolean;
   selected_agents: string[];
   music_volume: number;
   auto_focus_game?: boolean;
@@ -245,12 +248,20 @@ interface RecentMatchDetail {
   result: string;
   rr_change: number;
   map_name: string;
+  tier_before?: number;
   tier_after: number;
   tier_name: string;
   rr_after: number;
   performance_bonus: number;
   match_id: string;
   timestamp: number;
+  is_rank_up?: boolean;
+  is_derank?: boolean;
+  kills?: number;
+  deaths?: number;
+  assists?: number;
+  kd_ratio?: number;
+  has_kda?: boolean;
 }
 
 interface TrackedPlayer {
@@ -266,6 +277,9 @@ interface TrackedPlayer {
   peak_tier: number;
   peak_rank_name: string;
   peak_season: string;
+  last_season_tier?: number;
+  last_season_rank_name?: string;
+  last_season_name?: string;
   leaderboard_pos?: number;
   headshot_percent?: number;
   win_rate: number;
@@ -275,6 +289,10 @@ interface TrackedPlayer {
   all_skins: string[];
   recent_games?: string[];
   recent_matches?: RecentMatchDetail[];
+  kd_ratio?: number;
+  total_kills?: number;
+  total_deaths?: number;
+  total_assists?: number;
   party_tag?: string;
   is_incognito: boolean;
   is_self: boolean;
@@ -356,6 +374,7 @@ type TabType =
   | "chat"
   | "autovote"
   | "music"
+  | "media"
   | "webhook"
   | "changelog"
   | "settings"
@@ -374,6 +393,7 @@ export default function App() {
   const [storefront, setStorefront] = useState<StorefrontData | null>(null);
   const [isStoreLoading, setIsStoreLoading] = useState<boolean>(false);
   const [selectedBundleIdx, setSelectedBundleIdx] = useState<number>(0);
+
   const [status, setStatus] = useState<StatusResponse>({
     is_connected: false,
     game_live: false,
@@ -410,11 +430,13 @@ export default function App() {
     webhook_url: "",
     webhook_user_id: "",
     webhook_notify_disconnect: true,
+    webhook_notify_status: true,
     webhook_notify_agent_select: true,
     webhook_notify_queue: true,
     webhook_notify_match_start: true,
     webhook_notify_match_concludes: true,
     webhook_notify_rank_change: true,
+    auto_reconnect: false,
     agents_enabled: true,
     instalock_enabled: false,
     lock_delay: 20,
@@ -468,7 +490,6 @@ export default function App() {
   const [toasts, setToasts] = useState<ToastMsg[]>([]);
   const [showKillModal, setShowKillModal] = useState<boolean>(false);
   const [showChatWarningModal, setShowChatWarningModal] = useState<boolean>(false);
-  const [showFullyAutoPlayWarningModal, setShowFullyAutoPlayWarningModal] = useState<boolean>(false);
   const [errorModal, setErrorModal] = useState<{ title: string; message: string; submessage?: string } | null>(null);
 
   // In-App Auto Updater State
@@ -484,6 +505,32 @@ export default function App() {
     player: TrackedPlayer;
     matches: RecentMatchDetail[];
   } | null>(null);
+
+  useEffect(() => {
+    if (!selectedPlayerMatches || !selectedPlayerMatches.player?.puuid) return;
+    const missing = selectedPlayerMatches.matches.some((m) => !m.has_kda);
+    if (!missing) return;
+
+    let active = true;
+    invoke<RecentMatchDetail[]>("fetch_player_match_kdas", {
+      matches: selectedPlayerMatches.matches,
+      puuid: selectedPlayerMatches.player.puuid,
+    })
+      .then((updated) => {
+        if (!active) return;
+        setSelectedPlayerMatches((prev) => {
+          if (!prev || prev.player.puuid !== selectedPlayerMatches.player.puuid) return prev;
+          return { ...prev, matches: updated };
+        });
+      })
+      .catch((e) => {
+        console.warn("fetch_player_match_kdas failed:", e);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [selectedPlayerMatches?.player?.puuid]);
 
   const formatMatchTime = (timestampMs: number): string => {
     if (!timestampMs || timestampMs === 0) return "";
@@ -538,7 +585,19 @@ export default function App() {
           showToast(`Too many requests. Try again in ${res.rate_limit_seconds}s.`);
         }
         if (res.ally_team.length > 0 || res.enemy_team.length > 0 || res.state !== "NO_MATCH") {
+          const isComp = (res.gamemode || status.gamemode || "").toLowerCase().includes("competitive");
+          if (isComp && res.ally_team.length === 5 && res.enemy_team.length === 5) {
+            const allyTag = res.ally_team[0]?.party_tag;
+            if (allyTag && res.ally_team.every((p) => p.party_tag === allyTag)) {
+              const enemyTag = allyTag === "Party 1" ? "Party 2" : "Party 1";
+              res.enemy_team.forEach((p) => {
+                p.party_tag = enemyTag;
+              });
+            }
+          }
           setRoster(res);
+        } else if (res.state === "NO_MATCH") {
+          setRoster((prev) => (prev && (prev.state === "COREGAME" || prev.state === "PREGAME") ? { ...prev, state: "CONCLUDED" } : prev));
         }
         // Webhook notification on rank change
         const self = res.ally_team.find((p) => p.is_self);
@@ -664,6 +723,7 @@ export default function App() {
   const preAutoDerankStateRef = useRef<{
     auto_queue_enabled: boolean;
     starter_fallback_enabled: boolean;
+    lock_random_agent?: boolean;
     auto_focus_game: boolean;
   }>({
     auto_queue_enabled: false,
@@ -713,6 +773,7 @@ export default function App() {
   });
   const disconnectCountRef = useRef<number>(0);
   const lobbyCountRef = useRef<number>(0);
+  const isReconnectingRef = useRef<boolean>(false);
 
   // Audio Player State
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -747,7 +808,7 @@ export default function App() {
   // Discord Notification Dispatcher
   const triggerWebhookEvent = (
     message: string,
-    eventType: "disconnect" | "agent_select" | "queue" | "match_start" | "match_concludes" | "bot_status" | "rank_change"
+    eventType: "disconnect" | "agent_select" | "queue" | "match_start" | "match_concludes" | "bot_status" | "rank_change" | "status"
   ) => {
     const cfg = configRef.current;
     const isEnabled = (cfg.webhook_enabled || cfg.discord_bot_enabled) ?? false;
@@ -755,10 +816,7 @@ export default function App() {
     if (!isEnabled || !hasTarget) return;
 
     if (eventType === "disconnect" && cfg.webhook_notify_disconnect === false) return;
-    if (eventType === "agent_select" && cfg.webhook_notify_agent_select === false) return;
-    if (eventType === "queue" && cfg.webhook_notify_queue === false) return;
-    if (eventType === "match_start" && cfg.webhook_notify_match_start === false) return;
-    if (eventType === "match_concludes" && cfg.webhook_notify_match_concludes === false) return;
+    if ((eventType === "agent_select" || eventType === "queue" || eventType === "match_start" || eventType === "match_concludes" || eventType === "status") && cfg.webhook_notify_status === false) return;
     if (eventType === "rank_change" && cfg.webhook_notify_rank_change === false) return;
 
     invoke("send_webhook_event", { message }).catch(() => { });
@@ -1168,8 +1226,20 @@ export default function App() {
           if (res.match_state === "In Queue") {
             if (prevMatchStateRef.current !== "In Queue") {
               prevMatchStateRef.current = "In Queue";
-              const qMode = configRef.current.auto_queue_mode || "competitive";
-              const formattedMode = qMode.charAt(0).toUpperCase() + qMode.slice(1);
+              const rawMode = (res.gamemode && res.gamemode !== "-" && res.gamemode !== "")
+                ? res.gamemode
+                : (configRef.current.auto_queue_mode || "competitive");
+              const formattedMode = rawMode.toLowerCase() === "hurm" || rawMode.toLowerCase() === "team deathmatch"
+                ? "Team Deathmatch"
+                : rawMode.toLowerCase() === "spikerush" || rawMode.toLowerCase() === "spike rush"
+                  ? "Spike Rush"
+                  : rawMode.toLowerCase() === "deathmatch"
+                    ? "Deathmatch"
+                    : rawMode.toLowerCase() === "ggteam" || rawMode.toLowerCase() === "escalation"
+                      ? "Escalation"
+                      : rawMode.toLowerCase() === "competitive"
+                        ? "Competitive"
+                        : rawMode.charAt(0).toUpperCase() + rawMode.slice(1);
               triggerWebhookEvent(
                 `Finding **${formattedMode}** Match...`,
                 "queue"
@@ -1220,6 +1290,9 @@ export default function App() {
           const isDisconnected = !res.is_connected || !res.game_live;
           if (isDisconnected) {
             disconnectCountRef.current += 1;
+            // When disconnected, game is no longer in a match lobby - prevent false concluded trigger
+            wasInMatchRef.current = false;
+            lobbyCountRef.current = 0;
             if (gatePassed && disconnectCountRef.current < 4) {
               return;
             }
@@ -1248,11 +1321,31 @@ export default function App() {
                 "VALORANT disconnected.",
                 "disconnect"
               );
+
+              // Auto Reconnect execution
+              if (configRef.current.auto_reconnect && !isReconnectingRef.current) {
+                isReconnectingRef.current = true;
+                triggerWebhookEvent("Rejoining...", "disconnect");
+                addLog("[RECONNECT] Auto Reconnect triggered. Relaunching VALORANT via Riot Client...");
+                invoke("launch_valorant")
+                  .then(() => {
+                    addLog("[RECONNECT] VALORANT launched. Waiting to rejoin match...");
+                  })
+                  .catch((err) => {
+                    addLog(`[RECONNECT] Failed to launch VALORANT: ${err}`);
+                  })
+                  .finally(() => {
+                    setTimeout(() => {
+                      isReconnectingRef.current = false;
+                    }, 15000);
+                  });
+              }
             } else {
               setGateGameFound(false);
             }
           } else {
             disconnectCountRef.current = 0;
+            isReconnectingRef.current = false;
             // VALORANT is connected and process is running!
             if (!gatePassed) {
               const isReady =
@@ -1360,6 +1453,8 @@ export default function App() {
           }
           const wasEverReady = wasGameReadyRef.current || gatePassed;
           if (wasEverReady) {
+            wasInMatchRef.current = false;
+            lobbyCountRef.current = 0;
             wasGameReadyRef.current = false;
             suppressDetectionUntilRef.current = Date.now() + 10000;
             setGateGameFound(false);
@@ -1378,6 +1473,25 @@ export default function App() {
               "VALORANT disconnected.",
               "disconnect"
             );
+
+            // Auto Reconnect execution
+            if (configRef.current.auto_reconnect && !isReconnectingRef.current) {
+              isReconnectingRef.current = true;
+              triggerWebhookEvent("Rejoining...", "disconnect");
+              addLog("[RECONNECT] Auto Reconnect triggered. Relaunching VALORANT via Riot Client...");
+              invoke("launch_valorant")
+                .then(() => {
+                  addLog("[RECONNECT] VALORANT launched. Waiting to rejoin match...");
+                })
+                .catch((err) => {
+                  addLog(`[RECONNECT] Failed to launch VALORANT: ${err}`);
+                })
+                .finally(() => {
+                  setTimeout(() => {
+                    isReconnectingRef.current = false;
+                  }, 15000);
+                });
+            }
           } else {
             setGateGameFound(false);
           }
@@ -2562,8 +2676,8 @@ export default function App() {
             const step = nextRow
               ? (nextRow.offsetTop - row.offsetTop)
               : prevRow
-              ? (row.offsetTop - prevRow.offsetTop)
-              : (row.offsetHeight + 5);
+                ? (row.offsetTop - prevRow.offsetTop)
+                : (row.offsetHeight + 5);
             const diff = toIdx - fromIdx;
             dragStartYRef.current += diff * step;
             setDragOffsetY(e.clientY - dragStartYRef.current);
@@ -2769,9 +2883,13 @@ export default function App() {
     if (lower.includes("sage")) return "#2fe5a8";
     if (lower.includes("killjoy")) return "#ffde00";
     if (lower.includes("cypher")) return "#cfd6e0";
-    if (lower.includes("chamber")) return "#d1a545";
     if (lower.includes("deadlock")) return "#7698b3";
     if (lower.includes("vyse")) return "#9e74a2";
+    if (lower.includes("hush")) return "#e056fd";
+    if (lower.includes("waylay")) return "#e74c3c";
+    if (lower.includes("tejo")) return "#e58e26";
+    if (lower.includes("veto")) return "#6c5ce7";
+    if (lower.includes("miks")) return "#3498db";
     return "#a78bfa";
   };
 
@@ -2810,8 +2928,14 @@ export default function App() {
     status.match_state.toUpperCase().includes("IN GAME") ||
     status.match_state.toUpperCase().includes("GAME");
 
+  const isDeathmatchOrTdm =
+    (status.gamemode && (status.gamemode.toLowerCase().includes("deathmatch") || status.gamemode.toLowerCase().includes("hurm") || status.gamemode.toLowerCase().includes("tdm"))) ||
+    (roster?.gamemode && (roster.gamemode.toLowerCase().includes("deathmatch") || roster.gamemode.toLowerCase().includes("hurm") || roster.gamemode.toLowerCase().includes("tdm")));
+
   const roundDisplay = isMatchInGame
-    ? `Round ${currentRoundNum} (${status.score_ally} - ${status.score_enemy})`
+    ? isDeathmatchOrTdm
+      ? `Score: ${status.score_ally} - ${status.score_enemy}`
+      : `Round ${currentRoundNum} (${status.score_ally} - ${status.score_enemy})`
     : status.match_state && status.match_state !== "OFFLINE"
       ? status.match_state
       : "-";
@@ -2869,6 +2993,9 @@ export default function App() {
               ) : (
                 <div className="tracker-agent-placeholder">?</div>
               )}
+              {player.level > 0 && (
+                <span className="tracker-avatar-level-badge">{player.level}</span>
+              )}
             </div>
             <div className="tracker-player-details">
               <div className="tracker-player-top-line">
@@ -2877,7 +3004,7 @@ export default function App() {
                   {tagLine && <span className="tracker-tagline">#{tagLine}</span>}
                 </span>
                 <div className="tracker-player-badges">
-                  {player.is_incognito && (
+                  {player.is_incognito && (cleanRawName.startsWith("Player ") || cleanRawName === "Player" || !hasTag) && (
                     <span
                       className="tracker-badge-incognito"
                       data-tooltip="Player hides their name"
@@ -2888,41 +3015,37 @@ export default function App() {
                   )}
                 </div>
               </div>
-              <div className="tracker-player-sub-line">
-                {player.level > 0 && (
-                  <span className="tracker-player-level">Lvl {player.level}</span>
+              <div
+                className="tracker-player-rank-subline"
+                data-tooltip={
+                  player.current_tier > 0
+                    ? `${player.current_rank_name} • ${player.current_rr} RR`
+                    : "Unranked"
+                }
+              >
+                <img
+                  className="tracker-rank-img-mini"
+                  src={getRankIconUrl(player.current_tier)}
+                  alt=""
+                />
+                <span
+                  className="tracker-rank-text-mini"
+                  style={{ color: getRankColor(player.current_rank_name) }}
+                >
+                  {player.current_rank_name || "Unranked"}
+                </span>
+                {player.current_tier > 0 && (
+                  <>
+                    <span className="tracker-rank-dot-mini">•</span>
+                    <span className="tracker-rank-rr-mini">{player.current_rr} RR</span>
+                  </>
                 )}
               </div>
             </div>
           </div>
         </td>
 
-        {/* CURRENT RANK (Aligned vertically across rows) */}
-        <td style={{ textAlign: "center" }}>
-          <div
-            className="tracker-rank-col aligned"
-            data-tooltip={`${player.current_rank_name}${player.current_tier > 0 ? ` (${player.current_rr} RR)` : ""}`}
-          >
-            <img
-              src={getRankIconUrl(player.current_tier)}
-              className="tracker-rank-icon"
-              alt=""
-            />
-            <div className="tracker-rank-meta">
-              <span
-                className="tracker-rank-name"
-                style={{ color: getRankColor(player.current_rank_name) }}
-              >
-                {player.current_rank_name}
-              </span>
-              {player.current_tier > 0 && (
-                <span className="tracker-rr-val">{player.current_rr} RR</span>
-              )}
-            </div>
-          </div>
-        </td>
-
-        {/* PEAK RANK (Aligned vertically across rows) */}
+        {/* PEAK RANK (Moved to column 2) */}
         <td style={{ textAlign: "center" }}>
           <div
             className="tracker-peak-col aligned"
@@ -2944,6 +3067,37 @@ export default function App() {
                 <span className="tracker-peak-season">{player.peak_season}</span>
               )}
             </div>
+          </div>
+        </td>
+
+        {/* K/D RATE (Column 3) */}
+        <td style={{ textAlign: "center" }}>
+          <div
+            className="tracker-wr-col centered"
+            data-tooltip={
+              (player.total_kills || 0) > 0 || (player.total_deaths || 0) > 0
+                ? `${player.total_kills || 0} K / ${player.total_deaths || 0} D (${(player.kd_ratio ?? 0).toFixed(2)} K/D)`
+                : "Recent K/D Rate"
+            }
+          >
+            {(player.kd_ratio ?? 0) > 0 || (player.total_deaths ?? 0) > 0 ? (
+              <span
+                className="tracker-wr-val"
+                style={{
+                  fontWeight: 700,
+                  color:
+                    (player.kd_ratio ?? 0) >= 1.05
+                      ? "#34d399"
+                      : (player.kd_ratio ?? 0) < 0.95
+                        ? "#fb7185"
+                        : "#f8fafc"
+                }}
+              >
+                {(player.kd_ratio ?? 0).toFixed(2)}
+              </span>
+            ) : (
+              <span className="tracker-val-muted">—</span>
+            )}
           </div>
         </td>
 
@@ -2978,17 +3132,23 @@ export default function App() {
             }}
           >
             {player.recent_games && player.recent_games.length > 0 ? (
-              player.recent_games.map((res, idx) => {
+              player.recent_games.slice(0, 5).map((res, idx) => {
                 const detail = player.recent_matches?.[idx];
                 const rrStr = detail ? (detail.rr_change > 0 ? `+${detail.rr_change}` : `${detail.rr_change}`) : "";
                 const tooltipText = detail
-                  ? `${detail.result === "W" ? "Victory" : detail.result === "L" ? "Defeat" : "Draw"} (${rrStr} RR) • ${detail.map_name || "Competitive"}${detail.tier_name ? ` • ${detail.tier_name}` : ""}`
+                  ? `${detail.map_name || "Competitive"} ${rrStr} RR`
                   : (res === "W" ? "Victory" : res === "L" ? "Defeat" : "Draw");
+
+                const pillClass = detail?.is_rank_up
+                  ? "pill-rankup"
+                  : detail?.is_derank
+                    ? "pill-derank"
+                    : `pill-${res.toLowerCase()}`;
 
                 return (
                   <span
                     key={idx}
-                    className={`recent-game-pill pill-${res.toLowerCase()}`}
+                    className={`recent-game-pill ${pillClass}`}
                     data-tooltip={tooltipText}
                   >
                     {res}
@@ -3029,7 +3189,6 @@ export default function App() {
             e.stopPropagation();
             setShowSkinDropdown((prev) => !prev);
           }}
-          data-tooltip="Select weapon to preview skins"
         >
           <span>{selectedWeaponLabel}</span>
           <svg
@@ -3168,7 +3327,7 @@ export default function App() {
               </div>
 
               <h1 className="gate-title">SageBot</h1>
-              <p className="gate-subtitle">VALORANT External & Utilities • v{APP_VERSION}</p>
+              <p className="gate-subtitle">VALORANT External &amp; Utilities • v{APP_VERSION}</p>
 
               <div className="gate-status-card">
                 {gateGameFound === null && (
@@ -3309,15 +3468,9 @@ export default function App() {
 
         {/* Main Body with Sidebar + Tab Content */}
         <div className="main-content">
-          {/* Navigation Sidebar (8 core tabs; Settings & Changelog housed in footer) */}
+          {/* Navigation Sidebar */}
           <div className="nav-sidebar">
-            <button
-              className={`nav-btn ${activeTab === "main" ? "active" : ""}`}
-              onClick={() => setActiveTab("main")}
-            >
-              <Play size={14} fill={activeTab === "main" ? "currentColor" : "none"} />
-              <span>Main</span>
-            </button>
+            {/* Top group: Tracker, Shop */}
             <button
               className={`nav-btn ${activeTab === "tracker" ? "active" : ""}`}
               onClick={() => {
@@ -3355,6 +3508,18 @@ export default function App() {
               <ShoppingBag size={14} />
               <span>Shop</span>
             </button>
+
+            {/* Divider */}
+            <div className="sidebar-divider" style={{ margin: "6px 4px" }} />
+
+            {/* Core Tools: Main, Config, Agents, Chat, Voting, Discord */}
+            <button
+              className={`nav-btn ${activeTab === "main" ? "active" : ""}`}
+              onClick={() => setActiveTab("main")}
+            >
+              <Play size={14} fill={activeTab === "main" ? "currentColor" : "none"} />
+              <span>Main</span>
+            </button>
             <button
               className={`nav-btn ${activeTab === "config" ? "active" : ""}`}
               onClick={() => setActiveTab("config")}
@@ -3384,22 +3549,24 @@ export default function App() {
               <span>Voting</span>
             </button>
             <button
-              className={`nav-btn ${activeTab === "music" ? "active" : ""}`}
-              onClick={() => setActiveTab("music")}
-            >
-              <Music size={14} />
-              <span>Music</span>
-            </button>
-            <button
               className={`nav-btn ${activeTab === "webhook" ? "active" : ""}`}
               onClick={() => setActiveTab("webhook")}
             >
               <Bot size={14} />
               <span>Discord</span>
             </button>
+
+            {/* Bottom group: Media & Info (no divider line between them) */}
+            <button
+              className={`nav-btn ${activeTab === "media" || activeTab === "music" ? "active" : ""}`}
+              style={{ marginTop: "auto" }}
+              onClick={() => setActiveTab("media")}
+            >
+              <Music size={14} />
+              <span>Media</span>
+            </button>
             <button
               className={`nav-btn ${activeTab === "info" ? "active" : ""}`}
-              style={{ marginTop: "auto" }}
               onClick={() => setActiveTab("info")}
             >
               <Info size={14} />
@@ -3416,8 +3583,7 @@ export default function App() {
                   <div className="status-row">
                     <span className="status-label">STATUS:</span>
                     <span
-                      className={`status-value ${isRunning ? "val-running" : "val-stopped"
-                        }`}
+                      className={`status-value ${isRunning ? "val-running" : "val-stopped"}`}
                     >
                       {isRunning ? "RUNNING" : "STOPPED"}
                     </span>
@@ -3429,8 +3595,7 @@ export default function App() {
                 </div>
 
                 <button
-                  className={`primary-action-btn ${isRunning ? "btn-stop" : "btn-start"
-                    }`}
+                  className={`primary-action-btn ${isRunning ? "btn-stop" : "btn-start"}`}
                   onClick={() => {
                     if (isRunning) stopSagebot();
                     else startSagebot();
@@ -3467,7 +3632,7 @@ export default function App() {
                     <div className="tracker-title-row">
                       <Radar size={15} className="tracker-radar-icon" />
                       <span className="tracker-title">Match Tracker</span>
-                      {roster && (status.match_state === "In Lobby" || status.match_state.toUpperCase().includes("LOBBY") || status.match_state.toUpperCase().includes("MENU")) ? (
+                      {roster && (roster.state === "CONCLUDED" || status.match_state === "In Lobby" || status.match_state.toUpperCase().includes("LOBBY") || status.match_state.toUpperCase().includes("MENU") || status.match_state === "In Queue") ? (
                         <span className="tracker-status-tag tag-concluded">MATCH CONCLUDED</span>
                       ) : roster?.state === "COREGAME" ? (
                         <span className="tracker-status-tag tag-coregame">IN MATCH</span>
@@ -3559,10 +3724,10 @@ export default function App() {
                         <thead>
                           <tr>
                             <th style={{ width: "24%", textAlign: "left" }}>PLAYER</th>
-                            <th style={{ width: "16%", textAlign: "center" }}>CURRENT RANK</th>
                             <th style={{ width: "16%", textAlign: "center" }}>PEAK RANK</th>
+                            <th style={{ width: "16%", textAlign: "center" }}>K/D</th>
                             <th style={{ width: "12%", textAlign: "center" }}>WIN RATE</th>
-                            <th style={{ width: "13%", textAlign: "center" }}>RECENT</th>
+                            <th style={{ width: "13%", textAlign: "center" }}>RECENT COMPS</th>
                             <th style={{ width: "19%", textAlign: "center" }}>
                               {renderSkinDropdown()}
                             </th>
@@ -3581,7 +3746,7 @@ export default function App() {
                                   return avg.tier > 0 ? (
                                     <span
                                       className="team-avg-badge"
-                                      data-tooltip="Team Average Rank calculated from active/peak competitive tiers"
+                                      data-tooltip="Average Rank"
                                     >
                                       <img
                                         src={getRankIconUrl(avg.tier)}
@@ -3615,7 +3780,7 @@ export default function App() {
                                   return avg.tier > 0 ? (
                                     <span
                                       className="team-avg-badge"
-                                      data-tooltip="Team Average Rank calculated from active/peak competitive tiers"
+                                      data-tooltip="Average Rank"
                                     >
                                       <img
                                         src={getRankIconUrl(avg.tier)}
@@ -3938,16 +4103,11 @@ export default function App() {
             {/* TAB: CONFIG */}
             {activeTab === "config" && (
               <div className="tab-pane">
-                {/* 0. Fully Auto Play */}
+                {/* 0. Auto Queue */}
                 <div className="card" style={{ marginBottom: "12px" }}>
                   <div className="control-row">
                     <div>
-                      <div className="control-title" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                        Fully Auto Play
-                        <span style={{ fontSize: "10px", color: "#f87171", background: "rgba(239, 68, 68, 0.15)", border: "1px solid rgba(239, 68, 68, 0.3)", padding: "1px 7px", borderRadius: "10px", fontWeight: 700 }}>
-                          RISKY
-                        </span>
-                      </div>
+                      <div className="control-title">Auto Queue</div>
                       <div className="pane-subtitle">
                         Queuing + Agent Select + In Game AFK + Repeats.
                       </div>
@@ -3959,14 +4119,23 @@ export default function App() {
                         onChange={(e) => {
                           const enabled = e.target.checked;
                           if (enabled) {
-                            setShowFullyAutoPlayWarningModal(true);
+                            preAutoDerankStateRef.current = {
+                              auto_queue_enabled: config.auto_queue_enabled,
+                              starter_fallback_enabled: false,
+                              auto_focus_game: false,
+                            };
+                            updateAndSaveConfig({
+                              auto_derank_enabled: true,
+                              auto_queue_enabled: true,
+                            });
+                            addLog("[CONFIG] Auto Queue enabled.");
                           } else {
                             const prev = preAutoDerankStateRef.current;
                             updateAndSaveConfig({
                               auto_derank_enabled: false,
                               auto_queue_enabled: prev.auto_queue_enabled,
                             });
-                            addLog("[CONFIG] Fully Auto Play (BETA) disabled.");
+                            addLog("[CONFIG] Auto Queue disabled.");
                           }
                         }}
                       />
@@ -3974,7 +4143,7 @@ export default function App() {
                     </label>
                   </div>
 
-                  {/* Fully Auto Play Subfunctions (Greyed out when disabled) */}
+                  {/* Auto Queue Subfunctions (Greyed out when disabled) */}
                   <div
                     style={{
                       marginTop: "14px",
@@ -4009,7 +4178,7 @@ export default function App() {
                         onChange={(e) => {
                           const val = e.target.value;
                           updateAndSaveConfig({ auto_queue_mode: val });
-                          addLog(`[CONFIG] Fully Auto Play queue mode set to ${val}.`);
+                          addLog(`[CONFIG] Auto Queue mode set to ${val}.`);
                         }}
                       >
                         <option value="competitive">Competitive</option>
@@ -4028,7 +4197,7 @@ export default function App() {
                         <div>
                           <div className="control-title">Rank Target</div>
                           <div className="pane-subtitle">
-                            Auto turns off Fully Auto Play upon reaching target rank.
+                            Auto turns off Auto Queue upon reaching target rank.
                           </div>
                         </div>
                         <select
@@ -4047,7 +4216,7 @@ export default function App() {
                           onChange={(e) => {
                             const val = e.target.value;
                             updateAndSaveConfig({ auto_derank_target_rank: val });
-                            addLog(val ? `[FULLY AUTO PLAY] Target rank set to ${val}.` : `[FULLY AUTO PLAY] Target rank disabled.`);
+                            addLog(val ? `[AUTO QUEUE] Target rank set to ${val}.` : `[AUTO QUEUE] Target rank disabled.`);
                           }}
                         >
                           <option value="">Disabled</option>
@@ -4094,28 +4263,30 @@ export default function App() {
                         </select>
                       </div>
                     )}
+                  </div>
+                </div>
 
-                    {/* Lock Starter Agents (Always appears regardless of gamemode) */}
-                    <div className="control-row" style={{ marginTop: "12px" }}>
-                      <div>
-                        <div className="control-title">Lock Starter Agents</div>
-                        <div className="pane-subtitle">
-                          Automatically select starter agents (Jett, Phoenix, Sova, Brimstone, Sage) if queued agents are taken.
-                        </div>
+                {/* Auto Reconnect */}
+                <div className="card">
+                  <div className="between-row">
+                    <div>
+                      <div className="pane-title">Auto Reconnect</div>
+                      <div className="pane-subtitle">
+                        Auto restart VALORANT if disconnected/crashed.
                       </div>
-                      <label className="switch">
-                        <input
-                          type="checkbox"
-                          checked={config.starter_fallback_enabled}
-                          onChange={(e) => {
-                            updateAndSaveConfig({
-                              starter_fallback_enabled: e.target.checked,
-                            });
-                          }}
-                        />
-                        <span className="slider round"></span>
-                      </label>
                     </div>
+                    <label className="switch">
+                      <input
+                        type="checkbox"
+                        checked={config.auto_reconnect ?? false}
+                        onChange={(e) => {
+                          const val = e.target.checked;
+                          updateAndSaveConfig({ auto_reconnect: val });
+                          addLog(val ? "[CONFIG] Auto Reconnect enabled." : "[CONFIG] Auto Reconnect disabled.");
+                        }}
+                      />
+                      <span className="slider round"></span>
+                    </label>
                   </div>
                 </div>
 
@@ -4609,13 +4780,13 @@ export default function App() {
                     {/* Queue Order Card */}
                     <div className="card agents-queue-card">
                       <div className="between-row">
-                        <div className="card-header">QUEUE PRIORITY</div>
+                        <div className="card-header">QUEUE</div>
                         <span className="version-pill">
                           {config.selected_agents.length} queued
                         </span>
                       </div>
                       <div className="pane-subtitle" style={{ marginBottom: "4px" }}>
-                        Auto-locks top available agent. Drag to change priority.
+                        Drag to change priority.
                       </div>
 
                       <div className="queue-list-box">
@@ -4693,7 +4864,6 @@ export default function App() {
                                       e.stopPropagation();
                                       toggleAgent(agId);
                                     }}
-                                    data-tooltip="Remove from queue"
                                   >
                                     ✕
                                   </button>
@@ -4716,7 +4886,7 @@ export default function App() {
                           <div className="pane-subtitle">
                             {config.instalock_enabled
                               ? "Instalock is active."
-                              : "Delay before locking (5 to 70s)."}
+                              : "Delay before locking (req. 20s)."}
                           </div>
                         </div>
                         <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
@@ -4813,6 +4983,36 @@ export default function App() {
                                 setLockDelayInput(String(restored));
                                 addLog(`[CONFIG] Instalock disabled (restored to ${restored}s).`);
                               }
+                            }}
+                          />
+                          <span className="slider round"></span>
+                        </label>
+                      </div>
+
+                      {/* 3. Random Agent Toggle */}
+                      <div className="control-row" style={{ marginTop: "14px" }}>
+                        <div>
+                          <div className="control-title">Random</div>
+                          <div className="pane-subtitle">
+                            Locks a random in-queue agent.
+                          </div>
+                        </div>
+                        <label className="switch">
+                          <input
+                            type="checkbox"
+                            checked={config.lock_random_agent ?? false}
+                            onChange={(e) => {
+                              const val = e.target.checked;
+                              if (val && (!config.selected_agents || config.selected_agents.length === 0)) {
+                                setErrorModal({
+                                  title: "No Agents in Queue",
+                                  message: "You must add at least one agent to your queue before enabling Random Agent.",
+                                  submessage: "Click on an agent in the grid above to add them to your queue.",
+                                });
+                                return;
+                              }
+                              updateAndSaveConfig({ lock_random_agent: val });
+                              addLog(val ? "[CONFIG] Random agent lock enabled." : "[CONFIG] Random agent lock disabled.");
                             }}
                           />
                           <span className="slider round"></span>
@@ -5260,12 +5460,12 @@ export default function App() {
               </div>
             )}
 
-            {/* TAB 6: MUSIC */}
-            {activeTab === "music" && (
+            {/* TAB 6: MEDIA / MUSIC */}
+            {(activeTab === "media" || activeTab === "music") && (
               <div className="tab-pane">
                 <div className="card music-card">
                   <div className="music-title">
-                    Les Toreadors x Even Flow x Demons x Just the Two of Us x Notion
+                    Moog City x Ordinary x End of Beginning x Back to Friends x Bye Bye Bye x Babydoll x Shape of You x See You Again x Caramelldansen  x Somewhere I Belong x Smells Like Teen Spirit x I Like The Way You Kiss Me x I Thought I Saw Your Face Today
                   </div>
 
                   <input
@@ -5421,35 +5621,35 @@ export default function App() {
                     </div>
                   </div>
 
-                {/* Section 2: Test Connection */}
-                <div style={{ marginTop: "16px", display: "flex", alignItems: "center", gap: "12px" }}>
-                  <button
-                    className="action-btn"
-                    onClick={async () => {
-                      const token = config.discord_bot_token?.trim();
-                      const url = config.webhook_url?.trim() || "";
-                      const uid = config.discord_bot_owner_id?.trim() || config.webhook_user_id?.trim() || "";
+                  {/* Section 2: Test Connection */}
+                  <div style={{ marginTop: "16px", display: "flex", alignItems: "center", gap: "12px" }}>
+                    <button
+                      className="action-btn"
+                      onClick={async () => {
+                        const token = config.discord_bot_token?.trim();
+                        const url = config.webhook_url?.trim() || "";
+                        const uid = config.discord_bot_owner_id?.trim() || config.webhook_user_id?.trim() || "";
 
-                      if (!token && !url) {
-                        showToast("Please enter your Bot Token and User ID first.");
-                        return;
-                      }
-                      showToast("Testing connection...");
-                      try {
-                        const res = await invoke<string>("test_discord_webhook", {
-                          url: url,
-                          userId: uid,
-                          botToken: token || null,
-                        });
-                        showToast(res);
-                      } catch (err: any) {
-                        showToast(`Failed: ${err}`);
-                      }
-                    }}
-                  >
-                    Test
-                  </button>
-                </div>
+                        if (!token && !url) {
+                          showToast("Please enter your Bot Token and User ID first.");
+                          return;
+                        }
+                        showToast("Testing connection...");
+                        try {
+                          const res = await invoke<string>("test_discord_webhook", {
+                            url: url,
+                            userId: uid,
+                            botToken: token || null,
+                          });
+                          showToast(res);
+                        } catch (err: any) {
+                          showToast(`Failed: ${err}`);
+                        }
+                      }}
+                    >
+                      Test
+                    </button>
+                  </div>
 
                   {/* Granular Notification Events */}
                   <div style={{ marginTop: "16px", paddingTop: "14px", borderTop: "1px solid rgba(255, 255, 255, 0.08)" }}>
@@ -5457,8 +5657,8 @@ export default function App() {
 
                     <div className="control-row" style={{ marginTop: "8px" }}>
                       <div>
-                        <div className="control-title">Disconnect</div>
-                        <div className="pane-subtitle">Alerts when VALORANT client closes or disconnects.</div>
+                        <div className="control-title">Disconnect &amp; Reconnect</div>
+                        <div className="pane-subtitle">Alerts when VALORANT client disconnects or re-joins.</div>
                       </div>
                       <label className="switch">
                         <input
@@ -5472,59 +5672,20 @@ export default function App() {
 
                     <div className="control-row" style={{ marginTop: "10px" }}>
                       <div>
-                        <div className="control-title">In Queue</div>
-                        <div className="pane-subtitle">Alerts when matchmaking queue starts.</div>
+                        <div className="control-title">Status</div>
+                        <div className="pane-subtitle">Alerts for match queue, agent select, match start, and match concludes.</div>
                       </div>
                       <label className="switch">
                         <input
                           type="checkbox"
-                          checked={config.webhook_notify_queue ?? true}
-                          onChange={(e) => updateAndSaveConfig({ webhook_notify_queue: e.target.checked })}
-                        />
-                        <span className="slider round"></span>
-                      </label>
-                    </div>
-
-                    <div className="control-row" style={{ marginTop: "10px" }}>
-                      <div>
-                        <div className="control-title">Agent Select</div>
-                        <div className="pane-subtitle">Alerts when a match is found and entering Agent Select.</div>
-                      </div>
-                      <label className="switch">
-                        <input
-                          type="checkbox"
-                          checked={config.webhook_notify_agent_select ?? true}
-                          onChange={(e) => updateAndSaveConfig({ webhook_notify_agent_select: e.target.checked })}
-                        />
-                        <span className="slider round"></span>
-                      </label>
-                    </div>
-
-                    <div className="control-row" style={{ marginTop: "10px" }}>
-                      <div>
-                        <div className="control-title">Match Start</div>
-                        <div className="pane-subtitle">Alerts when the match begins.</div>
-                      </div>
-                      <label className="switch">
-                        <input
-                          type="checkbox"
-                          checked={config.webhook_notify_match_start ?? true}
-                          onChange={(e) => updateAndSaveConfig({ webhook_notify_match_start: e.target.checked })}
-                        />
-                        <span className="slider round"></span>
-                      </label>
-                    </div>
-
-                    <div className="control-row" style={{ marginTop: "10px" }}>
-                      <div>
-                        <div className="control-title">Match Conclude</div>
-                        <div className="pane-subtitle">Alerts when the match concludes and returns to lobby.</div>
-                      </div>
-                      <label className="switch">
-                        <input
-                          type="checkbox"
-                          checked={config.webhook_notify_match_concludes ?? true}
-                          onChange={(e) => updateAndSaveConfig({ webhook_notify_match_concludes: e.target.checked })}
+                          checked={config.webhook_notify_status ?? true}
+                          onChange={(e) => updateAndSaveConfig({
+                            webhook_notify_status: e.target.checked,
+                            webhook_notify_queue: e.target.checked,
+                            webhook_notify_agent_select: e.target.checked,
+                            webhook_notify_match_start: e.target.checked,
+                            webhook_notify_match_concludes: e.target.checked,
+                          })}
                         />
                         <span className="slider round"></span>
                       </label>
@@ -5595,7 +5756,7 @@ export default function App() {
                     </span>
                   </div>
                   <p style={{ marginTop: "8px", fontSize: "12.5px", lineHeight: "1.6", color: "#cbd5e1" }}>
-                    These functions mess deeper with the game files, or they just take away the integrity of the game. Handle with caution.
+                    These functions are a bit edgy. Handle with caution.
                   </p>
                 </div>
 
@@ -5876,52 +6037,6 @@ export default function App() {
                   updateAndSaveConfig({ chat_enabled: true });
                   addLog("[CHAT] Chat automation activated.");
                   setShowChatWarningModal(false);
-                }}
-              >
-                I know what I'm doing
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Fully Auto Play Warning Modal */}
-      {showFullyAutoPlayWarningModal && (
-        <div className="modal-backdrop">
-          <div className="modal-card">
-            <div className="modal-header kill-modal-header">
-              <AlertTriangle color="#ef4444" size={20} />
-              <span style={{ color: "#ef4444" }}>High Ban Risk Warning</span>
-            </div>
-            <div className="modal-body">
-              <p style={{ fontWeight: 600, color: "#f87171" }}>
-                ⚠️ Fully Auto Play is BANNABLE
-              </p>
-              <p style={{ marginTop: "8px", lineHeight: "1.5" }}>
-                Enabling Fully Auto Play is <strong>highly detectable</strong>. Fully automated matchmaking queues, agent locking, and continuous AFK behavior will be flagged by Riot Games and Vanguard.
-              </p>
-              <p style={{ marginTop: "8px", color: "#94a3b8", fontSize: "12px", lineHeight: "1.4" }}>
-                You have been warned.
-              </p>
-            </div>
-            <div className="modal-footer">
-              <button
-                className="modal-btn secondary"
-                onClick={() => {
-                  setShowFullyAutoPlayWarningModal(false);
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                className="modal-btn danger"
-                onClick={() => {
-                  updateAndSaveConfig({
-                    auto_derank_enabled: true,
-                    auto_queue_enabled: true,
-                  });
-                  addLog("[WARNING] Fully Auto Play (BETA) enabled at user's own risk.");
-                  setShowFullyAutoPlayWarningModal(false);
                 }}
               >
                 I know what I'm doing
@@ -6234,7 +6349,7 @@ export default function App() {
             onClick={(e) => e.stopPropagation()}
             style={{ maxWidth: "560px", width: "95%" }}
           >
-            <div className="modal-header" style={{ justifyContent: "space-between", alignItems: "center" }}>
+            <div className="modal-header" style={{ alignItems: "center" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                 <History size={20} color="#38bdf8" />
                 <div style={{ display: "flex", flexDirection: "column", textAlign: "left" }}>
@@ -6251,30 +6366,12 @@ export default function App() {
                   </span>
                 </div>
               </div>
-              <button
-                className="modal-close-btn"
-                onClick={() => setSelectedPlayerMatches(null)}
-                style={{
-                  background: "transparent",
-                  border: "none",
-                  color: "#94a3b8",
-                  cursor: "pointer",
-                  fontSize: "18px",
-                  padding: "4px 8px",
-                  borderRadius: "4px"
-                }}
-              >
-                ✕
-              </button>
             </div>
 
             <div className="modal-body" style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: "10px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
                 <span style={{ fontSize: "12px", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.5px" }}>
                   Recent Competitive Matches ({selectedPlayerMatches.matches.length})
-                </span>
-                <span style={{ fontSize: "11px", color: "#64748b" }}>
-                  Click outside to close
                 </span>
               </div>
 
@@ -6283,13 +6380,49 @@ export default function App() {
                   No recent competitive games recorded in the last 20 matches.
                 </div>
               ) : (
-                <div className="recent-matches-list" style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                <div className="recent-matches-list" style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "430px", overflowY: "auto", paddingRight: "4px" }}>
                   {selectedPlayerMatches.matches.map((m, idx) => {
+                    const isRankUp = m.is_rank_up;
+                    const isDerank = m.is_derank;
                     const isWin = m.result === "W";
                     const isLoss = m.result === "L";
-                    const rrColor = isWin ? "#34d399" : isLoss ? "#fb7185" : "#cbd5e1";
-                    const rrBg = isWin ? "rgba(16, 185, 129, 0.12)" : isLoss ? "rgba(244, 63, 94, 0.12)" : "rgba(148, 163, 184, 0.12)";
-                    const rrBorder = isWin ? "rgba(16, 185, 129, 0.3)" : isLoss ? "rgba(244, 63, 94, 0.3)" : "rgba(148, 163, 184, 0.25)";
+
+                    const rrColor = isRankUp
+                      ? "#facc15"
+                      : isDerank
+                        ? "#c084fc"
+                        : isWin
+                          ? "#34d399"
+                          : isLoss
+                            ? "#fb7185"
+                            : "#cbd5e1";
+
+                    const rrBg = isRankUp
+                      ? "rgba(234, 179, 8, 0.16)"
+                      : isDerank
+                        ? "rgba(168, 85, 247, 0.16)"
+                        : isWin
+                          ? "rgba(16, 185, 129, 0.12)"
+                          : isLoss
+                            ? "rgba(244, 63, 94, 0.12)"
+                            : "rgba(148, 163, 184, 0.12)";
+
+                    const rrBorder = isRankUp
+                      ? "rgba(234, 179, 8, 0.55)"
+                      : isDerank
+                        ? "rgba(168, 85, 247, 0.55)"
+                        : isWin
+                          ? "rgba(16, 185, 129, 0.3)"
+                          : isLoss
+                            ? "rgba(244, 63, 94, 0.3)"
+                            : "rgba(148, 163, 184, 0.25)";
+
+                    const pillClass = isRankUp
+                      ? "pill-rankup"
+                      : isDerank
+                        ? "pill-derank"
+                        : `pill-${m.result.toLowerCase()}`;
+
                     const sign = m.rr_change > 0 ? "+" : "";
 
                     return (
@@ -6310,7 +6443,7 @@ export default function App() {
                         {/* Result badge + Map name */}
                         <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                           <span
-                            className={`recent-game-pill pill-${m.result.toLowerCase()}`}
+                            className={`recent-game-pill ${pillClass}`}
                             style={{ width: "28px", height: "24px", fontSize: "11px", fontWeight: 800 }}
                           >
                             {m.result}
@@ -6320,6 +6453,38 @@ export default function App() {
                               <span style={{ fontWeight: 700, fontSize: "14px", color: "#f8fafc" }}>
                                 {m.map_name || "Competitive Match"}
                               </span>
+                              {isRankUp && (
+                                <span
+                                  style={{
+                                    fontSize: "10px",
+                                    fontWeight: 600,
+                                    padding: "2px 7px",
+                                    borderRadius: "3px",
+                                    background: "rgba(234, 179, 8, 0.2)",
+                                    color: "#fef08a",
+                                    border: "1px solid rgba(234, 179, 8, 0.55)",
+                                    letterSpacing: "0.4px"
+                                  }}
+                                >
+                                  ▲ RANK UP
+                                </span>
+                              )}
+                              {isDerank && (
+                                <span
+                                  style={{
+                                    fontSize: "10px",
+                                    fontWeight: 600,
+                                    padding: "2px 7px",
+                                    borderRadius: "3px",
+                                    background: "rgba(168, 85, 247, 0.2)",
+                                    color: "#e9d5ff",
+                                    border: "1px solid rgba(168, 85, 247, 0.55)",
+                                    letterSpacing: "0.4px"
+                                  }}
+                                >
+                                  ▼ DERANK
+                                </span>
+                              )}
                               {m.performance_bonus > 0 && (
                                 <span
                                   style={{
@@ -6342,6 +6507,11 @@ export default function App() {
                             </div>
                             <span style={{ fontSize: "11px", color: "#94a3b8" }}>
                               {m.tier_name ? `${m.tier_name} • ${m.rr_after} RR` : `${m.rr_after} RR`}
+                              {m.has_kda && (
+                                <span style={{ color: (m.kd_ratio ?? 0) >= 1.0 ? "#86efac" : "#fca5a5", marginLeft: "4px" }}>
+                                  • {m.kills}/{m.deaths}/{m.assists} • K/D: {(m.kd_ratio ?? 0).toFixed(2)}
+                                </span>
+                              )}
                               {m.timestamp > 0 && ` • ${formatMatchTime(m.timestamp)}`}
                             </span>
                           </div>

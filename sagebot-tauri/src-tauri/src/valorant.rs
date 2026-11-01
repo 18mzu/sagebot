@@ -491,7 +491,7 @@ impl ValorantClient {
         Err(err_desc)
     }
 
-    pub async fn get_player_party_state(&self, puuid: &str) -> Result<String, String> {
+    pub async fn get_player_party_state(&self, puuid: &str) -> Result<(String, String), String> {
         let (access_token, jwt) = self.get_riot_tokens().await?;
         let glz_host = discover_glz_host();
         let client_version = discover_client_version();
@@ -510,7 +510,7 @@ impl ValorantClient {
         let pjson: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
         let party_id = match pjson.get("CurrentPartyID").and_then(|v| v.as_str()) {
             Some(id) if !id.is_empty() => id,
-            _ => return Ok("DEFAULT".to_string()),
+            _ => return Ok(("DEFAULT".to_string(), "".to_string())),
         };
 
         let party_url = format!("https://{}/parties/v1/parties/{}", glz_host, party_id);
@@ -525,8 +525,13 @@ impl ValorantClient {
             return Err("Party info fetch failed".to_string());
         }
         let party_info: serde_json::Value = presp.json().await.map_err(|e| e.to_string())?;
-        let state = party_info.get("State").and_then(|v| v.as_str()).unwrap_or("DEFAULT");
-        Ok(state.to_string())
+        let state = party_info.get("State").and_then(|v| v.as_str()).unwrap_or("DEFAULT").to_string();
+        let queue_id = party_info.get("MatchmakingData")
+            .and_then(|m| m.get("QueueID"))
+            .and_then(|q| q.as_str())
+            .unwrap_or("")
+            .to_string();
+        Ok((state, queue_id))
     }
 }
 

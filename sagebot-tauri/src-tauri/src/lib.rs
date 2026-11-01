@@ -210,7 +210,7 @@ async fn get_client_status() -> Result<StatusResponse, String> {
                     if match_state == "In Lobby" || match_state == "LOBBY" {
                         if let Some(ref p) = puuid_val {
                             if let Ok(p_state) = client.get_player_party_state(p).await {
-                                let p_upper = p_state.to_uppercase();
+                                let p_upper = p_state.0.to_uppercase();
                                 if p_upper.contains("MATCHMAKING") || p_upper.contains("STARTING") || p_upper.contains("QUEUE") {
                                     match_state = "In Queue".to_string();
                                 }
@@ -592,7 +592,7 @@ fn is_newer_version(cur: &str, latest: &str) -> bool {
 
 #[tauri::command]
 async fn check_for_updates() -> Result<UpdateInfo, String> {
-    const CURRENT_VERSION: &str = "3.4.1";
+    const CURRENT_VERSION: &str = "3.6";
 
     let client = reqwest::Client::builder()
         .user_agent(format!("SageBot/{}", CURRENT_VERSION))
@@ -778,6 +778,294 @@ fn kill_valorant() -> Result<bool, String> {
     valorant::terminate_valorant_processes()
 }
 
+#[cfg(target_os = "windows")]
+unsafe fn send_unicode_char(c: u16) {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
+    let mut inputs = [
+        INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: 0,
+                    wScan: c,
+                    dwFlags: KEYEVENTF_UNICODE,
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        },
+        INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: 0,
+                    wScan: c,
+                    dwFlags: KEYEVENTF_UNICODE | KEYEVENTF_KEYUP,
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        },
+    ];
+    SendInput(inputs.len() as u32, inputs.as_mut_ptr(), std::mem::size_of::<INPUT>() as i32);
+}
+
+#[cfg(target_os = "windows")]
+unsafe fn send_key(vk: u16) {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
+    let mut inputs = [
+        INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: vk,
+                    wScan: 0,
+                    dwFlags: 0,
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        },
+        INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: vk,
+                    wScan: 0,
+                    dwFlags: KEYEVENTF_KEYUP,
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        },
+    ];
+    SendInput(inputs.len() as u32, inputs.as_mut_ptr(), std::mem::size_of::<INPUT>() as i32);
+}
+
+#[cfg(target_os = "windows")]
+unsafe fn send_ctrl_a() {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
+    let mut inputs = [
+        INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT { wVk: VK_CONTROL, wScan: 0, dwFlags: 0, time: 0, dwExtraInfo: 0 },
+            },
+        },
+        INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT { wVk: 'A' as u16, wScan: 0, dwFlags: 0, time: 0, dwExtraInfo: 0 },
+            },
+        },
+        INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT { wVk: 'A' as u16, wScan: 0, dwFlags: KEYEVENTF_KEYUP, time: 0, dwExtraInfo: 0 },
+            },
+        },
+        INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT { wVk: VK_CONTROL, wScan: 0, dwFlags: KEYEVENTF_KEYUP, time: 0, dwExtraInfo: 0 },
+            },
+        },
+    ];
+    SendInput(inputs.len() as u32, inputs.as_mut_ptr(), std::mem::size_of::<INPUT>() as i32);
+}
+
+#[tauri::command]
+async fn login_riot_account(username: String, password: Option<String>) -> Result<bool, String> {
+    // 0. Safeguard: if VALORANT is running, do not attempt account switch
+    if valorant::is_valorant_process_running() {
+        return Err("VALORANT is currently running. Please exit VALORANT before switching accounts.".to_string());
+    }
+
+    // 1. Terminate existing Riot Client processes to ensure fresh login state
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/IM", "RiotClientUx.exe"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/IM", "RiotClientServices.exe"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+
+    // 2. Discover Riot Client executable path
+    let mut riot_client_path = None;
+    let install_json_path = std::path::Path::new("C:\\ProgramData\\Riot Games\\RiotClientInstalls.json");
+    if install_json_path.exists() {
+        if let Ok(content) = std::fs::read_to_string(install_json_path) {
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(p) = json.get("rc_live").or_else(|| json.get("rc_default")).and_then(|v| v.as_str()) {
+                    if std::path::Path::new(p).exists() {
+                        riot_client_path = Some(p.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    if riot_client_path.is_none() {
+        let defaults = [
+            "C:\\Riot Games\\Riot Client\\RiotClientServices.exe",
+            "D:\\Riot Games\\Riot Client\\RiotClientServices.exe",
+            "E:\\Riot Games\\Riot Client\\RiotClientServices.exe",
+        ];
+        for p in defaults {
+            if std::path::Path::new(p).exists() {
+                riot_client_path = Some(p.to_string());
+                break;
+            }
+        }
+    }
+
+    let rc_exe = riot_client_path.ok_or_else(|| "Could not locate RiotClientServices.exe on system".to_string())?;
+
+    // 3. Launch Riot Client into VALORANT
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const DETACHED_PROCESS: u32 = 0x00000008;
+        let mut cmd = std::process::Command::new(&rc_exe);
+        cmd.args(["--launch-product=valorant", "--launch-patchline=live"]);
+        cmd.creation_flags(DETACHED_PROCESS);
+        cmd.spawn().map_err(|e| format!("Failed to spawn Riot Client: {}", e))?;
+    }
+
+    // 4. Poll for Riot Client window & perform native keystrokes in blocking worker
+    #[cfg(target_os = "windows")]
+    {
+        tokio::task::spawn_blocking(move || -> Result<(), String> {
+            use windows_sys::Win32::UI::WindowsAndMessaging::*;
+            use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
+
+            unsafe extern "system" fn enum_riot_window(
+                hwnd: windows_sys::Win32::Foundation::HWND,
+                lparam: windows_sys::Win32::Foundation::LPARAM,
+            ) -> windows_sys::Win32::Foundation::BOOL {
+                if IsWindowVisible(hwnd) == 0 {
+                    return 1;
+                }
+                let mut buf = [0u16; 512];
+                let len = GetWindowTextW(hwnd, buf.as_mut_ptr(), 512);
+                if len > 0 {
+                    let title = String::from_utf16_lossy(&buf[..len as usize]);
+                    if title == "Riot Client" || title.contains("Riot Client") {
+                        let mut rect = windows_sys::Win32::Foundation::RECT { left: 0, top: 0, right: 0, bottom: 0 };
+                        GetWindowRect(hwnd, &mut rect);
+                        let width = rect.right - rect.left;
+                        let height = rect.bottom - rect.top;
+                        if width > 350 && height > 350 {
+                            let out = lparam as *mut windows_sys::Win32::Foundation::HWND;
+                            *out = hwnd;
+                            return 0; // stop enumeration
+                        }
+                    }
+                }
+                1
+            }
+
+            let mut target_hwnd: windows_sys::Win32::Foundation::HWND = std::ptr::null_mut();
+            for _ in 0..60 {
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                unsafe {
+                    EnumWindows(Some(enum_riot_window), &mut target_hwnd as *mut _ as isize);
+                }
+                if !target_hwnd.is_null() {
+                    break;
+                }
+            }
+
+            if target_hwnd.is_null() {
+                return Err("Timed out waiting for Riot Client window to open".to_string());
+            }
+
+            // Riot Client starts with a blank CEF window while web assets and auth initialize.
+            // Give CEF 6.0 seconds to finish loading and rendering the login form.
+            std::thread::sleep(std::time::Duration::from_millis(6000));
+
+            unsafe {
+                ShowWindow(target_hwnd, SW_RESTORE);
+                BringWindowToTop(target_hwnd);
+                SetForegroundWindow(target_hwnd);
+            }
+
+            std::thread::sleep(std::time::Duration::from_millis(600));
+
+            unsafe {
+                // Focus username field in Riot Client (left column)
+                let mut rect = windows_sys::Win32::Foundation::RECT { left: 0, top: 0, right: 0, bottom: 0 };
+                GetWindowRect(target_hwnd, &mut rect);
+                let width = rect.right - rect.left;
+                let height = rect.bottom - rect.top;
+                let click_x = rect.left + (width as f32 * 0.16) as i32;
+                let click_y = rect.top + (height as f32 * 0.38) as i32;
+
+                SetCursorPos(click_x, click_y);
+                std::thread::sleep(std::time::Duration::from_millis(150));
+                mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+                std::thread::sleep(std::time::Duration::from_millis(150));
+
+                // Click again to ensure focus on the text field
+                mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+                std::thread::sleep(std::time::Duration::from_millis(300));
+
+                // Clear username field
+                send_ctrl_a();
+                std::thread::sleep(std::time::Duration::from_millis(80));
+                send_key(VK_BACK);
+                std::thread::sleep(std::time::Duration::from_millis(100));
+
+                // Type username with natural cadence
+                for ch in username.encode_utf16() {
+                    send_unicode_char(ch);
+                    std::thread::sleep(std::time::Duration::from_millis(30));
+                }
+
+                // Tab to password
+                std::thread::sleep(std::time::Duration::from_millis(250));
+                send_key(VK_TAB);
+                std::thread::sleep(std::time::Duration::from_millis(250));
+
+                if let Some(pass) = password {
+                    if !pass.is_empty() {
+                        send_ctrl_a();
+                        std::thread::sleep(std::time::Duration::from_millis(80));
+                        send_key(VK_BACK);
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+
+                        // Type password with natural cadence
+                        for ch in pass.encode_utf16() {
+                            send_unicode_char(ch);
+                            std::thread::sleep(std::time::Duration::from_millis(30));
+                        }
+
+                        std::thread::sleep(std::time::Duration::from_millis(400));
+                        send_key(VK_RETURN);
+                    }
+                }
+            }
+
+            Ok(())
+        })
+        .await
+        .map_err(|e| format!("Task panicked: {}", e))??;
+    }
+
+    Ok(true)
+}
+
 #[tauri::command]
 async fn resize_to_gate(window: tauri::Window) {
     let _ = window.set_min_size(Some(tauri::Size::Logical(tauri::LogicalSize { width: 380.0, height: 440.0 })));
@@ -877,6 +1165,30 @@ async fn get_latest_completed_match_score() -> Result<tracker::LatestMatchResult
         puuid,
         &glz_host,
         &client_version,
+    ).await
+}
+
+#[tauri::command]
+async fn fetch_player_match_kdas(matches: Vec<tracker::RecentMatchDetail>, puuid: String) -> Result<Vec<tracker::RecentMatchDetail>, String> {
+    let lockfile = LockfileData::read_from_disk()?;
+    let client = ValorantClient::new(lockfile)?;
+    let (access_token, jwt) = client.get_riot_tokens().await?;
+    let glz_host = valorant::discover_glz_host();
+    let client_version = valorant::discover_client_version();
+
+    let http_client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    tracker::fetch_matches_kda_internal(
+        &http_client,
+        &access_token,
+        &jwt,
+        &puuid,
+        &glz_host,
+        &client_version,
+        matches,
     ).await
 }
 
@@ -990,6 +1302,7 @@ pub fn run() {
             close_window,
             start_dragging_window,
             kill_valorant,
+            login_riot_account,
             resize_to_gate,
             resize_to_dashboard,
             set_always_on_top,
@@ -1001,6 +1314,7 @@ pub fn run() {
             send_webhook_event,
             get_live_match_roster,
             get_latest_completed_match_score,
+            fetch_player_match_kdas,
             storefront::get_storefront
         ])
         .run(tauri::generate_context!())

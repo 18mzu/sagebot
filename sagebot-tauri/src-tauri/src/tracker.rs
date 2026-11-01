@@ -22,6 +22,12 @@ fn get_season_map() -> &'static Arc<RwLock<HashMap<String, String>>> {
     SEASON_MAP.get_or_init(|| Arc::new(RwLock::new(HashMap::new())))
 }
 
+static ORDERED_SEASONS: std::sync::OnceLock<Arc<RwLock<Vec<(String, String, u64)>>>> = std::sync::OnceLock::new();
+
+fn get_ordered_seasons() -> &'static Arc<RwLock<Vec<(String, String, u64)>>> {
+    ORDERED_SEASONS.get_or_init(|| Arc::new(RwLock::new(Vec::new())))
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct WalletBalances {
     pub vp: u32,
@@ -167,12 +173,20 @@ pub struct RecentMatchDetail {
     pub result: String,           // "W", "L", "D"
     pub rr_change: i64,           // e.g. 21, -14, 0
     pub map_name: String,         // e.g. "Lotus", "Sunset", "Abyss"
+    pub tier_before: u32,
     pub tier_after: u32,
     pub tier_name: String,        // e.g. "Silver 2"
     pub rr_after: i64,
     pub performance_bonus: i64,
     pub match_id: String,
     pub timestamp: u64,           // unix timestamp in ms (MatchStartTime)
+    pub is_rank_up: bool,
+    pub is_derank: bool,
+    pub kills: u32,
+    pub deaths: u32,
+    pub assists: u32,
+    pub kd_ratio: f64,
+    pub has_kda: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -189,10 +203,17 @@ pub struct TrackedPlayer {
     pub peak_tier: u32,             // Peak rank tier (0..27)
     pub peak_rank_name: String,     // Peak rank name
     pub peak_season: String,        // e.g. "E7: A2"
+    pub last_season_tier: u32,      // Rank tier in previous season
+    pub last_season_rank_name: String,
+    pub last_season_name: String,   // e.g. "V26: A5"
     pub win_rate: f64,              // Win rate %
     pub total_games: u32,           // Total competitive games recorded
     pub recent_games: Vec<String>,  // Up to 5 recent games: "W", "L", "D"
     pub recent_matches: Vec<RecentMatchDetail>, // Detailed recent matches
+    pub kd_ratio: f64,              // Calculated recent K/D rate
+    pub total_kills: u32,
+    pub total_deaths: u32,
+    pub total_assists: u32,
     pub primary_skin: String,       // Primary weapon skin
     pub weapon_skins: HashMap<String, String>, // All 21 weapon skins
     pub all_skins: Vec<String>,     // Equipped major skins
@@ -326,6 +347,7 @@ pub async fn ensure_skin_cache(client: &reqwest::Client) {
 
                 let mut s_map: HashMap<String, String> = HashMap::new();
                 let mut matched_act: Option<String> = None;
+                let mut ordered_acts = Vec::new();
 
                 for season in data {
                     let parent_uuid = season.get("parentUuid").and_then(|p| p.as_str()).unwrap_or("");
@@ -347,15 +369,23 @@ pub async fn ensure_skin_cache(client: &reqwest::Client) {
                                 "ACT VI" => "A6".to_string(),
                                 other => other.replace("ACT ", "A"),
                             };
-                            s_map.insert(uuid.to_lowercase(), format!("{}: {}", ep_code, act_code));
+                            let label = format!("{}: {}", ep_code, act_code);
+                            s_map.insert(uuid.to_lowercase(), label.clone());
 
                             let start_ts = parse_iso_ts(start_str);
                             let end_ts = parse_iso_ts(end_str);
+                            ordered_acts.push((uuid.to_lowercase(), label, start_ts));
                             if now_secs >= start_ts && now_secs <= end_ts {
                                 matched_act = Some(uuid.to_string());
                             }
                         }
                     }
+                }
+
+                ordered_acts.sort_by_key(|k| k.2);
+                {
+                    let mut o_writer = get_ordered_seasons().write().await;
+                    *o_writer = ordered_acts;
                 }
 
                 {
@@ -505,10 +535,107 @@ pub struct CachedPlayerData {
     pub current_rr: i64,
     pub peak_tier: u32,
     pub peak_season: String,
+    pub last_season_tier: u32,
+    pub last_season_rank_name: String,
+    pub last_season_name: String,
     pub win_rate: f64,
     pub total_games: u32,
     pub recent_games: Vec<String>,
     pub recent_matches: Vec<RecentMatchDetail>,
+    pub kd_ratio: f64,
+    pub total_kills: u32,
+    pub total_deaths: u32,
+    pub total_assists: u32,
+}
+
+static MATCH_DETAILS_CACHE: std::sync::OnceLock<Arc<RwLock<HashMap<String, serde_json::Value>>>> = std::sync::OnceLock::new();
+
+fn get_match_cache() -> &'static Arc<RwLock<HashMap<String, serde_json::Value>>> {
+    MATCH_DETAILS_CACHE.get_or_init(|| Arc::new(RwLock::new(HashMap::new())))
+}
+
+pub async fn fetch_match_kda(
+    client: &reqwest::Client,
+    pd_host: &str,
+    match_id: &str,
+    puuid: &str,
+    access_token: &str,
+    jwt: &str,
+    client_version: &str,
+) -> Option<(u32, u32, u32)> {
+    if match_id.is_empty() {
+        return None;
+    }
+
+    // Check cache
+    let cached = {
+        let cache = get_match_cache().read().await;
+        cache.get(match_id).cloned()
+    };
+
+    let m_json = if let Some(j) = cached {
+        j
+    } else {
+        let match_url = format!("https://{}/match-details/v1/matches/{}", pd_host, match_id);
+        let resp = client.get(&match_url)
+            .header("Authorization", format!("Bearer {}", access_token))
+            .header("X-Riot-Entitlements-JWT", jwt)
+            .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+            .header("X-Riot-ClientVersion", client_version)
+            .send().await.ok()?;
+
+        if !resp.status().is_success() {
+            return None;
+        }
+
+        let parsed: serde_json::Value = resp.json().await.ok()?;
+        let mut cache = get_match_cache().write().await;
+        cache.insert(match_id.to_string(), parsed.clone());
+        parsed
+    };
+
+    if let Some(players) = m_json.get("players").and_then(|p| p.as_array()) {
+        for p in players {
+            if p.get("subject").and_then(|s| s.as_str()) == Some(puuid) {
+                if let Some(stats) = p.get("stats") {
+                    let k = stats.get("kills").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                    let d = stats.get("deaths").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                    let a = stats.get("assists").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                    return Some((k, d, a));
+                }
+            }
+        }
+    }
+    None
+}
+
+pub async fn fetch_matches_kda_internal(
+    client: &reqwest::Client,
+    access_token: &str,
+    jwt: &str,
+    puuid: &str,
+    glz_host: &str,
+    client_version: &str,
+    mut matches: Vec<RecentMatchDetail>,
+) -> Result<Vec<RecentMatchDetail>, String> {
+    let parts: Vec<&str> = glz_host.split('.').collect();
+    let shard = if parts.len() >= 2 { parts[1] } else { "ap" };
+    let pd_host = format!("pd.{}.a.pvp.net", shard);
+
+    for m in &mut matches {
+        if m.has_kda {
+            continue;
+        }
+        if let Some((k, d, a)) = fetch_match_kda(client, &pd_host, &m.match_id, puuid, access_token, jwt, client_version).await {
+            m.kills = k;
+            m.deaths = d;
+            m.assists = a;
+            m.kd_ratio = if d == 0 { k as f64 } else { ((k as f64 / d as f64) * 100.0).round() / 100.0 };
+            m.has_kda = true;
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    }
+    Ok(matches)
 }
 
 static PLAYER_DATA_CACHE: std::sync::OnceLock<Arc<RwLock<HashMap<String, (CachedPlayerData, std::time::Instant)>>>> = std::sync::OnceLock::new();
@@ -559,7 +686,8 @@ async fn fetch_player_full_stats(
     {
         let reader = get_player_cache().read().await;
         if let Some((cached, instant)) = reader.get(puuid) {
-            if instant.elapsed().as_secs() < 600 && (cached.current_tier > 0 || cached.peak_tier > 0 || !cached.recent_games.is_empty()) {
+            let has_data = cached.current_tier > 0 || cached.peak_tier > 0 || cached.last_season_tier > 0 || !cached.recent_games.is_empty();
+            if (has_data && instant.elapsed().as_secs() < 600) || (!has_data && instant.elapsed().as_secs() < 8) {
                 let mut c = cached.clone();
                 if given_level > 0 {
                     c.level = given_level;
@@ -576,45 +704,23 @@ async fn fetch_player_full_stats(
     let mut eff_level = given_level;
     let mut match_ids = Vec::new();
 
-    // 3. Fetch recent match history (for party detection and level fallback)
-    let hist_url = format!("https://{}/match-history/v1/history/{}?startIndex=0&endIndex=10", pd_host, puuid);
-    let mut hist_req = client.get(&hist_url)
-        .header("Authorization", format!("Bearer {}", access_token))
-        .header("X-Riot-Entitlements-JWT", jwt)
-        .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
-        .header("X-Riot-ClientVersion", client_version)
-        .send().await;
-
-    if let Ok(ref resp) = hist_req {
-        if resp.status().as_u16() == 429 {
-            let retry_secs = resp.headers().get("Retry-After")
-                .and_then(|h| h.to_str().ok())
-                .and_then(|s| s.parse::<u64>().ok())
-                .unwrap_or(20);
-            {
-                let mut w = get_rate_limit_expiry().write().await;
-                *w = Some((std::time::Instant::now() + std::time::Duration::from_secs(retry_secs), retry_secs));
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
-            hist_req = client.get(&hist_url)
-                .header("Authorization", format!("Bearer {}", access_token))
-                .header("X-Riot-Entitlements-JWT", jwt)
-                .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
-                .header("X-Riot-ClientVersion", client_version)
-                .send().await;
-        }
-    }
-
-    if let Ok(hist_resp) = hist_req {
-        if let Ok(hist_json) = hist_resp.json::<serde_json::Value>().await {
-            if let Some(history) = hist_json.get("History").and_then(|h| h.as_array()) {
-                for item in history {
-                    if let Some(m_id) = item.get("MatchID").and_then(|m| m.as_str()) {
-                        match_ids.push(m_id.to_string());
+    // 3. Only fetch match history if account level is unknown (saves 10+ calls per match!)
+    if eff_level == 0 {
+        let hist_url = format!("https://{}/match-history/v1/history/{}?startIndex=0&endIndex=5", pd_host, puuid);
+        if let Ok(hist_resp) = client.get(&hist_url)
+            .header("Authorization", format!("Bearer {}", access_token))
+            .header("X-Riot-Entitlements-JWT", jwt)
+            .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+            .header("X-Riot-ClientVersion", client_version)
+            .send().await {
+            if let Ok(hist_json) = hist_resp.json::<serde_json::Value>().await {
+                if let Some(history) = hist_json.get("History").and_then(|h| h.as_array()) {
+                    for item in history {
+                        if let Some(m_id) = item.get("MatchID").and_then(|m| m.as_str()) {
+                            match_ids.push(m_id.to_string());
+                        }
                     }
-                }
 
-                if eff_level == 0 {
                     if let Some(first_match) = history.first() {
                         if let Some(match_id) = first_match.get("MatchID").and_then(|m| m.as_str()) {
                             let match_url = format!("https://{}/match-details/v1/matches/{}", pd_host, match_id);
@@ -670,11 +776,29 @@ async fn fetch_player_full_stats(
     }
 
     let season_map = { get_season_map().read().await.clone() };
+    let ordered_seasons = { get_ordered_seasons().read().await.clone() };
+
+    let (prev_season_id, prev_season_label) = if let Some(pos) = ordered_seasons.iter().position(|(id, _, _)| id.eq_ignore_ascii_case(&active_season_id)) {
+        if pos > 0 {
+            let (id, label, _) = &ordered_seasons[pos - 1];
+            (id.clone(), label.clone())
+        } else {
+            ("".to_string(), "".to_string())
+        }
+    } else if ordered_seasons.len() >= 2 {
+        let (id, label, _) = &ordered_seasons[ordered_seasons.len() - 2];
+        (id.clone(), label.clone())
+    } else {
+        ("".to_string(), "".to_string())
+    };
 
     let mut current_tier = 0u32;
     let mut current_rr = 0i64;
     let mut peak_tier = 0u32;
     let mut peak_season_uuid = String::new();
+    let mut last_season_tier = 0u32;
+    let mut last_season_rank_name = "Unranked".to_string();
+    let mut last_season_name = prev_season_label.clone();
     let mut total_wins = 0u32;
     let mut total_games = 0u32;
 
@@ -704,6 +828,34 @@ async fn fetch_player_full_stats(
                         if games_needed == 0 && tier > 0 {
                             current_tier = tier;
                             current_rr = rr;
+                        }
+                    }
+
+                    // Extract rank from previous season
+                    if !prev_season_id.is_empty() {
+                        if let Some(sdata) = seasonal.get(&prev_season_id) {
+                            let tier = sdata.get("CompetitiveTier").and_then(|t| t.as_u64()).unwrap_or(0) as u32;
+                            if tier > 0 {
+                                last_season_tier = tier;
+                                last_season_rank_name = get_rank_name(tier).to_string();
+                            }
+                        }
+                    }
+
+                    // Fallback to latest past season player played in if prev_season was not played
+                    if last_season_tier == 0 {
+                        if let Some(pos) = ordered_seasons.iter().position(|(id, _, _)| id.eq_ignore_ascii_case(&active_season_id)) {
+                            for (id, label, _) in ordered_seasons[..pos].iter().rev() {
+                                if let Some(sdata) = seasonal.get(id) {
+                                    let tier = sdata.get("CompetitiveTier").and_then(|t| t.as_u64()).unwrap_or(0) as u32;
+                                    if tier > 0 {
+                                        last_season_tier = tier;
+                                        last_season_rank_name = get_rank_name(tier).to_string();
+                                        last_season_name = label.clone();
+                                        break;
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -737,7 +889,7 @@ async fn fetch_player_full_stats(
 
     tokio::time::sleep(std::time::Duration::from_millis(40)).await;
 
-    // 5. Fetch Recent Competitive Games (query up to 20 to extract 5 competitive games)
+    // 5. Fetch Recent Competitive Games (query up to 20 competitive games)
     let mut recent_games = Vec::new();
     let mut recent_matches = Vec::new();
     let comp_url = format!("https://{}/mmr/v1/players/{}/competitiveupdates?startIndex=0&endIndex=20", pd_host, puuid);
@@ -761,13 +913,22 @@ async fn fetch_player_full_stats(
     }
 
     if let Ok(c_resp) = comp_req {
-        if let Ok(c_json) = c_resp.json::<serde_json::Value>().await {
-            if let Some(matches) = c_json.get("Matches").and_then(|m| m.as_array()) {
+        if c_resp.status().is_success() {
+            if let Ok(c_json) = c_resp.json::<serde_json::Value>().await {
+                if let Some(matches) = c_json.get("Matches").and_then(|m| m.as_array()) {
                 for m in matches {
                     let queue_id = m.get("QueueID").and_then(|s| s.as_str()).unwrap_or("");
-                    if queue_id != "competitive" {
+                    let tier_after = m.get("TierAfterUpdate").and_then(|r| r.as_u64()).unwrap_or(0) as u32;
+                    let tier_before = m.get("TierBeforeUpdate").and_then(|r| r.as_u64()).unwrap_or(0) as u32;
+                    let is_placement = m.get("IsPlacementMatch").and_then(|b| b.as_bool()).unwrap_or(false);
+
+                    if !queue_id.is_empty() && !queue_id.eq_ignore_ascii_case("competitive") {
                         continue;
                     }
+                    if queue_id.is_empty() && tier_after == 0 && !is_placement {
+                        continue;
+                    }
+
                     let rr_earned = m.get("RankedRatingEarned").and_then(|r| r.as_i64()).unwrap_or(0);
                     let movement = m.get("CompetitiveMovement").and_then(|s| s.as_str()).unwrap_or("");
                     let result = if rr_earned > 0 || movement == "INCREASE" {
@@ -778,8 +939,9 @@ async fn fetch_player_full_stats(
                         "D".to_string()
                     };
 
+                    let is_rank_up = tier_after > tier_before && tier_before > 0;
+                    let is_derank = tier_after < tier_before && tier_before > 0;
                     let perf_bonus = m.get("RankedRatingPerformanceBonus").and_then(|r| r.as_i64()).unwrap_or(0);
-                    let tier_after = m.get("TierAfterUpdate").and_then(|r| r.as_u64()).unwrap_or(0) as u32;
                     let rr_after = m.get("RankedRatingAfterUpdate").and_then(|r| r.as_i64()).unwrap_or(0);
                     let map_id = m.get("MapID").and_then(|s| s.as_str()).unwrap_or("");
                     let map_name = crate::valorant::resolve_map_name(map_id);
@@ -791,21 +953,62 @@ async fn fetch_player_full_stats(
                         result,
                         rr_change: rr_earned,
                         map_name,
+                        tier_before,
                         tier_after,
                         tier_name: get_rank_name(tier_after).to_string(),
                         rr_after,
                         performance_bonus: perf_bonus,
                         match_id,
                         timestamp,
+                        is_rank_up,
+                        is_derank,
+                        kills: 0,
+                        deaths: 0,
+                        assists: 0,
+                        kd_ratio: 0.0,
+                        has_kda: false,
                     });
 
-                    if recent_matches.len() >= 5 {
+                    if recent_matches.len() >= 20 {
                         break;
                     }
                 }
             }
         }
     }
+    }
+
+    // Fetch KDA for the top 5 matches to compute immediate K/D Rate
+    let mut total_kills = 0u32;
+    let mut total_deaths = 0u32;
+    let mut total_assists = 0u32;
+    let mut matches_with_kda = 0u32;
+
+    for m in recent_matches.iter_mut().take(5) {
+        if let Some((k, d, a)) = fetch_match_kda(client, pd_host, &m.match_id, puuid, access_token, jwt, client_version).await {
+            m.kills = k;
+            m.deaths = d;
+            m.assists = a;
+            m.kd_ratio = if d == 0 { k as f64 } else { ((k as f64 / d as f64) * 100.0).round() / 100.0 };
+            m.has_kda = true;
+
+            total_kills += k;
+            total_deaths += d;
+            total_assists += a;
+            matches_with_kda += 1;
+            tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+        }
+    }
+
+    let kd_ratio = if matches_with_kda > 0 {
+        if total_deaths == 0 {
+            total_kills as f64
+        } else {
+            ((total_kills as f64 / total_deaths as f64) * 100.0).round() / 100.0
+        }
+    } else {
+        0.0
+    };
 
     let data = CachedPlayerData {
         level: eff_level,
@@ -814,15 +1017,29 @@ async fn fetch_player_full_stats(
         current_rr,
         peak_tier,
         peak_season,
+        last_season_tier,
+        last_season_rank_name,
+        last_season_name,
         win_rate,
         total_games,
         recent_games,
         recent_matches,
+        kd_ratio,
+        total_kills,
+        total_deaths,
+        total_assists,
     };
 
-    // Store in cache
+    // Store in cache (preserve existing valid data if new fetch returned zeroes)
     {
         let mut writer = get_player_cache().write().await;
+        if let Some((old, _)) = writer.get(puuid) {
+            let has_old = old.current_tier > 0 || old.peak_tier > 0 || old.last_season_tier > 0 || !old.recent_games.is_empty();
+            let has_new = data.current_tier > 0 || data.peak_tier > 0 || data.last_season_tier > 0 || !data.recent_games.is_empty();
+            if has_old && !has_new {
+                return old.clone();
+            }
+        }
         writer.insert(puuid.to_string(), (data.clone(), std::time::Instant::now()));
     }
 
@@ -864,8 +1081,12 @@ async fn fetch_unmasked_names(
                         item.get("GameName").and_then(|v| v.as_str()),
                         item.get("TagLine").and_then(|v| v.as_str()),
                     ) {
-                        if !game_name.trim().is_empty() && !tag_line.trim().is_empty() {
-                            let full_name = format!("{}#{}", game_name, tag_line);
+                        if !game_name.trim().is_empty() {
+                            let full_name = if tag_line.trim().is_empty() {
+                                game_name.trim().to_string()
+                            } else {
+                                format!("{}#{}", game_name.trim(), tag_line.trim())
+                            };
                             names.insert(sub.to_string(), full_name);
                         }
                     }
@@ -1067,6 +1288,66 @@ fn detect_parties_from_histories(
     }
 }
 
+// Fetch direct authoritative party members from Riot's GLZ service
+async fn fetch_glz_party_members(
+    client: &reqwest::Client,
+    glz_host: &str,
+    my_puuid: &str,
+    access_token: &str,
+    jwt: &str,
+    client_version: &str,
+) -> Vec<String> {
+    let party_player_url = format!("https://{}/parties/v1/players/{}", glz_host, my_puuid);
+    let Ok(resp) = client.get(&party_player_url)
+        .header("Authorization", format!("Bearer {}", access_token))
+        .header("X-Riot-Entitlements-JWT", jwt)
+        .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+        .header("X-Riot-ClientVersion", client_version)
+        .send().await else {
+        return Vec::new();
+    };
+
+    if !resp.status().is_success() {
+        return Vec::new();
+    }
+
+    let Ok(player_party) = resp.json::<serde_json::Value>().await else {
+        return Vec::new();
+    };
+
+    let Some(party_id) = player_party.get("CurrentPartyID").and_then(|v| v.as_str()) else {
+        return Vec::new();
+    };
+
+    let party_url = format!("https://{}/parties/v1/parties/{}", glz_host, party_id);
+    let Ok(party_resp) = client.get(&party_url)
+        .header("Authorization", format!("Bearer {}", access_token))
+        .header("X-Riot-Entitlements-JWT", jwt)
+        .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+        .header("X-Riot-ClientVersion", client_version)
+        .send().await else {
+        return Vec::new();
+    };
+
+    if !party_resp.status().is_success() {
+        return Vec::new();
+    }
+
+    let Ok(party_json) = party_resp.json::<serde_json::Value>().await else {
+        return Vec::new();
+    };
+
+    let mut members = Vec::new();
+    if let Some(arr) = party_json.get("Members").and_then(|m| m.as_array()) {
+        for m in arr {
+            if let Some(sub) = m.get("Subject").and_then(|s| s.as_str()) {
+                members.push(sub.to_string());
+            }
+        }
+    }
+    members
+}
+
 // Main live match tracker function
 pub async fn get_live_match_roster_internal(
     client: &reqwest::Client,
@@ -1080,7 +1361,10 @@ pub async fn get_live_match_roster_internal(
     // Make sure weapon skin database and active season are cached
     ensure_skin_cache(client).await;
 
-    let party_map = parse_party_members(presences);
+    let (glz_party, party_map) = tokio::join!(
+        fetch_glz_party_members(client, glz_host, my_puuid, access_token, jwt, client_version),
+        async { parse_party_members(presences) }
+    );
 
     let parts: Vec<&str> = glz_host.split('.').collect();
     let shard = if parts.len() >= 2 { parts[1] } else { "ap" };
@@ -1109,6 +1393,7 @@ pub async fn get_live_match_roster_internal(
                         client_version,
                         match_id,
                         &party_map,
+                        &glz_party,
                     ).await;
                 }
             }
@@ -1138,6 +1423,7 @@ pub async fn get_live_match_roster_internal(
                         client_version,
                         match_id,
                         &party_map,
+                        &glz_party,
                     ).await;
                 }
             }
@@ -1385,6 +1671,7 @@ async fn parse_coregame_roster(
     client_version: &str,
     match_id: &str,
     party_map: &HashMap<String, String>,
+    glz_party: &[String],
 ) -> Result<LiveMatchRoster, String> {
     let match_url = format!("https://{}/core-game/v1/matches/{}", glz_host, match_id);
     let match_resp = client.get(&match_url)
@@ -1487,7 +1774,12 @@ async fn parse_coregame_roster(
             }
         };
 
-        let party_tag = party_map.get(&puuid).cloned().unwrap_or_default();
+        let is_my_party = glz_party.len() >= 2 && glz_party.contains(&puuid);
+        let party_tag = if is_my_party {
+            "Party 1".to_string()
+        } else {
+            party_map.get(&puuid).cloned().unwrap_or_default()
+        };
 
         // Skins
         let loadout_items = loadouts_by_sub.get(&puuid)
@@ -1519,10 +1811,17 @@ async fn parse_coregame_roster(
                 peak_tier: pdata.peak_tier,
                 peak_rank_name: get_rank_name(pdata.peak_tier).to_string(),
                 peak_season: pdata.peak_season,
+                last_season_tier: pdata.last_season_tier,
+                last_season_rank_name: pdata.last_season_rank_name,
+                last_season_name: pdata.last_season_name,
                 win_rate: pdata.win_rate,
                 total_games: pdata.total_games,
                 recent_games: pdata.recent_games,
                 recent_matches: pdata.recent_matches,
+                kd_ratio: pdata.kd_ratio,
+                total_kills: pdata.total_kills,
+                total_deaths: pdata.total_deaths,
+                total_assists: pdata.total_assists,
                 primary_skin,
                 weapon_skins,
                 all_skins,
@@ -1542,8 +1841,17 @@ async fn parse_coregame_roster(
     let mut ally_matches: HashMap<String, Vec<String>> = HashMap::new();
     let mut enemy_matches: HashMap<String, Vec<String>> = HashMap::new();
 
+    let is_ffa = gamemode.eq_ignore_ascii_case("deathmatch") || (gamemode.to_lowercase().contains("deathmatch") && !gamemode.to_lowercase().contains("team"));
     for (player, m_ids) in results {
-        if player.team == my_team_id {
+        if is_ffa {
+            if player.is_self {
+                ally_matches.insert(player.puuid.clone(), m_ids);
+                ally_team.push(player);
+            } else {
+                enemy_matches.insert(player.puuid.clone(), m_ids);
+                enemy_team.push(player);
+            }
+        } else if player.team == my_team_id {
             ally_matches.insert(player.puuid.clone(), m_ids);
             ally_team.push(player);
         } else {
@@ -1563,8 +1871,38 @@ async fn parse_coregame_roster(
         }
     }
 
-    detect_parties_from_histories(&mut ally_team, &ally_matches, match_id, &mut next_party_id);
+    let is_competitive = gamemode.to_lowercase().contains("competitive") || queue_id.to_lowercase().contains("competitive");
+    let ally_is_authoritative_5_stack = ally_team.len() == 5 && (
+        glz_party.len() == 5 ||
+        ally_team.iter().all(|p| glz_party.contains(&p.puuid)) ||
+        (!ally_team[0].party_tag.is_empty() && ally_team.iter().all(|p| p.party_tag == ally_team[0].party_tag))
+    );
+
+    if ally_is_authoritative_5_stack {
+        for p in &mut ally_team {
+            p.party_tag = "Party 1".to_string();
+        }
+    } else {
+        detect_parties_from_histories(&mut ally_team, &ally_matches, match_id, &mut next_party_id);
+    }
+
     detect_parties_from_histories(&mut enemy_team, &enemy_matches, match_id, &mut next_party_id);
+
+    // If Competitive and ally team is strictly a 5-stack, enemy team MUST be a 5-stack as well
+    if is_competitive && ally_team.len() == 5 && enemy_team.len() == 5 {
+        let first_party = ally_team[0].party_tag.clone();
+        let ally_is_5_stack = !first_party.is_empty() && ally_team.iter().all(|p| p.party_tag == first_party);
+        if ally_is_5_stack {
+            let enemy_party_tag = if first_party == "Party 1" {
+                "Party 2".to_string()
+            } else {
+                format!("Party {}", next_party_id)
+            };
+            for p in &mut enemy_team {
+                p.party_tag = enemy_party_tag.clone();
+            }
+        }
+    }
 
     Ok(LiveMatchRoster {
         state: "COREGAME".to_string(),
@@ -1590,6 +1928,7 @@ async fn parse_pregame_roster(
     client_version: &str,
     match_id: &str,
     party_map: &HashMap<String, String>,
+    glz_party: &[String],
 ) -> Result<LiveMatchRoster, String> {
     let match_url = format!("https://{}/pregame/v1/matches/{}", glz_host, match_id);
     let match_resp = client.get(&match_url)
@@ -1707,7 +2046,7 @@ async fn parse_pregame_roster(
 
     // Concurrently fetch MMR & stats
     let mut futures = Vec::new();
-    for p in raw_players {
+    for (idx, p) in raw_players.into_iter().enumerate() {
         let puuid = p.puuid;
         let team_id = p.team_id;
         let char_id = p.char_id;
@@ -1720,14 +2059,23 @@ async fn parse_pregame_roster(
             Some(n) if !n.trim().is_empty() && n.trim() != "#" && !n.starts_with('#') => n.clone(),
             _ => {
                 if incognito {
-                    agent_name.clone()
+                    if !agent_name.is_empty() && agent_name != "Selecting..." {
+                        agent_name.clone()
+                    } else {
+                        format!("Player {}", idx + 1)
+                    }
                 } else {
                     format!("Player#{}", &puuid[..puuid.len().min(4)])
                 }
             }
         };
 
-        let party_tag = party_map.get(&puuid).cloned().unwrap_or_default();
+        let is_my_party = glz_party.len() >= 2 && glz_party.contains(&puuid);
+        let party_tag = if is_my_party {
+            "Party 1".to_string()
+        } else {
+            party_map.get(&puuid).cloned().unwrap_or_default()
+        };
 
         let loadout_items = loadouts_by_sub.get(&puuid)
             .or_else(|| loadouts_by_char.get(&char_id))
@@ -1758,10 +2106,17 @@ async fn parse_pregame_roster(
                 peak_tier: pdata.peak_tier,
                 peak_rank_name: get_rank_name(pdata.peak_tier).to_string(),
                 peak_season: pdata.peak_season,
+                last_season_tier: pdata.last_season_tier,
+                last_season_rank_name: pdata.last_season_rank_name,
+                last_season_name: pdata.last_season_name,
                 win_rate: pdata.win_rate,
                 total_games: pdata.total_games,
                 recent_games: pdata.recent_games,
                 recent_matches: pdata.recent_matches,
+                kd_ratio: pdata.kd_ratio,
+                total_kills: pdata.total_kills,
+                total_deaths: pdata.total_deaths,
+                total_assists: pdata.total_assists,
                 primary_skin,
                 weapon_skins,
                 all_skins,
@@ -1778,8 +2133,17 @@ async fn parse_pregame_roster(
     let mut ally_matches: HashMap<String, Vec<String>> = HashMap::new();
     let mut enemy_matches: HashMap<String, Vec<String>> = HashMap::new();
 
+    let is_ffa = gamemode.eq_ignore_ascii_case("deathmatch") || (gamemode.to_lowercase().contains("deathmatch") && !gamemode.to_lowercase().contains("team"));
     for (player, m_ids) in results {
-        if player.team == "Ally" || player.team == "Blue" || player.is_self {
+        if is_ffa {
+            if player.is_self {
+                ally_matches.insert(player.puuid.clone(), m_ids);
+                ally_team.push(player);
+            } else {
+                enemy_matches.insert(player.puuid.clone(), m_ids);
+                enemy_team.push(player);
+            }
+        } else if player.team == "Ally" || player.team == "Blue" || player.is_self {
             ally_matches.insert(player.puuid.clone(), m_ids);
             ally_team.push(player);
         } else {
@@ -1799,8 +2163,38 @@ async fn parse_pregame_roster(
         }
     }
 
-    detect_parties_from_histories(&mut ally_team, &ally_matches, match_id, &mut next_party_id);
+    let is_competitive = gamemode.to_lowercase().contains("competitive") || queue_id.to_lowercase().contains("competitive");
+    let ally_is_authoritative_5_stack = ally_team.len() == 5 && (
+        glz_party.len() == 5 ||
+        ally_team.iter().all(|p| glz_party.contains(&p.puuid)) ||
+        (!ally_team[0].party_tag.is_empty() && ally_team.iter().all(|p| p.party_tag == ally_team[0].party_tag))
+    );
+
+    if ally_is_authoritative_5_stack {
+        for p in &mut ally_team {
+            p.party_tag = "Party 1".to_string();
+        }
+    } else {
+        detect_parties_from_histories(&mut ally_team, &ally_matches, match_id, &mut next_party_id);
+    }
+
     detect_parties_from_histories(&mut enemy_team, &enemy_matches, match_id, &mut next_party_id);
+
+    // If Competitive and ally team is strictly a 5-stack, enemy team MUST be a 5-stack as well
+    if is_competitive && ally_team.len() == 5 && enemy_team.len() == 5 {
+        let first_party = ally_team[0].party_tag.clone();
+        let ally_is_5_stack = !first_party.is_empty() && ally_team.iter().all(|p| p.party_tag == first_party);
+        if ally_is_5_stack {
+            let enemy_party_tag = if first_party == "Party 1" {
+                "Party 2".to_string()
+            } else {
+                format!("Party {}", next_party_id)
+            };
+            for p in &mut enemy_team {
+                p.party_tag = enemy_party_tag.clone();
+            }
+        }
+    }
 
     Ok(LiveMatchRoster {
         state: "PREGAME".to_string(),

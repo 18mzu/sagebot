@@ -82,6 +82,13 @@ pub fn get_all_agents() -> Vec<AgentInfo> {
             is_starter: false,
         },
         AgentInfo {
+            id: "ddd5a15c-4fbe-42fa-3789-11a55ca5ee04".to_string(),
+            name: "Hush".to_string(),
+            role: "Duelist".to_string(),
+            color: "#E056FD".to_string(),
+            is_starter: false,
+        },
+        AgentInfo {
             id: "0e38b510-41a8-5780-5e8f-568b2a4f2d6c".to_string(),
             name: "Iso".to_string(),
             role: "Duelist".to_string(),

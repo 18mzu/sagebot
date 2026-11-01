@@ -23,7 +23,7 @@ pub fn start_background_locker(config_state: Arc<Mutex<AppConfig>>) {
             };
             tokio::time::sleep(Duration::from_millis(sleep_ms)).await;
 
-            let (agents_enabled, instalock, lock_delay, fallback, selected_agents, webhook_url, webhook_user_id, webhook_enabled, webhook_notify_agent_select, bot_token) = {
+            let (agents_enabled, instalock, lock_delay, fallback, lock_random_agent, selected_agents, webhook_url, webhook_user_id, webhook_enabled, webhook_notify_agent_select, bot_token) = {
                 if let Ok(cfg) = config_state.lock() {
                     let uid = if !cfg.discord_bot_owner_id.is_empty() { cfg.discord_bot_owner_id.clone() } else { cfg.webhook_user_id.clone() };
                     (
@@ -31,6 +31,7 @@ pub fn start_background_locker(config_state: Arc<Mutex<AppConfig>>) {
                         cfg.instalock_enabled,
                         cfg.lock_delay,
                         cfg.starter_fallback_enabled,
+                        cfg.lock_random_agent,
                         cfg.selected_agents.clone(),
                         cfg.webhook_url.clone(),
                         uid,
@@ -56,9 +57,10 @@ pub fn start_background_locker(config_state: Arc<Mutex<AppConfig>>) {
                 continue;
             }
 
-            // Run locker if either agent selection is enabled (with queued agents) OR starter fallback is enabled
+            // Run locker if agent selection is enabled (with queued agents OR random agent) OR starter fallback is enabled
             let has_custom_agents = agents_enabled && !selected_agents.is_empty();
-            if !has_custom_agents && !fallback {
+            let has_random = agents_enabled && lock_random_agent;
+            if !has_custom_agents && !has_random && !fallback {
                 continue;
             }
 
@@ -146,11 +148,38 @@ pub fn start_background_locker(config_state: Arc<Mutex<AppConfig>>) {
                 }
             }
 
-            // 1. Attempt to lock chosen agents in order of priority (if agents_enabled is on)
+            // 1. Attempt to lock agents (if agents_enabled is on)
             let mut locked = false;
             let mut locked_agent_id = String::new();
 
-            if agents_enabled {
+            if agents_enabled && lock_random_agent {
+                // Random agent locking: shuffle selected agents in queue and try until one succeeds
+                let mut candidate_ids: Vec<String> = selected_agents.clone();
+
+                if !candidate_ids.is_empty() {
+                    let mut seed = std::time::SystemTime::now()
+                        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_nanos() as u64;
+
+                    for i in (1..candidate_ids.len()).rev() {
+                        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                        let j = (seed % (i as u64 + 1)) as usize;
+                        candidate_ids.swap(i, j);
+                    }
+
+                    for agent_id in candidate_ids {
+                        let _ = client.select_agent_glz(&match_id, &agent_id, &access_token, &jwt, &glz_host, &client_version).await;
+                        if let Ok(success) = client.lock_agent_glz(&match_id, &agent_id, &access_token, &jwt, &glz_host, &client_version).await {
+                            if success {
+                                locked = true;
+                                locked_agent_id = agent_id;
+                                break;
+                            }
+                        }
+                    }
+                }
+            } else if agents_enabled {
                 for agent_id in &selected_agents {
                     let _ = client.select_agent_glz(&match_id, agent_id, &access_token, &jwt, &glz_host, &client_version).await;
                     if let Ok(success) = client.lock_agent_glz(&match_id, agent_id, &access_token, &jwt, &glz_host, &client_version).await {

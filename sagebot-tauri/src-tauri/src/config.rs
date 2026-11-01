@@ -33,6 +33,7 @@ pub struct AppConfig {
     pub instalock_enabled: bool,
     pub lock_delay: u64,              // In seconds (5 to 70)
     pub starter_fallback_enabled: bool,
+    pub lock_random_agent: bool,
     pub selected_agents: Vec<String>,
     pub music_volume: u32,            // 0 - 100
     pub auto_focus_game: bool,
@@ -40,6 +41,7 @@ pub struct AppConfig {
     pub auto_derank_enabled: bool,
     pub auto_derank_target_rank: String,
     pub auto_derank_match_limit: u32, // 0 = unlimited
+    pub auto_reconnect: bool,         // Auto Reconnect on Disconnect
     pub auto_queue_enabled: bool,
     pub auto_queue_mode: String,      // competitive, unrated, swiftplay, spikerush, deathmatch, hurm, ggteam
     pub comms_hotkey: String,
@@ -88,6 +90,7 @@ impl Default for AppConfig {
             instalock_enabled: false,
             lock_delay: 20,
             starter_fallback_enabled: false,
+            lock_random_agent: false,
             selected_agents: Vec::new(),
             music_volume: 80,
             auto_focus_game: false,
@@ -95,6 +98,7 @@ impl Default for AppConfig {
             auto_derank_enabled: false,
             auto_derank_target_rank: String::new(),
             auto_derank_match_limit: 0,
+            auto_reconnect: false,
             auto_queue_enabled: false,
             auto_queue_mode: "competitive".to_string(),
             comms_hotkey: ".".to_string(),
@@ -247,6 +251,9 @@ impl AppConfig {
                                     cfg.auto_vote_mode = m;
                                 }
                             }
+                            ("settings", "autoreconnect") => {
+                                cfg.auto_reconnect = val == "1";
+                            }
                             ("antiafk", "method") => {
                                 if let Ok(m) = val.parse::<u32>() {
                                     cfg.anti_afk_mode = m;
@@ -303,14 +310,14 @@ impl AppConfig {
                                     cfg.chat_text = val.to_string();
                                 }
                             }
-                            ("webhook", "enabled") => {
-                                cfg.webhook_enabled = val == "1";
+                            ("discord", "bottoken") => {
+                                cfg.discord_bot_token = val.to_string();
                             }
-                            ("webhook", "url") => {
-                                cfg.webhook_url = val.to_string();
+                            ("discord", "ownerid") | ("discord", "userid") => {
+                                cfg.discord_bot_owner_id = val.to_string();
                             }
-                            ("webhook", "userid") => {
-                                cfg.webhook_user_id = val.to_string();
+                            ("discord", "enabled") => {
+                                cfg.discord_bot_enabled = val == "1";
                             }
                             ("agents", "enabled") => {
                                 cfg.agents_enabled = val == "1";
@@ -359,6 +366,7 @@ impl AppConfig {
             "[Settings]\r\n\
             PlayPause={}\r\n\
             AutoVote={}\r\n\
+            AutoReconnect={}\r\n\
             \r\n\
             [Chat]\r\n\
             Enabled={}\r\n\
@@ -376,9 +384,9 @@ impl AppConfig {
             CommsRandom={}\r\n\
             CommsDelay={}\r\n\
             \r\n\
-            [Webhook]\r\n\
-            Url={}\r\n\
-            UserId={}\r\n\
+            [Discord]\r\n\
+            BotToken={}\r\n\
+            OwnerId={}\r\n\
             Enabled={}\r\n\
             \r\n\
             [Agents]\r\n\
@@ -389,6 +397,7 @@ impl AppConfig {
             SelectedAgents={}\r\n",
             hotkey_vk,
             self.auto_vote_mode,
+            if self.auto_reconnect { 1 } else { 0 },
             if self.chat_enabled { 1 } else { 0 },
             self.chat_target,
             self.chat_interval,
@@ -401,9 +410,9 @@ impl AppConfig {
             self.comms_second_num,
             if self.comms_random { 1 } else { 0 },
             self.comms_delay,
-            self.webhook_url,
-            self.webhook_user_id,
-            if self.webhook_enabled { 1 } else { 0 },
+            self.discord_bot_token,
+            self.discord_bot_owner_id,
+            if self.discord_bot_enabled { 1 } else { 0 },
             if self.agents_enabled { 1 } else { 0 },
             if self.instalock_enabled { 1 } else { 0 },
             self.lock_delay,
