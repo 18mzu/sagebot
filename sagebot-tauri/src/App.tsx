@@ -37,7 +37,7 @@ import {
 } from "lucide-react";
 import "./App.css";
 
-const APP_VERSION = "3.6";
+const APP_VERSION = "3.6.1";
 
 const COMMS_CATEGORIES = [
   {
@@ -190,6 +190,8 @@ interface AppConfig {
   webhook_notify_match_concludes?: boolean;
   webhook_notify_rank_change?: boolean;
   auto_reconnect?: boolean;
+  auto_kj_turret?: boolean;
+  low_detail?: boolean;
   agents_enabled: boolean;
   instalock_enabled: boolean;
   lock_delay: number;
@@ -437,6 +439,8 @@ export default function App() {
     webhook_notify_match_concludes: true,
     webhook_notify_rank_change: true,
     auto_reconnect: false,
+    auto_kj_turret: false,
+    low_detail: false,
     agents_enabled: true,
     instalock_enabled: false,
     lock_delay: 20,
@@ -735,6 +739,8 @@ export default function App() {
   const suppressDetectionUntilRef = useRef<number>(0);
   const lastScoreSumRef = useRef<number>(-1);
   const roundStartTimestampRef = useRef<number>(0);
+  const kjTurretTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const kjTurretSecondTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastQueueTimeRef = useRef<number>(0);
   const isHoldingKeyRef = useRef<boolean>(false);
   const statusRef = useRef<StatusResponse>(status);
@@ -1439,10 +1445,42 @@ export default function App() {
                   }
                 }
 
+                // Auto Killjoy Turret: Since detected new round (Round 2, Round 3...), wait 15s then hit E, wait 3s then hit L
+                if (configRef.current.auto_kj_turret && currentRound >= 2) {
+                  if (kjTurretTimerRef.current) {
+                    clearTimeout(kjTurretTimerRef.current);
+                    kjTurretTimerRef.current = null;
+                  }
+                  if (kjTurretSecondTimerRef.current) {
+                    clearTimeout(kjTurretSecondTimerRef.current);
+                    kjTurretSecondTimerRef.current = null;
+                  }
+                  addLog(`[AUTO TURRET] Round ${currentRound} detected. Placing Killjoy Turret in 15s...`);
+                  kjTurretTimerRef.current = setTimeout(() => {
+                    if (!runningRef.current) return;
+                    addLog(`[AUTO TURRET] Round ${currentRound}: Equipping Turret (E)...`);
+                    invoke("trigger_key_press", { key: "E" }).catch(() => {});
+
+                    kjTurretSecondTimerRef.current = setTimeout(() => {
+                      if (!runningRef.current) return;
+                      addLog(`[AUTO TURRET] Round ${currentRound}: Placing Turret (L)...`);
+                      invoke("trigger_key_press", { key: "L" }).catch(() => {});
+                    }, 3000);
+                  }, 15000);
+                }
+
               }
             } else {
               lastScoreSumRef.current = -1;
               roundStartTimestampRef.current = 0;
+              if (kjTurretTimerRef.current) {
+                clearTimeout(kjTurretTimerRef.current);
+                kjTurretTimerRef.current = null;
+              }
+              if (kjTurretSecondTimerRef.current) {
+                clearTimeout(kjTurretSecondTimerRef.current);
+                kjTurretSecondTimerRef.current = null;
+              }
             }
           }
         })
@@ -1537,9 +1575,9 @@ export default function App() {
     }
   }, [activeTab]);
 
-  // Live Storefront countdown ticker
+  // Live Storefront countdown ticker (disabled in Low Detail mode or when not viewing shop)
   useEffect(() => {
-    if (!storefront) return;
+    if (!storefront || config.low_detail || activeTab !== "shop") return;
     const ticker = setInterval(() => {
       setStorefront((prev) => {
         if (!prev) return null;
@@ -1556,7 +1594,7 @@ export default function App() {
       });
     }, 1000);
     return () => clearInterval(ticker);
-  }, [Boolean(storefront)]);
+  }, [Boolean(storefront), config.low_detail, activeTab]);
 
   // Live Match Tracker startup trigger: runs once when game gate passes or VALORANT connects
   useEffect(() => {
@@ -1953,6 +1991,14 @@ export default function App() {
     roundStartTimestampRef.current = 0;
     lastScoreSumRef.current = -1;
     surrenderSpamUntilRef.current = 0;
+    if (kjTurretTimerRef.current) {
+      clearTimeout(kjTurretTimerRef.current);
+      kjTurretTimerRef.current = null;
+    }
+    if (kjTurretSecondTimerRef.current) {
+      clearTimeout(kjTurretSecondTimerRef.current);
+      kjTurretSecondTimerRef.current = null;
+    }
     isActionBusyRef.current = false;
     addLog(reason ? `[SYSTEM] Stopped: ${reason}` : "Stopped SageBot");
 
@@ -3237,7 +3283,7 @@ export default function App() {
   );
 
   return (
-    <div className="app-window" onContextMenu={(e) => e.preventDefault()}>
+    <div className={`app-window ${config.low_detail ? "low-detail" : ""}`} onContextMenu={(e) => e.preventDefault()}>
       {/* Hidden Audio Player */}
       <audio
         ref={audioRef}
@@ -4109,7 +4155,7 @@ export default function App() {
                     <div>
                       <div className="control-title">Auto Queue</div>
                       <div className="pane-subtitle">
-                        Queuing + Agent Select + In Game AFK + Repeats.
+                        Auto Queue into new game.
                       </div>
                     </div>
                     <label className="switch">
@@ -4283,6 +4329,38 @@ export default function App() {
                           const val = e.target.checked;
                           updateAndSaveConfig({ auto_reconnect: val });
                           addLog(val ? "[CONFIG] Auto Reconnect enabled." : "[CONFIG] Auto Reconnect disabled.");
+                        }}
+                      />
+                      <span className="slider round"></span>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Auto Killjoy Turret */}
+                <div className="card">
+                  <div className="between-row">
+                    <div>
+                      <div className="pane-title" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        Auto Killjoy Turret
+                        <span style={{ fontSize: "10px", color: "#f87171", background: "rgba(239, 68, 68, 0.15)", border: "1px solid rgba(239, 68, 68, 0.3)", padding: "1px 7px", borderRadius: "10px", fontWeight: 700 }}>
+                          BETA
+                        </span>
+                      </div>
+                      <div className="pane-subtitle">
+                        Auto place Killjoy Turret.
+                      </div>
+                    </div>
+                    <label className="switch">
+                      <input
+                        type="checkbox"
+                        checked={config.auto_kj_turret ?? false}
+                        onChange={(e) => {
+                          const val = e.target.checked;
+                          updateAndSaveConfig({ auto_kj_turret: val });
+                          if (val) {
+                            showToast("You must be playing Killjoy for this to work.");
+                          }
+                          addLog(val ? "[CONFIG] Auto Killjoy Turret enabled." : "[CONFIG] Auto Killjoy Turret disabled.");
                         }}
                       />
                       <span className="slider round"></span>
@@ -5004,11 +5082,7 @@ export default function App() {
                             onChange={(e) => {
                               const val = e.target.checked;
                               if (val && (!config.selected_agents || config.selected_agents.length === 0)) {
-                                setErrorModal({
-                                  title: "No Agents in Queue",
-                                  message: "You must add at least one agent to your queue before enabling Random Agent.",
-                                  submessage: "Click on an agent in the grid above to add them to your queue.",
-                                });
+                                showToast("You must add at least one agent in queue.");
                                 return;
                               }
                               updateAndSaveConfig({ lock_random_agent: val });
@@ -5853,6 +5927,31 @@ export default function App() {
                             val
                               ? "[SETTINGS] Always on top enabled."
                               : "[SETTINGS] Always on top disabled."
+                          );
+                        }}
+                      />
+                      <span className="slider round"></span>
+                    </label>
+                  </div>
+
+                  <div className="control-row" style={{ marginTop: "14px" }}>
+                    <div>
+                      <div className="control-title">Low Detail Mode</div>
+                      <div className="pane-subtitle">
+                        Disables blurs, timers, and heavy animations to maximize in-game FPS.
+                      </div>
+                    </div>
+                    <label className="switch">
+                      <input
+                        type="checkbox"
+                        checked={config.low_detail ?? false}
+                        onChange={(e) => {
+                          const val = e.target.checked;
+                          updateAndSaveConfig({ low_detail: val });
+                          addLog(
+                            val
+                              ? "[SETTINGS] Low Detail Mode enabled."
+                              : "[SETTINGS] Low Detail Mode disabled."
                           );
                         }}
                       />

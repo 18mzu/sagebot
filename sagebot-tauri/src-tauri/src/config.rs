@@ -42,6 +42,8 @@ pub struct AppConfig {
     pub auto_derank_target_rank: String,
     pub auto_derank_match_limit: u32, // 0 = unlimited
     pub auto_reconnect: bool,         // Auto Reconnect on Disconnect
+    pub auto_kj_turret: bool,         // Auto place Killjoy Turret
+    pub low_detail: bool,             // Low Detail Mode (performance / minimal GPU)
     pub auto_queue_enabled: bool,
     pub auto_queue_mode: String,      // competitive, unrated, swiftplay, spikerush, deathmatch, hurm, ggteam
     pub comms_hotkey: String,
@@ -99,6 +101,8 @@ impl Default for AppConfig {
             auto_derank_target_rank: String::new(),
             auto_derank_match_limit: 0,
             auto_reconnect: false,
+            auto_kj_turret: false,
+            low_detail: false,
             auto_queue_enabled: false,
             auto_queue_mode: "competitive".to_string(),
             comms_hotkey: ".".to_string(),
@@ -254,6 +258,12 @@ impl AppConfig {
                             ("settings", "autoreconnect") => {
                                 cfg.auto_reconnect = val == "1";
                             }
+                            ("settings", "autokjturret") => {
+                                cfg.auto_kj_turret = val == "1";
+                            }
+                            ("settings", "lowdetail") => {
+                                cfg.low_detail = val == "1" || val.eq_ignore_ascii_case("true");
+                            }
                             ("antiafk", "method") => {
                                 if let Ok(m) = val.parse::<u32>() {
                                     cfg.anti_afk_mode = m;
@@ -367,6 +377,8 @@ impl AppConfig {
             PlayPause={}\r\n\
             AutoVote={}\r\n\
             AutoReconnect={}\r\n\
+            AutoKjTurret={}\r\n\
+            LowDetail={}\r\n\
             \r\n\
             [Chat]\r\n\
             Enabled={}\r\n\
@@ -398,6 +410,8 @@ impl AppConfig {
             hotkey_vk,
             self.auto_vote_mode,
             if self.auto_reconnect { 1 } else { 0 },
+            if self.auto_kj_turret { 1 } else { 0 },
+            if self.low_detail { 1 } else { 0 },
             if self.chat_enabled { 1 } else { 0 },
             self.chat_target,
             self.chat_interval,

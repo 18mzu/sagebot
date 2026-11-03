@@ -471,7 +471,10 @@ fn trigger_vote(vote_yes: bool) {
 fn trigger_key_press(key: String) {
     if !IS_BOT_RUNNING.load(Ordering::Relaxed) { return; }
     if !valorant::IS_INGAME_WITH_AGENT.load(Ordering::Relaxed) { return; }
-    if !valorant::is_valorant_focused() { return; }
+    if !valorant::is_valorant_focused() {
+        valorant::focus_valorant_window();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
     let vk = config::key_name_to_vk(&key);
     valorant::send_key_press(vk);
 }

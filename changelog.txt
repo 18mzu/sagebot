@@ -1,10 +1,3 @@
-[v3.6]
-- fixed 5-stack premade party not detected
-- improved UI
-- added Auto Reconnect
-- added Random Agent
-- added Accounts Manager
-- added K/D/A
-- added K/D (20 recent comp games)
-- removed Last Season Rank
-- fixed Hidden names
+[v3.6.1]
+- added Auto Killjoy Turret.
+- added Low Detail Mode.

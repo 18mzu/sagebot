@@ -4259,3 +4259,41 @@ input[type="number"] {
 
 
 
+
+
+/* ==========================================================================
+   LOW DETAIL MODE (Performance & Minimal GPU Usage)
+   ========================================================================== */
+.low-detail *,
+.low-detail *::before,
+.low-detail *::after {
+  animation: none !important;
+  transition: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+}
+
+/* Retain a smooth slow spinner so users know async actions are working */
+.low-detail .spin {
+  animation: spinAnim 3s linear infinite !important;
+}
+
+/* Clean solid backgrounds replacing GPU-heavy translucent blur layers */
+.low-detail .titlebar {
+  background: #0f1118 !important;
+}
+
+.low-detail .card,
+.low-detail .account-selection-box {
+  background: #151824 !important;
+}
+
+.low-detail .modal-overlay {
+  background: rgba(0, 0, 0, 0.85) !important;
+}
+
+.low-detail .modal-card {
+  background: #121520 !important;
+}
