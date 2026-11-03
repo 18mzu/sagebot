@@ -1540,12 +1540,7 @@ fn get_lobby_server_cache() -> &'static Arc<RwLock<Option<(std::time::Instant, S
 }
 
 pub fn discover_lowest_ping_server() -> Option<String> {
-    if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
-        let path = std::path::PathBuf::from(local_app_data)
-            .join("VALORANT")
-            .join("Saved")
-            .join("Logs")
-            .join("ShooterGame.log");
+    if let Some(path) = crate::paths::find_shooter_game_log() {
         #[cfg(target_os = "windows")]
         use std::os::windows::fs::OpenOptionsExt;
         let file_res = std::fs::OpenOptions::new()

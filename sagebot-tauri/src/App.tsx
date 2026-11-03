@@ -36,8 +36,10 @@ import {
   History,
 } from "lucide-react";
 import "./App.css";
+import tauriConf from "../src-tauri/tauri.conf.json";
 
-const APP_VERSION = "3.6.1";
+// Single source of truth for the displayed version (bump tauri.conf.json + Cargo.toml only)
+const APP_VERSION = String(tauriConf.version).replace(/\.0$/, "");
 
 const COMMS_CATEGORIES = [
   {
@@ -153,6 +155,7 @@ interface UpdateInfo {
   release_notes: string;
   download_url: string;
   release_url: string;
+  auto_update_allowed?: boolean;
 }
 
 interface AgentInfo {
@@ -903,7 +906,7 @@ export default function App() {
     invoke<UpdateInfo>("check_for_updates")
       .then((info) => {
         setUpdateInfo(info);
-        if (info.available && info.download_url) {
+        if (info.available && info.download_url && info.auto_update_allowed !== false) {
           performAutoUpdate(info.download_url);
         } else if (info.available) {
           setUpdateStatus(`A newer version is available: ${info.latest_version}`);

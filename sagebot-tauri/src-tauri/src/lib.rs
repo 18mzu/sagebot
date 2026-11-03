@@ -6,6 +6,7 @@ mod locker;
 mod tracker;
 mod storefront;
 mod discord_bot;
+mod paths;
 
 use config::AppConfig;
 use valorant::{
@@ -556,7 +557,7 @@ fn get_changelog() -> String {
     if let Ok(content) = std::fs::read_to_string("changelog.txt") {
         return content;
     }
-    "[v3.4.1]\r\n- Eliminated 50-60 FPS performance drain: optimized process and window detection with zero-snapshot atomic caching.\r\n- Native background hotkey listener: eliminated continuous IPC polling.\r\n- Throttled background locker and monitor loops when in-game or idle.\r\n- Seamless Auto Initiate Surrender: strictly spams for 10s only and pauses Anti-AFK to prevent input collision.\r\n- Set background process priority to ensure game execution takes full precedence.\r\n\r\n[v3.4]\r\n- Upgraded Live Match Tracker with balanced column centering.\r\n- Squeezed weapon skin names to clean skin titles (e.g. Evori Dreamwings, Reaver).\r\n- Color-coded Win Rate: Green (>50%), Neutral (40-50%), Red (<40%).\r\n- Compact 1020x700 dashboard window size with full-tab vertical scrolling.\r\n- Discord Webhook notification on Rank change.\r\n- Rate limit toast notifications with countdown.\r\n- Rounded party indicator capsules aligned to team divider bars.\r\n\r\n[v3.0]\r\n- Upgraded to modern desktop architecture (SageBot 3.0).\r\n- Accurate real-time VALORANT process detection.\r\n- Single-instance enforcement.\r\n- Smooth window dragging on custom titlebar.\r\n\r\n[v2.5]\r\n- added Agents tab.\r\n- added Agent Select, Instalock and Fallback.\r\n- added Webhook notifications.".to_string()
+    include_str!("../../../changelog.txt").to_string()
 }
 
 #[derive(Serialize, Clone, Debug, Default)]
@@ -567,6 +568,31 @@ pub struct UpdateInfo {
     pub release_notes: String,
     pub download_url: String,
     pub release_url: String,
+    /// False when an automatic update to this exact release was already attempted recently
+    /// (prevents endless re-download loops if the replacement failed or the asset is stale).
+    pub auto_update_allowed: bool,
+}
+
+fn update_marker_path() -> std::path::PathBuf {
+    std::env::temp_dir().join("sagebot_update_marker.txt")
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// True if `download_url` was auto-applied less than 30 minutes ago.
+fn recently_attempted(download_url: &str) -> bool {
+    if let Ok(text) = std::fs::read_to_string(update_marker_path()) {
+        let mut parts = text.trim().splitn(2, '|');
+        let ts = parts.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+        let url = parts.next().unwrap_or("");
+        return url == download_url && now_secs().saturating_sub(ts) < 30 * 60;
+    }
+    false
 }
 
 fn is_newer_version(cur: &str, latest: &str) -> bool {
@@ -595,7 +621,9 @@ fn is_newer_version(cur: &str, latest: &str) -> bool {
 
 #[tauri::command]
 async fn check_for_updates() -> Result<UpdateInfo, String> {
-    const CURRENT_VERSION: &str = "3.6";
+    // Single source of truth: version from Cargo.toml (never hard-code; a stale constant
+    // makes every install think the latest release is newer and re-update forever).
+    const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
     let client = reqwest::Client::builder()
         .user_agent(format!("SageBot/{}", CURRENT_VERSION))
@@ -655,6 +683,7 @@ async fn check_for_updates() -> Result<UpdateInfo, String> {
     }
 
     let is_newer = is_newer_version(CURRENT_VERSION, &tag);
+    let auto_update_allowed = is_newer && !download_url.is_empty() && !recently_attempted(&download_url);
 
     Ok(UpdateInfo {
         available: is_newer,
@@ -663,6 +692,7 @@ async fn check_for_updates() -> Result<UpdateInfo, String> {
         release_notes: body,
         download_url,
         release_url,
+        auto_update_allowed,
     })
 }
 
@@ -674,6 +704,9 @@ async fn apply_update(app: tauri::AppHandle, download_url: String) -> Result<(),
     if download_url.is_empty() {
         return Err("Download URL is empty".to_string());
     }
+
+    // Record the attempt so a failed/stale update can't trigger an endless auto-update loop.
+    let _ = std::fs::write(update_marker_path(), format!("{}|{}", now_secs(), download_url));
 
     let client = reqwest::Client::builder()
         .user_agent("SageBot-Updater")
@@ -691,7 +724,12 @@ async fn apply_update(app: tauri::AppHandle, download_url: String) -> Result<(),
     let current_exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let temp_exe = current_exe.with_extension("update_temp.exe");
 
-    let mut file = std::fs::File::create(&temp_exe).map_err(|e| e.to_string())?;
+    let mut file = std::fs::File::create(&temp_exe).map_err(|e| {
+        format!(
+            "Cannot write next to SageBot ({}). Move sagebot.exe to a writable folder (e.g. Desktop) or download the update manually.",
+            e
+        )
+    })?;
     let mut downloaded: u64 = 0;
 
     let _ = app.emit("update-progress", 0u32);
@@ -723,18 +761,26 @@ async fn apply_update(app: tauri::AppHandle, download_url: String) -> Result<(),
     let bat_file = std::env::temp_dir().join(format!("sagebot_updater_{}.bat", std::process::id()));
     let bat_clean = normalize_windows_path(&bat_file);
 
+    // Bounded retries (~20s). If the exe can't be replaced (locked / read-only / frozen disk),
+    // discard the download and relaunch the existing SageBot instead of looping forever.
     let bat_script = format!(
         "@echo off\r\n\
-        timeout /t 1 /nobreak > nul\r\n\
+        set /a tries=0\r\n\
+        ping -n 2 127.0.0.1 > nul\r\n\
         :retry\r\n\
-        move /y \"{}\" \"{}\" > nul 2>&1\r\n\
-        if errorlevel 1 (\r\n\
-            timeout /t 1 /nobreak > nul\r\n\
-            goto retry\r\n\
-        )\r\n\
-        start \"\" \"{}\"\r\n\
+        move /y \"{tmp}\" \"{cur}\" > nul 2>&1\r\n\
+        if not errorlevel 1 goto launch\r\n\
+        set /a tries+=1\r\n\
+        if %tries% geq 20 goto fail\r\n\
+        ping -n 2 127.0.0.1 > nul\r\n\
+        goto retry\r\n\
+        :fail\r\n\
+        del /f /q \"{tmp}\" > nul 2>&1\r\n\
+        :launch\r\n\
+        start \"\" \"{cur}\"\r\n\
         del \"%~f0\"\r\n",
-        temp_clean, current_clean, current_clean
+        tmp = temp_clean,
+        cur = current_clean
     );
 
     let _ = std::fs::write(&bat_clean, bat_script);
@@ -878,6 +924,18 @@ unsafe fn send_ctrl_a() {
 }
 
 #[tauri::command]
+async fn launch_valorant() -> Result<bool, String> {
+    // Used by Auto Reconnect. Works with any install location (see paths.rs).
+    if valorant::is_valorant_process_running() {
+        return Ok(true);
+    }
+    tauri::async_runtime::spawn_blocking(paths::spawn_valorant_via_riot_client)
+        .await
+        .map_err(|e| e.to_string())??;
+    Ok(true)
+}
+
+#[tauri::command]
 async fn login_riot_account(username: String, password: Option<String>) -> Result<bool, String> {
     // 0. Safeguard: if VALORANT is running, do not attempt account switch
     if valorant::is_valorant_process_running() {
@@ -900,36 +958,10 @@ async fn login_riot_account(username: String, password: Option<String>) -> Resul
     }
     tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
 
-    // 2. Discover Riot Client executable path
-    let mut riot_client_path = None;
-    let install_json_path = std::path::Path::new("C:\\ProgramData\\Riot Games\\RiotClientInstalls.json");
-    if install_json_path.exists() {
-        if let Ok(content) = std::fs::read_to_string(install_json_path) {
-            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
-                if let Some(p) = json.get("rc_live").or_else(|| json.get("rc_default")).and_then(|v| v.as_str()) {
-                    if std::path::Path::new(p).exists() {
-                        riot_client_path = Some(p.to_string());
-                    }
-                }
-            }
-        }
-    }
-
-    if riot_client_path.is_none() {
-        let defaults = [
-            "C:\\Riot Games\\Riot Client\\RiotClientServices.exe",
-            "D:\\Riot Games\\Riot Client\\RiotClientServices.exe",
-            "E:\\Riot Games\\Riot Client\\RiotClientServices.exe",
-        ];
-        for p in defaults {
-            if std::path::Path::new(p).exists() {
-                riot_client_path = Some(p.to_string());
-                break;
-            }
-        }
-    }
-
-    let rc_exe = riot_client_path.ok_or_else(|| "Could not locate RiotClientServices.exe on system".to_string())?;
+    // 2. Discover Riot Client executable path (running process, installs json, registry, drive scan)
+    let rc_exe = paths::find_riot_client_services()
+        .map(|p| p.to_string_lossy().to_string())
+        .ok_or_else(|| "Could not locate RiotClientServices.exe on system".to_string())?;
 
     // 3. Launch Riot Client into VALORANT
     #[cfg(target_os = "windows")]
@@ -1305,6 +1337,7 @@ pub fn run() {
             close_window,
             start_dragging_window,
             kill_valorant,
+            launch_valorant,
             login_riot_account,
             resize_to_gate,
             resize_to_dashboard,

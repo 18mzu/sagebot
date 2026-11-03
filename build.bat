@@ -17,7 +17,7 @@ if %ERRORLEVEL% neq 0 (
 
 echo.
 echo [2/2] Packaging executable...
-set VERSION=3.6.1
+set VERSION=3.6.2
 
 set "SRC_EXE="
 if exist "src-tauri\target\release\sagebot.exe" set "SRC_EXE=src-tauri\target\release\sagebot.exe"

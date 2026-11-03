@@ -12,16 +12,32 @@ pub struct LockfileData {
 }
 
 impl LockfileData {
+    /// Reads Riot Client credentials. Searches every user profile for the lockfile and,
+    /// if none is usable (internet cafes, redirected profiles), falls back to reading the
+    /// port/token directly from the running Riot Client / VALORANT process arguments.
     pub fn read_from_disk() -> Result<Self, String> {
-        let local_app_data = std::env::var("LOCALAPPDATA")
-            .map_err(|_| "Failed to find LOCALAPPDATA environment variable".to_string())?;
+        if let Some(path) = crate::paths::find_lockfile_path() {
+            if let Ok(data) = Self::parse_file(&path) {
+                if data.pid == 0 || crate::paths::is_pid_alive(data.pid) {
+                    return Ok(data);
+                }
+            }
+        }
 
-        let path = PathBuf::from(local_app_data)
-            .join("Riot Games")
-            .join("Riot Client")
-            .join("Config")
-            .join("lockfile");
+        if let Some((pid, port, password)) = crate::paths::credentials_from_processes() {
+            return Ok(LockfileData {
+                process: "Riot Client".to_string(),
+                pid,
+                port,
+                password,
+                protocol: "https".to_string(),
+            });
+        }
 
+        Err("Valorant / Riot Client is not running (lockfile not found)".to_string())
+    }
+
+    fn parse_file(path: &PathBuf) -> Result<Self, String> {
         if !path.exists() {
             return Err("Valorant / Riot Client is not running (lockfile not found)".to_string());
         }
@@ -536,12 +552,7 @@ impl ValorantClient {
 }
 
 pub fn discover_glz_host() -> String {
-    if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
-        let path = std::path::PathBuf::from(local_app_data)
-            .join("VALORANT")
-            .join("Saved")
-            .join("Logs")
-            .join("ShooterGame.log");
+    if let Some(path) = crate::paths::find_shooter_game_log() {
         #[cfg(target_os = "windows")]
         use std::os::windows::fs::OpenOptionsExt;
         let file_res = std::fs::OpenOptions::new()
@@ -566,12 +577,7 @@ pub fn discover_glz_host() -> String {
 }
 
 pub fn discover_client_version() -> String {
-    if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
-        let path = std::path::PathBuf::from(local_app_data)
-            .join("VALORANT")
-            .join("Saved")
-            .join("Logs")
-            .join("ShooterGame.log");
+    if let Some(path) = crate::paths::find_shooter_game_log() {
         #[cfg(target_os = "windows")]
         use std::os::windows::fs::OpenOptionsExt;
         let file_res = std::fs::OpenOptions::new()
@@ -610,12 +616,7 @@ pub fn discover_client_version() -> String {
 }
 
 pub fn resolve_agent_from_log() -> String {
-    if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
-        let path = std::path::PathBuf::from(local_app_data)
-            .join("VALORANT")
-            .join("Saved")
-            .join("Logs")
-            .join("ShooterGame.log");
+    if let Some(path) = crate::paths::find_shooter_game_log() {
         #[cfg(target_os = "windows")]
         use std::os::windows::fs::OpenOptionsExt;
         let file_res = std::fs::OpenOptions::new()
