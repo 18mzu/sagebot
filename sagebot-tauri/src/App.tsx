@@ -453,6 +453,14 @@ export default function App() {
 
   const [remoteClientConnected, setRemoteClientConnected] = useState<boolean>(false);
   const remoteBridgeRef = useRef<RemoteBridge | null>(null);
+  const pairedDevicesRef = useRef<PairedDevice[]>(pairedDevices);
+  const secretTokenRef = useRef<string>(secretToken);
+  useEffect(() => {
+    pairedDevicesRef.current = pairedDevices;
+  }, [pairedDevices]);
+  useEffect(() => {
+    secretTokenRef.current = secretToken;
+  }, [secretToken]);
 
   const [activeTab, setActiveTab] = useState<TabType>("main");
   const [agents, setAgents] = useState<AgentInfo[]>([]);
@@ -1072,22 +1080,41 @@ export default function App() {
 
         if (msgType === "request_pair") {
           const { client_id, proposed_name, token } = data;
-          if (token && token === secretToken) {
+          const currentToken = secretTokenRef.current;
+          const currentList = pairedDevicesRef.current;
+
+          // If client provided matching secret token (e.g. from QR scan)
+          if (token && token === currentToken) {
+            const existing = currentList.find((d) => d.id === client_id);
+            const devName = existing?.name || proposed_name || "Mobile Device";
+            if (!existing) {
+              const newDev: PairedDevice = {
+                id: client_id,
+                name: devName,
+                paired_at: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+              };
+              const updated = [...currentList, newDev];
+              pairedDevicesRef.current = updated;
+              setPairedDevices(updated);
+              localStorage.setItem("sagebot_paired_devices", JSON.stringify(updated));
+              showToast(`Connected: ${devName}`);
+            }
             bridge.send({
               type: "pair_approved",
-              token: secretToken,
+              token: currentToken,
               client_id,
-              device_name: proposed_name || "Phone",
+              device_name: devName,
             });
             sendStatusUpdate(bridge);
             return;
           }
 
-          const existing = pairedDevices.find((d) => d.id === client_id);
+          // If client_id was previously approved
+          const existing = currentList.find((d) => d.id === client_id);
           if (existing) {
             bridge.send({
               type: "pair_approved",
-              token: secretToken,
+              token: currentToken,
               client_id,
               device_name: existing.name,
             });
@@ -1095,6 +1122,7 @@ export default function App() {
             return;
           }
 
+          // New device requesting approval -> Prompt modal on PC!
           setDeviceNicknameInput(proposed_name || "iPhone Duo");
           setPendingPairRequest({
             client_id,
@@ -1255,14 +1283,15 @@ export default function App() {
       name: deviceNicknameInput.trim() || pendingPairRequest.proposed_name || "Phone",
       paired_at: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
     };
-    const next = [...pairedDevices.filter((d) => d.id !== newDev.id), newDev];
+    const next = [...pairedDevicesRef.current.filter((d) => d.id !== newDev.id), newDev];
+    pairedDevicesRef.current = next;
     setPairedDevices(next);
     localStorage.setItem("sagebot_paired_devices", JSON.stringify(next));
 
     if (remoteBridgeRef.current) {
       remoteBridgeRef.current.send({
         type: "pair_approved",
-        token: secretToken,
+        token: secretTokenRef.current,
         client_id: newDev.id,
         device_name: newDev.name,
       });
@@ -1298,7 +1327,8 @@ export default function App() {
         target_id: devId,
       });
     }
-    const next = pairedDevices.filter((d) => d.id !== devId);
+    const next = pairedDevicesRef.current.filter((d) => d.id !== devId);
+    pairedDevicesRef.current = next;
     setPairedDevices(next);
     localStorage.setItem("sagebot_paired_devices", JSON.stringify(next));
     showToast("Device removed and disconnected.");
@@ -1314,6 +1344,8 @@ export default function App() {
     const newToken = generateSecretToken();
     setRemoteRoomCode(newCode);
     setSecretToken(newToken);
+    secretTokenRef.current = newToken;
+    pairedDevicesRef.current = [];
     setPairedDevices([]);
     localStorage.setItem("sagebot_remote_code", newCode);
     localStorage.setItem("sagebot_remote_secret", newToken);
@@ -6043,7 +6075,7 @@ export default function App() {
                   <div style={{ marginTop: "20px", paddingTop: "18px", borderTop: "1px solid rgba(255, 255, 255, 0.08)" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
                       <Shield size={16} style={{ color: "var(--accent)" }} />
-                      <span style={{ fontSize: "14px", fontWeight: 700, color: "#ffffff" }}>Security &amp; Connected Devices</span>
+                      <span style={{ fontSize: "14px", fontWeight: 700, color: "#ffffff" }}>Connected Devices</span>
                     </div>
                     <div className="pane-subtitle" style={{ marginBottom: "16px" }}>
                       Manage paired mobile devices authorized to monitor and control SageBot.
@@ -6112,7 +6144,7 @@ export default function App() {
                         </span>
                       </div>
                       <div className="pane-subtitle" style={{ marginTop: "4px" }}>
-                        Sagebot is a multi-functional, external Valorant automation utility.
+                        SageBot is a multi-functional, external VALORANT utility.
                       </div>
                     </div>
                   </div>
@@ -6969,16 +7001,15 @@ export default function App() {
 
       {/* Device Pairing Approval Modal */}
       {pendingPairRequest && (
-        <div className="modal-overlay">
-          <div className="modal-content" style={{ maxWidth: 440 }}>
-            <div className="modal-header">
-              <h3 style={{ margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
-                <span>📱</span> Device Pairing Request
-              </h3>
+        <div className="modal-backdrop" style={{ zIndex: 9999 }}>
+          <div className="modal-card" style={{ maxWidth: 440 }}>
+            <div className="modal-header" style={{ color: "#38bdf8" }}>
+              <Smartphone size={20} color="#38bdf8" />
+              <span style={{ fontSize: "15px", fontWeight: 700, color: "#ffffff" }}>Device Pairing Request</span>
             </div>
             <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
               <p style={{ margin: 0, fontSize: "13px", color: "#cbd5e1" }}>
-                A new mobile device is requesting permission to pair with SageBot.
+                A mobile device is requesting permission to connect and control SageBot.
               </p>
               <div style={{ background: "#0b1120", padding: "10px 14px", borderRadius: 8, border: "1px solid #1e293b", fontSize: "12px", color: "#94a3b8" }}>
                 <div>Device ID: <span style={{ fontFamily: "monospace", color: "#e2e8f0" }}>{pendingPairRequest.client_id.slice(0, 16)}...</span></div>
@@ -6991,7 +7022,7 @@ export default function App() {
                   type="text"
                   value={deviceNicknameInput}
                   onChange={(e) => setDeviceNicknameInput(e.target.value)}
-                  placeholder="e.g. iPhone Duo, iPad Living Room"
+                  placeholder="e.g. iPhone Duo, Living Room iPad"
                   style={{
                     width: "100%",
                     boxSizing: "border-box",
@@ -7006,7 +7037,7 @@ export default function App() {
                 />
               </div>
             </div>
-            <div className="modal-actions" style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+            <div className="modal-actions" style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 18 }}>
               <button
                 className="modal-btn secondary"
                 onClick={handleDenyDevice}
@@ -7016,9 +7047,9 @@ export default function App() {
               <button
                 className="modal-btn primary"
                 onClick={handleApproveDevice}
-                style={{ background: "#3b82f6", borderColor: "#60a5fa" }}
+                style={{ background: "#0284c7", borderColor: "#38bdf8", color: "#ffffff", fontWeight: 700 }}
               >
-                Approve & Pair
+                Approve &amp; Pair
               </button>
             </div>
           </div>
@@ -7027,12 +7058,11 @@ export default function App() {
 
       {/* Reset Code Confirmation Modal */}
       {showResetConfirmModal && (
-        <div className="modal-overlay">
-          <div className="modal-content" style={{ maxWidth: 420 }}>
-            <div className="modal-header">
-              <h3 style={{ margin: 0, color: "#f87171", display: "flex", alignItems: "center", gap: 8 }}>
-                <span>⚠️</span> Reset Remote Pairing Code?
-              </h3>
+        <div className="modal-backdrop" style={{ zIndex: 9999 }}>
+          <div className="modal-card" style={{ maxWidth: 420 }}>
+            <div className="modal-header kill-modal-header">
+              <AlertTriangle size={20} color="#ef4444" />
+              <span style={{ fontSize: "15px", fontWeight: 700, color: "#ef4444" }}>Reset Remote Pairing Code?</span>
             </div>
             <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <p style={{ margin: 0, fontSize: "13px", color: "#cbd5e1", lineHeight: "1.5" }}>
@@ -7042,7 +7072,7 @@ export default function App() {
                 You will need to re-pair any device you wish to use with SageBot.
               </p>
             </div>
-            <div className="modal-actions" style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+            <div className="modal-actions" style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 18 }}>
               <button
                 className="modal-btn secondary"
                 onClick={() => setShowResetConfirmModal(false)}
@@ -7052,9 +7082,9 @@ export default function App() {
               <button
                 className="modal-btn danger"
                 onClick={handleResetRemoteCode}
-                style={{ background: "#dc2626", borderColor: "#ef4444", color: "#ffffff" }}
+                style={{ background: "#dc2626", borderColor: "#ef4444", color: "#ffffff", fontWeight: 700 }}
               >
-                Reset & Disconnect All
+                Reset &amp; Disconnect All
               </button>
             </div>
           </div>

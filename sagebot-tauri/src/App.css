@@ -1861,7 +1861,8 @@ input:checked + .slider:before {
 }
 
 /* Modal Dialog */
-.modal-backdrop {
+.modal-backdrop,
+.modal-overlay {
   position: fixed;
   top: 0;
   left: 0;
@@ -1875,7 +1876,8 @@ input:checked + .slider:before {
   z-index: 2000;
 }
 
-.modal-card {
+.modal-card,
+.modal-content {
   width: 440px;
   max-width: calc(100vw - 32px);
   background: #161824;
