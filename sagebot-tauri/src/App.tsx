@@ -36,7 +36,7 @@ import {
   History,
   Smartphone,
 } from "lucide-react";
-import Peer, { type DataConnection } from "peerjs";
+import { RemoteBridge } from "./remoteBridge";
 import { QRCodeSVG } from "qrcode.react";
 import "./App.css";
 import tauriConf from "../src-tauri/tauri.conf.json";
@@ -404,8 +404,7 @@ export default function App() {
     return generated;
   });
   const [remoteClientConnected, setRemoteClientConnected] = useState<boolean>(false);
-  const remoteConnRef = useRef<DataConnection | null>(null);
-  const remotePeerRef = useRef<Peer | null>(null);
+  const remoteBridgeRef = useRef<RemoteBridge | null>(null);
 
   const [activeTab, setActiveTab] = useState<TabType>("main");
   const [agents, setAgents] = useState<AgentInfo[]>([]);
@@ -933,56 +932,67 @@ export default function App() {
       .catch((err) => {
         console.error("Auto update check failed:", err);
       });
-    // Initialize PeerJS Remote Host
-    const pcPeerId = `sagebot-pc-${remoteRoomCode.toLowerCase()}`;
-    const peer = new Peer(pcPeerId, {
-      debug: 1,
-      config: {
-        iceServers: [
-          { urls: "stun:stun.l.google.com:19302" },
-          { urls: "stun:global.stun.twilio.com:3478" },
-        ],
-      },
-    });
-    remotePeerRef.current = peer;
-
-    peer.on("connection", (conn) => {
-      remoteConnRef.current = conn;
-      setRemoteClientConnected(true);
-      showToast("📱 Mobile Remote connected!");
-
-      const sendStatusUpdate = () => {
-        if (conn.open) {
-          conn.send({
-            type: "status",
-            payload: statusRef.current,
-          });
-          conn.send({
-            type: "config",
-            payload: {
-              bot_running: runningRef.current,
-              anti_afk_enabled: true,
-              auto_reconnect: configRef.current.auto_reconnect,
-              auto_ff_enabled: configRef.current.auto_ff_enabled,
-              auto_kj_turret: configRef.current.auto_kj_turret,
-              auto_queue_enabled: configRef.current.auto_queue_enabled,
-              auto_queue_mode: configRef.current.auto_queue_mode,
-              lock_random_agent: configRef.current.lock_random_agent,
-              low_detail: configRef.current.low_detail,
-            },
-          });
-        }
-      };
-
-      conn.on("open", () => {
-        sendStatusUpdate();
+    // Initialize Dual-Broker WSS Remote Host
+    const formatRosterForMobile = (r: LiveMatchRoster | null) => {
+      if (!r) return [];
+      const all = [...(r.ally_team || []), ...(r.enemy_team || [])];
+      return all.map((p) => {
+        const [game_name, tag_line] = (p.name || "").split("#");
+        return {
+          puuid: p.puuid,
+          game_name: game_name || p.name || "Player",
+          tag_line: tag_line || "",
+          team: p.team || "Blue",
+          agent_name: p.agent_name || "-",
+          agent_id: p.agent_id || "",
+          current_rank_name: p.current_rank_name || "Unranked",
+          current_rr: p.current_rr || 0,
+          win_rate: p.total_games > 0 ? `${Math.round(p.win_rate)}% (${p.total_games}G)` : "-",
+          games_count: p.total_games || 0,
+          is_party: Boolean(p.party_tag),
+        };
       });
+    };
 
-      conn.on("data", async (data: any) => {
-        if (!data || !data.action) return;
-        switch (data.action) {
+    const sendStatusUpdate = (bridgeInstance?: RemoteBridge | null) => {
+      const b = bridgeInstance ?? remoteBridgeRef.current;
+      if (!b) return;
+      b.send({
+        type: "sync",
+        status: statusRef.current,
+        config: {
+          bot_running: runningRef.current,
+          anti_afk_enabled: true,
+          auto_reconnect: Boolean(configRef.current.auto_reconnect),
+          auto_ff_enabled: Boolean(configRef.current.auto_ff_enabled),
+          auto_kj_turret: Boolean(configRef.current.auto_kj_turret),
+          auto_queue_enabled: Boolean(configRef.current.auto_queue_enabled),
+          auto_queue_mode: configRef.current.auto_queue_mode || "competitive",
+          lock_random_agent: Boolean(configRef.current.lock_random_agent),
+          low_detail: Boolean(configRef.current.low_detail),
+        },
+      });
+    };
+
+    const bridge = new RemoteBridge(remoteRoomCode, "pc", {
+      onBrokerReady: () => {
+        sendStatusUpdate(bridge);
+      },
+      onMessage: async (data: any) => {
+        if (!data) return;
+        const action = data.action || (data.type === "request_sync" ? "request_sync" : "");
+        if (!action) return;
+
+        setRemoteClientConnected((prev) => {
+          if (!prev) {
+            showToast("Mobile Remote connected");
+          }
+          return true;
+        });
+
+        switch (action) {
           case "request_sync":
-            sendStatusUpdate();
+            sendStatusUpdate(bridge);
             break;
           case "toggle_bot":
             if (runningRef.current) {
@@ -990,50 +1000,51 @@ export default function App() {
             } else {
               startSagebot();
             }
-            sendStatusUpdate();
+            setTimeout(() => sendStatusUpdate(bridge), 80);
             break;
           case "toggle_anti_afk":
-            showToast("Anti-AFK toggled via remote");
+            showToast("Anti-AFK is active when SageBot runs");
+            sendStatusUpdate(bridge);
             break;
           case "toggle_auto_queue": {
             const next = !configRef.current.auto_queue_enabled;
             updateAndSaveConfig({ auto_queue_enabled: next });
-            sendStatusUpdate();
+            setTimeout(() => sendStatusUpdate(bridge), 50);
             break;
           }
           case "toggle_auto_ff": {
             const next = !configRef.current.auto_ff_enabled;
             updateAndSaveConfig({ auto_ff_enabled: next });
-            sendStatusUpdate();
+            setTimeout(() => sendStatusUpdate(bridge), 50);
             break;
           }
           case "toggle_auto_kj": {
             const next = !configRef.current.auto_kj_turret;
             updateAndSaveConfig({ auto_kj_turret: next });
-            sendStatusUpdate();
+            setTimeout(() => sendStatusUpdate(bridge), 50);
             break;
           }
           case "toggle_auto_reconnect": {
             const next = !configRef.current.auto_reconnect;
             updateAndSaveConfig({ auto_reconnect: next });
-            sendStatusUpdate();
+            setTimeout(() => sendStatusUpdate(bridge), 50);
             break;
           }
           case "toggle_random_agent": {
             const next = !configRef.current.lock_random_agent;
             updateAndSaveConfig({ lock_random_agent: next });
-            sendStatusUpdate();
+            setTimeout(() => sendStatusUpdate(bridge), 50);
             break;
           }
           case "take_screenshot": {
             try {
               const b64 = await invoke<string>("capture_screen_base64");
-              conn.send({
+              bridge.send({
                 type: "screenshot",
                 payload: b64,
               });
             } catch (err) {
-              conn.send({
+              bridge.send({
                 type: "toast",
                 payload: `Screenshot failed: ${err}`,
               });
@@ -1042,13 +1053,13 @@ export default function App() {
           }
           case "refresh_roster": {
             try {
-              const r = await invoke<any>("get_live_match_roster");
-              conn.send({
+              const r = await invoke<LiveMatchRoster>("get_live_match_roster");
+              bridge.send({
                 type: "roster",
-                payload: r?.players || [],
+                payload: formatRosterForMobile(r),
               });
             } catch {
-              conn.send({
+              bridge.send({
                 type: "roster",
                 payload: [],
               });
@@ -1056,15 +1067,17 @@ export default function App() {
             break;
           }
         }
-      });
-
-      conn.on("close", () => {
-        setRemoteClientConnected(false);
-      });
+      },
     });
+    remoteBridgeRef.current = bridge;
+
+    const syncInterval = setInterval(() => {
+      sendStatusUpdate(bridge);
+    }, 2500);
 
     return () => {
-      peer.destroy();
+      clearInterval(syncInterval);
+      bridge.destroy();
     };
   }, []);
 
