@@ -455,12 +455,21 @@ export default function App() {
   const remoteBridgeRef = useRef<RemoteBridge | null>(null);
   const pairedDevicesRef = useRef<PairedDevice[]>(pairedDevices);
   const secretTokenRef = useRef<string>(secretToken);
+  const remoteRoomCodeRef = useRef<string>(remoteRoomCode);
+  const pendingPairRequestRef = useRef<any>(null);
+
   useEffect(() => {
     pairedDevicesRef.current = pairedDevices;
   }, [pairedDevices]);
   useEffect(() => {
     secretTokenRef.current = secretToken;
   }, [secretToken]);
+  useEffect(() => {
+    remoteRoomCodeRef.current = remoteRoomCode;
+  }, [remoteRoomCode]);
+  useEffect(() => {
+    pendingPairRequestRef.current = pendingPairRequest;
+  }, [pendingPairRequest]);
 
   const [activeTab, setActiveTab] = useState<TabType>("main");
   const [agents, setAgents] = useState<AgentInfo[]>([]);
@@ -1055,7 +1064,10 @@ export default function App() {
       .catch((err) => {
         console.error("Auto update check failed:", err);
       });
-    // Initialize Dual-Broker WSS Remote Host
+  }, []);
+
+  // Dedicated Lifecycle for Dual-Broker Remote Bridge (re-subscribes cleanly when remoteRoomCode changes)
+  useEffect(() => {
     const sendStatusUpdate = (bridgeInstance?: RemoteBridge | null) => {
       const b = bridgeInstance ?? remoteBridgeRef.current;
       if (!b) return;
@@ -1078,15 +1090,25 @@ export default function App() {
         const msgType = data.type || "";
         const action = data.action || (data.type === "request_sync" ? "request_sync" : "");
 
-        if (msgType === "request_pair") {
-          const { client_id, proposed_name, token } = data;
+        if (msgType === "verify_pair" || msgType === "request_pair") {
+          const { client_id, proposed_name, token, code } = data;
+          const currentCode = remoteRoomCodeRef.current;
           const currentToken = secretTokenRef.current;
           const currentList = pairedDevicesRef.current;
 
-          // If client provided matching secret token (e.g. from QR scan)
+          // 1. Verify code if provided
+          if (code && typeof code === "string" && code.trim().toUpperCase() !== currentCode.trim().toUpperCase()) {
+            bridge.send({
+              type: "invalid_code",
+              message: "Invalid pairing code. Check code on PC."
+            });
+            return;
+          }
+
+          // 2. If client provided matching secret token (e.g. from QR scan)
           if (token && token === currentToken) {
             const existing = currentList.find((d) => d.id === client_id);
-            const devName = existing?.name || proposed_name || "Mobile Device";
+            const devName = existing?.name || proposed_name || "Phone";
             if (!existing) {
               const newDev: PairedDevice = {
                 id: client_id,
@@ -1109,7 +1131,7 @@ export default function App() {
             return;
           }
 
-          // If client_id was previously approved
+          // 3. If client_id was previously approved
           const existing = currentList.find((d) => d.id === client_id);
           if (existing) {
             bridge.send({
@@ -1122,12 +1144,20 @@ export default function App() {
             return;
           }
 
-          // New device requesting approval -> Prompt modal on PC!
-          setDeviceNicknameInput(proposed_name || "iPhone Duo");
-          setPendingPairRequest({
+          // 4. Code is valid, acknowledge to mobile that approval is required on PC
+          bridge.send({
+            type: "approval_required",
             client_id,
-            proposed_name: proposed_name || "iPhone Duo",
           });
+
+          // Open approval modal on PC (only set once so typing is never interrupted)
+          if (!pendingPairRequestRef.current) {
+            setDeviceNicknameInput(proposed_name || "Phone");
+            setPendingPairRequest({
+              client_id,
+              proposed_name: proposed_name || "Phone",
+            });
+          }
           return;
         }
 
@@ -1237,8 +1267,9 @@ export default function App() {
     return () => {
       clearInterval(syncInterval);
       bridge.destroy();
+      remoteBridgeRef.current = null;
     };
-  }, []);
+  }, [remoteRoomCode]);
 
   // Disable default browser/WebView context menu on right-click
   useEffect(() => {
@@ -1305,6 +1336,7 @@ export default function App() {
       });
     }
     setPendingPairRequest(null);
+    pendingPairRequestRef.current = null;
     showToast(`Approved device: ${newDev.name}`);
   };
 
@@ -1317,6 +1349,7 @@ export default function App() {
       });
     }
     setPendingPairRequest(null);
+    pendingPairRequestRef.current = null;
     showToast("Device pairing denied");
   };
 
@@ -1347,6 +1380,8 @@ export default function App() {
     secretTokenRef.current = newToken;
     pairedDevicesRef.current = [];
     setPairedDevices([]);
+    setPendingPairRequest(null);
+    pendingPairRequestRef.current = null;
     localStorage.setItem("sagebot_remote_code", newCode);
     localStorage.setItem("sagebot_remote_secret", newToken);
     localStorage.setItem("sagebot_paired_devices", JSON.stringify([]));
@@ -6017,9 +6052,6 @@ export default function App() {
                       <div>
                         <div className="pane-title" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                           <span>SageBot Mobile</span>
-                          <span style={{ fontSize: "10px", color: "#38bdf8", background: "rgba(56, 189, 248, 0.15)", border: "1px solid rgba(56, 189, 248, 0.3)", padding: "1px 7px", borderRadius: "10px", fontWeight: 700 }}>
-                            PWA
-                          </span>
                         </div>
                         <div className="pane-subtitle" style={{ marginTop: "2px" }}>
                           Control SageBot and the game from your phone.
@@ -6041,7 +6073,7 @@ export default function App() {
                         QR Code
                       </h4>
                       <p style={{ fontSize: "12px", color: "var(--text-secondary)", lineHeight: 1.5, marginBottom: "14px" }}>
-                        Scan this QR code on your phone to control SageBot and the game.
+                        Scan this QR code on your phone to control SageBot and VALORANT.
                       </p>
 
                       <div style={{ display: "inline-flex", flexDirection: "column", gap: "4px" }}>
@@ -6058,6 +6090,17 @@ export default function App() {
                             <RotateCcw size={14} />
                             <span>Reset Code</span>
                           </button>
+                        </div>
+                        <div style={{ marginTop: "8px", fontSize: "12px", color: "var(--text-tertiary)" }}>
+                          in this link:{" "}
+                          <a
+                            href="https://sagebot-mobile.vercel.app/"
+                            target="_blank"
+                            rel="noreferrer"
+                            style={{ color: "#38bdf8", textDecoration: "underline", fontWeight: 600 }}
+                          >
+                            https://sagebot-mobile.vercel.app/
+                          </a>
                         </div>
                       </div>
                     </div>
@@ -7009,11 +7052,8 @@ export default function App() {
             </div>
             <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
               <p style={{ margin: 0, fontSize: "13px", color: "#cbd5e1" }}>
-                A mobile device is requesting permission to connect and control SageBot.
+                A device is requesting permission to connect to SageBot.
               </p>
-              <div style={{ background: "#0b1120", padding: "10px 14px", borderRadius: 8, border: "1px solid #1e293b", fontSize: "12px", color: "#94a3b8" }}>
-                <div>Device ID: <span style={{ fontFamily: "monospace", color: "#e2e8f0" }}>{pendingPairRequest.client_id.slice(0, 16)}...</span></div>
-              </div>
               <div>
                 <label style={{ fontSize: "12px", color: "#94a3b8", display: "block", marginBottom: 6 }}>
                   Give this device a nickname:
