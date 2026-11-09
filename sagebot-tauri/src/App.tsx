@@ -30,11 +30,10 @@ import {
   ShoppingBag,
   Clock,
   Sparkles,
-  Bot,
-  Eye,
   GripVertical,
   History,
   Smartphone,
+  Bell,
 } from "lucide-react";
 import { RemoteBridge } from "./remoteBridge";
 import { QRCodeSVG } from "qrcode.react";
@@ -195,6 +194,9 @@ interface AppConfig {
   webhook_notify_match_start?: boolean;
   webhook_notify_match_concludes?: boolean;
   webhook_notify_rank_change?: boolean;
+  remote_notify_disconnect?: boolean;
+  remote_notify_status?: boolean;
+  remote_notify_rank_change?: boolean;
   auto_reconnect?: boolean;
   auto_kj_turret?: boolean;
   low_detail?: boolean;
@@ -456,6 +458,9 @@ export default function App() {
     webhook_notify_match_start: true,
     webhook_notify_match_concludes: true,
     webhook_notify_rank_change: true,
+    remote_notify_disconnect: true,
+    remote_notify_status: true,
+    remote_notify_rank_change: true,
     auto_reconnect: false,
     auto_kj_turret: false,
     low_detail: false,
@@ -508,7 +513,6 @@ export default function App() {
   isRecordingMacroRef.current = isRecordingMacro;
   const [changelogContent, setChangelogContent] = useState<string>("");
   const [updateStatus, setUpdateStatus] = useState<string>("");
-  const [showBotToken, setShowBotToken] = useState<boolean>(false);
   const [toasts, setToasts] = useState<ToastMsg[]>([]);
   const [showKillModal, setShowKillModal] = useState<boolean>(false);
   const [showChatWarningModal, setShowChatWarningModal] = useState<boolean>(false);
@@ -829,12 +833,51 @@ export default function App() {
   const configRef = useRef<AppConfig>(config);
   configRef.current = config;
 
-  // Discord Notification Dispatcher
+  // Notification Dispatcher (Remote Phone + Discord Webhook)
   const triggerWebhookEvent = (
     message: string,
     eventType: "disconnect" | "agent_select" | "queue" | "match_start" | "match_concludes" | "bot_status" | "rank_change" | "status"
   ) => {
     const cfg = configRef.current;
+
+    // 1. Dispatch notification to connected Mobile Phone
+    if (remoteBridgeRef.current) {
+      let allowRemote = true;
+      if (eventType === "disconnect" && (cfg.remote_notify_disconnect ?? cfg.webhook_notify_disconnect) === false) {
+        allowRemote = false;
+      }
+      if (
+        (eventType === "agent_select" || eventType === "queue" || eventType === "match_start" || eventType === "match_concludes" || eventType === "status") &&
+        (cfg.remote_notify_status ?? cfg.webhook_notify_status) === false
+      ) {
+        allowRemote = false;
+      }
+      if (eventType === "rank_change" && (cfg.remote_notify_rank_change ?? cfg.webhook_notify_rank_change) === false) {
+        allowRemote = false;
+      }
+
+      if (allowRemote) {
+        const cleanMessage = message.replace(/\*\*/g, "").trim();
+        const title =
+          eventType === "disconnect"
+            ? "SageBot Connection"
+            : eventType === "rank_change"
+            ? "SageBot Rank Update"
+            : "SageBot Match Status";
+
+        remoteBridgeRef.current.send({
+          type: "notification",
+          payload: {
+            title,
+            message: cleanMessage,
+            eventType,
+            timestamp: Date.now(),
+          },
+        });
+      }
+    }
+
+    // 2. Dispatch to Discord webhook/bot if configured
     const isEnabled = (cfg.webhook_enabled || cfg.discord_bot_enabled) ?? false;
     const hasTarget = Boolean((cfg.discord_bot_token?.trim() && (cfg.discord_bot_owner_id?.trim() || cfg.webhook_user_id?.trim())) || cfg.webhook_url?.trim());
     if (!isEnabled || !hasTarget) return;
@@ -970,6 +1013,21 @@ export default function App() {
           auto_queue_mode: configRef.current.auto_queue_mode || "competitive",
           lock_random_agent: Boolean(configRef.current.lock_random_agent),
           low_detail: Boolean(configRef.current.low_detail),
+          agents_enabled: Boolean(configRef.current.agents_enabled),
+          instalock_enabled: Boolean(configRef.current.instalock_enabled),
+          lock_delay: configRef.current.lock_delay ?? 20,
+          starter_fallback_enabled: Boolean(configRef.current.starter_fallback_enabled),
+          selected_agents: configRef.current.selected_agents || [],
+          chat_enabled: Boolean(configRef.current.chat_enabled),
+          chat_target: configRef.current.chat_target ?? 0,
+          chat_interval: configRef.current.chat_interval ?? 180,
+          chat_text: configRef.current.chat_text || "",
+          auto_ff_round_5: Boolean(configRef.current.auto_ff_round_5),
+          auto_ff_round_13: Boolean(configRef.current.auto_ff_round_13),
+          auto_ff_round_14: Boolean(configRef.current.auto_ff_round_14),
+          remote_notify_disconnect: configRef.current.remote_notify_disconnect ?? configRef.current.webhook_notify_disconnect ?? true,
+          remote_notify_status: configRef.current.remote_notify_status ?? configRef.current.webhook_notify_status ?? true,
+          remote_notify_rank_change: configRef.current.remote_notify_rank_change ?? configRef.current.webhook_notify_rank_change ?? true,
         },
       });
     };
@@ -1063,6 +1121,38 @@ export default function App() {
                 type: "roster",
                 payload: [],
               });
+            }
+            break;
+          }
+          case "kill_valorant": {
+            try {
+              await invoke("kill_valorant");
+              showToast("VALORANT terminated via Mobile Remote");
+              bridge.send({ type: "toast", payload: "VALORANT terminated successfully." });
+            } catch (err: any) {
+              bridge.send({ type: "toast", payload: `Failed to terminate: ${err}` });
+            }
+            break;
+          }
+          case "request_storefront": {
+            try {
+              const sf = await invoke<StorefrontData>("get_storefront");
+              bridge.send({
+                type: "storefront",
+                payload: sf,
+              });
+            } catch (err) {
+              bridge.send({
+                type: "storefront",
+                payload: null,
+              });
+            }
+            break;
+          }
+          case "update_config": {
+            if (data.payload && typeof data.payload === "object") {
+              updateAndSaveConfig(data.payload);
+              setTimeout(() => sendStatusUpdate(bridge), 60);
             }
             break;
           }
@@ -3766,13 +3856,6 @@ export default function App() {
               <Smartphone size={14} />
               <span>Remote</span>
             </button>
-            <button
-              className={`nav-btn ${activeTab === "webhook" ? "active" : ""}`}
-              onClick={() => setActiveTab("webhook")}
-            >
-              <Bot size={14} />
-              <span>Discord</span>
-            </button>
 
             {/* Bottom group: Media & Info (no divider line between them) */}
             <button
@@ -5846,170 +5929,46 @@ export default function App() {
                       <span style={{ fontSize: "11px", color: "var(--text-secondary)", marginTop: "2px", display: "block" }}>Tap to snap a real-time full screenshot of VALORANT on PC.</span>
                     </div>
                   </div>
-                </div>
-              </div>
-            )}
 
-            {/* TAB 7: DISCORD INTEGRATION */}
-            {activeTab === "webhook" && (
-              <div className="tab-pane">
-                <div className="card">
-                  {/* Master Header */}
-                  <div className="between-row">
-                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                      <Bot size={22} style={{ color: "var(--accent)" }} />
-                      <div>
-                        <div className="pane-title" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                          <span>Discord Integration</span>
-                        </div>
-                        <div className="pane-subtitle" style={{ marginTop: "2px" }}>
-                          Remote Control via Discord Bot.
-                        </div>
-                      </div>
+                  {/* Remote Notifications */}
+                  <div style={{ marginTop: "20px", paddingTop: "18px", borderTop: "1px solid rgba(255, 255, 255, 0.08)" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+                      <Bell size={16} style={{ color: "var(--accent)" }} />
+                      <span style={{ fontSize: "14px", fontWeight: 700, color: "#ffffff" }}>Phone Notifications</span>
                     </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                      <span style={{ fontSize: "13px", fontWeight: 600 }}>Enable</span>
-                      <label className="switch">
-                        <input
-                          type="checkbox"
-                          checked={(config.discord_bot_enabled || config.webhook_enabled) ?? false}
-                          onChange={(e) => {
-                            const val = e.target.checked;
-                            updateAndSaveConfig({
-                              discord_bot_enabled: val,
-                              webhook_enabled: val,
-                            });
-                            showToast(val ? "Discord Integration Activated" : "Discord Integration Disabled");
-                          }}
-                        />
-                        <span className="slider round"></span>
-                      </label>
+                    <div className="pane-subtitle" style={{ marginBottom: "16px" }}>
+                      Push live notifications to your connected phone for game alerts and status updates.
                     </div>
-                  </div>
-
-                  {/* Section 1: Discord Bot (Remote Commands + DM Alerts) */}
-                  <div style={{ marginTop: "16px", padding: "14px 16px", background: "rgba(255,255,255,0.03)", borderRadius: "10px", border: "1px solid rgba(255,255,255,0.06)" }}>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                      <div className="field-header" style={{ color: "var(--accent)", margin: 0, fontSize: "13px" }}>
-                        Authentication
-                      </div>
-                    </div>
-
-                    <div style={{ marginTop: "12px" }}>
-                      <div className="field-header" style={{ fontSize: "12px" }}>Bot Token</div>
-                      <div style={{ position: "relative", display: "flex", alignItems: "center", marginTop: "4px" }}>
-                        <input
-                          type={showBotToken ? "text" : "password"}
-                          className="text-input"
-                          placeholder="Paste your Discord Bot Token..."
-                          value={config.discord_bot_token || ""}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            updateAndSaveConfig({ discord_bot_token: val });
-                          }}
-                          style={{ paddingRight: "40px" }}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowBotToken(!showBotToken)}
-                          style={{
-                            position: "absolute",
-                            right: "8px",
-                            background: "none",
-                            border: "none",
-                            cursor: "pointer",
-                            color: "var(--text-muted)",
-                            display: "flex",
-                            alignItems: "center"
-                          }}
-                          title={showBotToken ? "Hide Token" : "Show Token"}
-                        >
-                          {showBotToken ? <EyeOff size={16} /> : <Eye size={16} />}
-                        </button>
-                      </div>
-                    </div>
-
-                    <div style={{ marginTop: "12px" }}>
-                      <div className="field-header" style={{ fontSize: "12px" }}>User ID</div>
-                      <div className="pane-subtitle" style={{ fontSize: "11px" }}>
-                        Right-click your profile in Discord ➔ Copy User ID. Authorizes commands and delivers private DM notifications.
-                      </div>
-                      <input
-                        type="text"
-                        className="text-input"
-                        placeholder="e.g. 822863893692284948"
-                        value={config.discord_bot_owner_id || config.webhook_user_id || ""}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          updateAndSaveConfig({
-                            discord_bot_owner_id: val,
-                            webhook_user_id: val,
-                          });
-                        }}
-                        style={{ marginTop: "4px" }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Section 2: Test Connection */}
-                  <div style={{ marginTop: "16px", display: "flex", alignItems: "center", gap: "12px" }}>
-                    <button
-                      className="action-btn"
-                      onClick={async () => {
-                        const token = config.discord_bot_token?.trim();
-                        const url = config.webhook_url?.trim() || "";
-                        const uid = config.discord_bot_owner_id?.trim() || config.webhook_user_id?.trim() || "";
-
-                        if (!token && !url) {
-                          showToast("Please enter your Bot Token and User ID first.");
-                          return;
-                        }
-                        showToast("Testing connection...");
-                        try {
-                          const res = await invoke<string>("test_discord_webhook", {
-                            url: url,
-                            userId: uid,
-                            botToken: token || null,
-                          });
-                          showToast(res);
-                        } catch (err: any) {
-                          showToast(`Failed: ${err}`);
-                        }
-                      }}
-                    >
-                      Test
-                    </button>
-                  </div>
-
-                  {/* Granular Notification Events */}
-                  <div style={{ marginTop: "16px", paddingTop: "14px", borderTop: "1px solid rgba(255, 255, 255, 0.08)" }}>
-                    <div className="field-header" style={{ marginBottom: "12px" }}>Notification Events</div>
 
                     <div className="control-row" style={{ marginTop: "8px" }}>
                       <div>
                         <div className="control-title">Disconnect &amp; Reconnect</div>
-                        <div className="pane-subtitle">Alerts when VALORANT client disconnects or re-joins.</div>
+                        <div className="pane-subtitle">Alerts phone when VALORANT client disconnects or re-joins.</div>
                       </div>
                       <label className="switch">
                         <input
                           type="checkbox"
-                          checked={config.webhook_notify_disconnect ?? true}
-                          onChange={(e) => updateAndSaveConfig({ webhook_notify_disconnect: e.target.checked })}
+                          checked={config.remote_notify_disconnect ?? config.webhook_notify_disconnect ?? true}
+                          onChange={(e) => updateAndSaveConfig({
+                            remote_notify_disconnect: e.target.checked,
+                            webhook_notify_disconnect: e.target.checked,
+                          })}
                         />
                         <span className="slider round"></span>
                       </label>
                     </div>
 
-                    <div className="control-row" style={{ marginTop: "10px" }}>
+                    <div className="control-row" style={{ marginTop: "12px" }}>
                       <div>
-                        <div className="control-title">Status</div>
-                        <div className="pane-subtitle">Alerts for match queue, agent select, match start, and match concludes.</div>
+                        <div className="control-title">Status Changes</div>
+                        <div className="pane-subtitle">Alerts phone for queue, agent select, match start, and match concludes.</div>
                       </div>
                       <label className="switch">
                         <input
                           type="checkbox"
-                          checked={config.webhook_notify_status ?? true}
+                          checked={config.remote_notify_status ?? config.webhook_notify_status ?? true}
                           onChange={(e) => updateAndSaveConfig({
+                            remote_notify_status: e.target.checked,
                             webhook_notify_status: e.target.checked,
                             webhook_notify_queue: e.target.checked,
                             webhook_notify_agent_select: e.target.checked,
@@ -6021,16 +5980,19 @@ export default function App() {
                       </label>
                     </div>
 
-                    <div className="control-row" style={{ marginTop: "10px" }}>
+                    <div className="control-row" style={{ marginTop: "12px" }}>
                       <div>
                         <div className="control-title">Rank Update</div>
-                        <div className="pane-subtitle">Alerts when your competitive rank or RR updates.</div>
+                        <div className="pane-subtitle">Alerts phone when your competitive rank or RR changes.</div>
                       </div>
                       <label className="switch">
                         <input
                           type="checkbox"
-                          checked={config.webhook_notify_rank_change ?? true}
-                          onChange={(e) => updateAndSaveConfig({ webhook_notify_rank_change: e.target.checked })}
+                          checked={config.remote_notify_rank_change ?? config.webhook_notify_rank_change ?? true}
+                          onChange={(e) => updateAndSaveConfig({
+                            remote_notify_rank_change: e.target.checked,
+                            webhook_notify_rank_change: e.target.checked,
+                          })}
                         />
                         <span className="slider round"></span>
                       </label>
