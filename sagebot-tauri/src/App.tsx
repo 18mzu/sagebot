@@ -889,6 +889,36 @@ export default function App() {
   const lobbyCountRef = useRef<number>(0);
   const isReconnectingRef = useRef<boolean>(false);
 
+  const triggerAutoReconnect = (reason: string) => {
+    if (!configRef.current.auto_reconnect) return;
+    if (isReconnectingRef.current) return;
+    isReconnectingRef.current = true;
+    triggerWebhookEvent("Rejoining...", "disconnect");
+    addLog(`[RECONNECT] Auto Reconnect triggered (${reason}). Launching VALORANT via Riot Client...`);
+    invoke("launch_valorant")
+      .then(() => {
+        addLog("[RECONNECT] VALORANT launched. Waiting to rejoin match...");
+      })
+      .catch((err) => {
+        addLog(`[RECONNECT] Failed to launch VALORANT: ${err}`);
+      })
+      .finally(() => {
+        setTimeout(() => {
+          isReconnectingRef.current = false;
+        }, 20000);
+      });
+  };
+
+  // Auto Reconnect Startup Check: launch VALORANT 3.5s after app startup if enabled & offline
+  useEffect(() => {
+    const startupTimer = setTimeout(() => {
+      if (configRef.current.auto_reconnect && !statusRef.current.game_live && !statusRef.current.is_connected) {
+        triggerAutoReconnect("App Startup");
+      }
+    }, 3500);
+    return () => clearTimeout(startupTimer);
+  }, []);
+
   // Audio Player State
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [isPlayingMusic, setIsPlayingMusic] = useState<boolean>(false);
@@ -1742,6 +1772,9 @@ export default function App() {
             }
             if (devBypassRef.current) {
               setGateGameFound(false);
+              if (configRef.current.auto_reconnect && !isReconnectingRef.current && runningRef.current) {
+                triggerAutoReconnect("Offline Testing Mode");
+              }
               return;
             }
             // VALORANT is not running or lockfiles lost
@@ -1767,25 +1800,12 @@ export default function App() {
               );
 
               // Auto Reconnect execution
-              if (configRef.current.auto_reconnect && !isReconnectingRef.current) {
-                isReconnectingRef.current = true;
-                triggerWebhookEvent("Rejoining...", "disconnect");
-                addLog("[RECONNECT] Auto Reconnect triggered. Relaunching VALORANT via Riot Client...");
-                invoke("launch_valorant")
-                  .then(() => {
-                    addLog("[RECONNECT] VALORANT launched. Waiting to rejoin match...");
-                  })
-                  .catch((err) => {
-                    addLog(`[RECONNECT] Failed to launch VALORANT: ${err}`);
-                  })
-                  .finally(() => {
-                    setTimeout(() => {
-                      isReconnectingRef.current = false;
-                    }, 15000);
-                  });
-              }
+              triggerAutoReconnect("VALORANT Disconnected");
             } else {
               setGateGameFound(false);
+              if (configRef.current.auto_reconnect && !isReconnectingRef.current) {
+                triggerAutoReconnect("Waiting for VALORANT");
+              }
             }
           } else {
             disconnectCountRef.current = 0;
@@ -1925,6 +1945,9 @@ export default function App() {
         .catch(() => {
           if (devBypassRef.current) {
             setGateGameFound(false);
+            if (configRef.current.auto_reconnect && !isReconnectingRef.current && runningRef.current) {
+              triggerAutoReconnect("Offline Testing Mode");
+            }
             return;
           }
           const wasEverReady = wasGameReadyRef.current || gatePassed;
@@ -1951,25 +1974,12 @@ export default function App() {
             );
 
             // Auto Reconnect execution
-            if (configRef.current.auto_reconnect && !isReconnectingRef.current) {
-              isReconnectingRef.current = true;
-              triggerWebhookEvent("Rejoining...", "disconnect");
-              addLog("[RECONNECT] Auto Reconnect triggered. Relaunching VALORANT via Riot Client...");
-              invoke("launch_valorant")
-                .then(() => {
-                  addLog("[RECONNECT] VALORANT launched. Waiting to rejoin match...");
-                })
-                .catch((err) => {
-                  addLog(`[RECONNECT] Failed to launch VALORANT: ${err}`);
-                })
-                .finally(() => {
-                  setTimeout(() => {
-                    isReconnectingRef.current = false;
-                  }, 15000);
-                });
-            }
+            triggerAutoReconnect("VALORANT Process Lost");
           } else {
             setGateGameFound(false);
+            if (configRef.current.auto_reconnect && !isReconnectingRef.current) {
+              triggerAutoReconnect("Waiting for VALORANT");
+            }
           }
         })
         .finally(() => {
@@ -2383,6 +2393,11 @@ export default function App() {
     setLogs(["Logs cleared.", "SageBot started."]);
     setIsRunning(true);
     invoke("set_bot_running", { running: true }).catch(() => { });
+
+    // Auto Reconnect trigger on start if VALORANT is not running
+    if (configRef.current.auto_reconnect && !statusRef.current.game_live) {
+      triggerAutoReconnect("SageBot Started");
+    }
 
     // Mandatory Auto Focus handling on start if already in match
     const st = statusRef.current;
@@ -4769,18 +4784,32 @@ export default function App() {
                         Auto restart VALORANT if disconnected/crashed.
                       </div>
                     </div>
-                    <label className="switch">
-                      <input
-                        type="checkbox"
-                        checked={config.auto_reconnect ?? false}
-                        onChange={(e) => {
-                          const val = e.target.checked;
-                          updateAndSaveConfig({ auto_reconnect: val });
-                          addLog(val ? "[CONFIG] Auto Reconnect enabled." : "[CONFIG] Auto Reconnect disabled.");
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                      <button
+                        className="key-badge-btn"
+                        style={{ height: "30px", padding: "0 10px", fontSize: "11px", fontWeight: 700, color: "#38bdf8", borderColor: "rgba(56, 189, 248, 0.4)" }}
+                        onClick={() => {
+                          addLog("[RECONNECT] Manual test: Launching VALORANT via Riot Client...");
+                          invoke("launch_valorant")
+                            .then(() => addLog("[RECONNECT] VALORANT launch command sent successfully."))
+                            .catch((err) => addLog(`[RECONNECT] Failed: ${err}`));
                         }}
-                      />
-                      <span className="slider round"></span>
-                    </label>
+                      >
+                        Test Reconnect
+                      </button>
+                      <label className="switch">
+                        <input
+                          type="checkbox"
+                          checked={config.auto_reconnect ?? false}
+                          onChange={(e) => {
+                            const val = e.target.checked;
+                            updateAndSaveConfig({ auto_reconnect: val });
+                            addLog(val ? "[CONFIG] Auto Reconnect enabled." : "[CONFIG] Auto Reconnect disabled.");
+                          }}
+                        />
+                        <span className="slider round"></span>
+                      </label>
+                    </div>
                   </div>
                 </div>
 
