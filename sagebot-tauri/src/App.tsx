@@ -622,8 +622,19 @@ export default function App() {
             }
           }
           setRoster(res);
+          rosterRef.current = res;
+          if (remoteBridgeRef.current) {
+            remoteBridgeRef.current.send({
+              type: "roster",
+              payload: res,
+            });
+          }
         } else if (res.state === "NO_MATCH") {
-          setRoster((prev) => (prev && (prev.state === "COREGAME" || prev.state === "PREGAME") ? { ...prev, state: "CONCLUDED" } : prev));
+          setRoster((prev) => {
+            const next = prev && (prev.state === "COREGAME" || prev.state === "PREGAME") ? { ...prev, state: "CONCLUDED" } : prev;
+            rosterRef.current = next;
+            return next;
+          });
         }
         // Webhook notification on rank change
         const self = res.ally_team.find((p) => p.is_self);
@@ -651,6 +662,13 @@ export default function App() {
     try {
       const data = await invoke<StorefrontData>("get_storefront");
       setStorefront(data);
+      storefrontRef.current = data;
+      if (remoteBridgeRef.current) {
+        remoteBridgeRef.current.send({
+          type: "storefront",
+          payload: data,
+        });
+      }
     } catch (e) {
       console.error("Failed to fetch storefront:", e);
     } finally {
@@ -793,6 +811,11 @@ export default function App() {
   const surrenderSpamUntilRef = useRef<number>(0);
   const lockedAgentRef = useRef<string>("");
   const hasLoggedClickAfkRef = useRef<boolean>(false);
+  const hasLoggedCommsRef = useRef<boolean>(false);
+  const hasLoggedChatRef = useRef<boolean>(false);
+  const logsRef = useRef<string[]>([]);
+  const rosterRef = useRef<LiveMatchRoster | null>(null);
+  const storefrontRef = useRef<StorefrontData | null>(null);
   const lastScoreRef = useRef<{ ally: number; enemy: number; map: string; gamemode: string }>({
     ally: 0,
     enemy: 0,
@@ -891,7 +914,17 @@ export default function App() {
 
   // Add Log Entry
   const addLog = (msg: string) => {
-    setLogs((prev) => [...prev, msg]);
+    setLogs((prev) => {
+      const next = [...prev, msg];
+      logsRef.current = next;
+      return next;
+    });
+    if (remoteBridgeRef.current) {
+      remoteBridgeRef.current.send({
+        type: "log",
+        payload: msg,
+      });
+    }
   };
 
   const showToast = (text: string) => {
@@ -976,59 +1009,16 @@ export default function App() {
         console.error("Auto update check failed:", err);
       });
     // Initialize Dual-Broker WSS Remote Host
-    const formatRosterForMobile = (r: LiveMatchRoster | null) => {
-      if (!r) return [];
-      const all = [...(r.ally_team || []), ...(r.enemy_team || [])];
-      return all.map((p) => {
-        const [game_name, tag_line] = (p.name || "").split("#");
-        return {
-          puuid: p.puuid,
-          game_name: game_name || p.name || "Player",
-          tag_line: tag_line || "",
-          team: p.team || "Blue",
-          agent_name: p.agent_name || "-",
-          agent_id: p.agent_id || "",
-          current_rank_name: p.current_rank_name || "Unranked",
-          current_rr: p.current_rr || 0,
-          win_rate: p.total_games > 0 ? `${Math.round(p.win_rate)}% (${p.total_games}G)` : "-",
-          games_count: p.total_games || 0,
-          is_party: Boolean(p.party_tag),
-        };
-      });
-    };
-
     const sendStatusUpdate = (bridgeInstance?: RemoteBridge | null) => {
       const b = bridgeInstance ?? remoteBridgeRef.current;
       if (!b) return;
       b.send({
         type: "sync",
         status: statusRef.current,
-        config: {
-          bot_running: runningRef.current,
-          anti_afk_enabled: true,
-          auto_reconnect: Boolean(configRef.current.auto_reconnect),
-          auto_ff_enabled: Boolean(configRef.current.auto_ff_enabled),
-          auto_kj_turret: Boolean(configRef.current.auto_kj_turret),
-          auto_queue_enabled: Boolean(configRef.current.auto_queue_enabled),
-          auto_queue_mode: configRef.current.auto_queue_mode || "competitive",
-          lock_random_agent: Boolean(configRef.current.lock_random_agent),
-          low_detail: Boolean(configRef.current.low_detail),
-          agents_enabled: Boolean(configRef.current.agents_enabled),
-          instalock_enabled: Boolean(configRef.current.instalock_enabled),
-          lock_delay: configRef.current.lock_delay ?? 20,
-          starter_fallback_enabled: Boolean(configRef.current.starter_fallback_enabled),
-          selected_agents: configRef.current.selected_agents || [],
-          chat_enabled: Boolean(configRef.current.chat_enabled),
-          chat_target: configRef.current.chat_target ?? 0,
-          chat_interval: configRef.current.chat_interval ?? 180,
-          chat_text: configRef.current.chat_text || "",
-          auto_ff_round_5: Boolean(configRef.current.auto_ff_round_5),
-          auto_ff_round_13: Boolean(configRef.current.auto_ff_round_13),
-          auto_ff_round_14: Boolean(configRef.current.auto_ff_round_14),
-          remote_notify_disconnect: configRef.current.remote_notify_disconnect ?? configRef.current.webhook_notify_disconnect ?? true,
-          remote_notify_status: configRef.current.remote_notify_status ?? configRef.current.webhook_notify_status ?? true,
-          remote_notify_rank_change: configRef.current.remote_notify_rank_change ?? configRef.current.webhook_notify_rank_change ?? true,
-        },
+        bot_running: runningRef.current,
+        roster: rosterRef.current,
+        storefront: storefrontRef.current,
+        logs: logsRef.current.slice(-8),
       });
     };
 
@@ -1060,40 +1050,6 @@ export default function App() {
             }
             setTimeout(() => sendStatusUpdate(bridge), 80);
             break;
-          case "toggle_anti_afk":
-            showToast("Anti-AFK is active when SageBot runs");
-            sendStatusUpdate(bridge);
-            break;
-          case "toggle_auto_queue": {
-            const next = !configRef.current.auto_queue_enabled;
-            updateAndSaveConfig({ auto_queue_enabled: next });
-            setTimeout(() => sendStatusUpdate(bridge), 50);
-            break;
-          }
-          case "toggle_auto_ff": {
-            const next = !configRef.current.auto_ff_enabled;
-            updateAndSaveConfig({ auto_ff_enabled: next });
-            setTimeout(() => sendStatusUpdate(bridge), 50);
-            break;
-          }
-          case "toggle_auto_kj": {
-            const next = !configRef.current.auto_kj_turret;
-            updateAndSaveConfig({ auto_kj_turret: next });
-            setTimeout(() => sendStatusUpdate(bridge), 50);
-            break;
-          }
-          case "toggle_auto_reconnect": {
-            const next = !configRef.current.auto_reconnect;
-            updateAndSaveConfig({ auto_reconnect: next });
-            setTimeout(() => sendStatusUpdate(bridge), 50);
-            break;
-          }
-          case "toggle_random_agent": {
-            const next = !configRef.current.lock_random_agent;
-            updateAndSaveConfig({ lock_random_agent: next });
-            setTimeout(() => sendStatusUpdate(bridge), 50);
-            break;
-          }
           case "take_screenshot": {
             try {
               const b64 = await invoke<string>("capture_screen_base64");
@@ -1110,17 +1066,26 @@ export default function App() {
             break;
           }
           case "refresh_roster": {
-            try {
-              const r = await invoke<LiveMatchRoster>("get_live_match_roster");
+            if (rosterRef.current) {
               bridge.send({
                 type: "roster",
-                payload: formatRosterForMobile(r),
+                payload: rosterRef.current,
               });
-            } catch {
-              bridge.send({
-                type: "roster",
-                payload: [],
-              });
+            } else {
+              try {
+                const r = await invoke<LiveMatchRoster>("get_live_match_roster");
+                setRoster(r);
+                rosterRef.current = r;
+                bridge.send({
+                  type: "roster",
+                  payload: r,
+                });
+              } catch {
+                bridge.send({
+                  type: "roster",
+                  payload: null,
+                });
+              }
             }
             break;
           }
@@ -1135,24 +1100,26 @@ export default function App() {
             break;
           }
           case "request_storefront": {
-            try {
-              const sf = await invoke<StorefrontData>("get_storefront");
+            if (storefrontRef.current) {
               bridge.send({
                 type: "storefront",
-                payload: sf,
+                payload: storefrontRef.current,
               });
-            } catch (err) {
-              bridge.send({
-                type: "storefront",
-                payload: null,
-              });
-            }
-            break;
-          }
-          case "update_config": {
-            if (data.payload && typeof data.payload === "object") {
-              updateAndSaveConfig(data.payload);
-              setTimeout(() => sendStatusUpdate(bridge), 60);
+            } else {
+              try {
+                const sf = await invoke<StorefrontData>("get_storefront");
+                setStorefront(sf);
+                storefrontRef.current = sf;
+                bridge.send({
+                  type: "storefront",
+                  payload: sf,
+                });
+              } catch (err) {
+                bridge.send({
+                  type: "storefront",
+                  payload: null,
+                });
+              }
             }
             break;
           }
@@ -2232,6 +2199,8 @@ export default function App() {
     hasFocusedCurrentMatchRef.current = false;
     isQueueingRef.current = false;
     hasLoggedClickAfkRef.current = false;
+    hasLoggedCommsRef.current = false;
+    hasLoggedChatRef.current = false;
     hasSentAgentSelectWebhookRef.current = false;
 
     // Clear macro timeouts and release active keys
@@ -2445,6 +2414,8 @@ export default function App() {
           isHoldingKeyRef.current = false;
         }
         hasLoggedClickAfkRef.current = false;
+    hasLoggedCommsRef.current = false;
+    hasLoggedChatRef.current = false;
         timer = setTimeout(tick, 1000);
         return;
       }
@@ -2597,7 +2568,10 @@ export default function App() {
           releaseActionLock(450);
         });
 
-      addLog(`[CHAT] CHAT_MESSAGE`);
+      if (!hasLoggedChatRef.current) {
+        hasLoggedChatRef.current = true;
+        addLog(`[CHAT] Auto chat active (${config.chat_target === 0 ? "All" : config.chat_target === 1 ? "Team" : "Party"})`);
+      }
       timer = setTimeout(tickChat, intervalMs);
     };
 
@@ -2675,7 +2649,10 @@ export default function App() {
       const catName = catObj ? catObj.name : `Category ${firstNum}`;
       const optName = optObj ? optObj.text : `Option ${secondNum}`;
 
-      addLog(`[COMMS] Speaking: "${catName} > ${optName}" (${commsHotkey} -> ${firstNum} -> ${secondNum})`);
+      if (!hasLoggedCommsRef.current) {
+        hasLoggedCommsRef.current = true;
+        addLog(`[COMMS] Speaking: "${catName} > ${optName}" (${commsHotkey} -> ${firstNum} -> ${secondNum})`);
+      }
 
       // 3 Steps executed via native thread in Rust with minimal delay
       invoke("trigger_comms_sequence", {

@@ -1,6 +1,6 @@
 [package]
 name = "sagebot-tauri"
-version = "3.6.2"
+version = "4.0.0"
 description = "A Tauri App"
 authors = ["mizu"]
 edition = "2021"
