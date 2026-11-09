@@ -545,16 +545,37 @@ pub fn find_riot_client_services() -> Option<PathBuf> {
 
 /// Starts the Riot Client and asks it to launch VALORANT.
 pub fn spawn_valorant_via_riot_client() -> Result<(), String> {
-    let rc = find_riot_client_services()
-        .ok_or_else(|| "Could not locate RiotClientServices.exe on this PC".to_string())?;
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
-        const DETACHED_PROCESS: u32 = 0x00000008;
-        std::process::Command::new(&rc)
-            .args(["--launch-product=valorant", "--launch-patchline=live"])
-            .creation_flags(DETACHED_PROCESS)
-            .spawn()
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+        // 1. Terminate any stale or zombie Riot Client processes that deadlock the splash screen
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/IM", "Riot Client.exe"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/IM", "RiotClientUx.exe"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/IM", "RiotClientServices.exe"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+
+        std::thread::sleep(std::time::Duration::from_millis(600));
+
+        let rc = find_riot_client_services()
+            .ok_or_else(|| "Could not locate RiotClientServices.exe on this PC".to_string())?;
+
+        let rc_dir = rc.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| PathBuf::from("."));
+
+        let mut cmd = std::process::Command::new(&rc);
+        cmd.args(["--launch-product=valorant", "--launch-patchline=live"])
+            .current_dir(&rc_dir);
+
+        cmd.spawn()
             .map_err(|e| format!("Failed to start Riot Client ({}): {}", rc.display(), e))?;
     }
     Ok(())

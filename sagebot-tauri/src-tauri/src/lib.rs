@@ -956,6 +956,10 @@ async fn login_riot_account(username: String, password: Option<String>) -> Resul
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
         let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/IM", "Riot Client.exe"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+        let _ = std::process::Command::new("taskkill")
             .args(["/F", "/IM", "RiotClientUx.exe"])
             .creation_flags(CREATE_NO_WINDOW)
             .status();
@@ -974,11 +978,13 @@ async fn login_riot_account(username: String, password: Option<String>) -> Resul
     // 3. Launch Riot Client into VALORANT
     #[cfg(target_os = "windows")]
     {
-        use std::os::windows::process::CommandExt;
-        const DETACHED_PROCESS: u32 = 0x00000008;
+        let rc_dir = std::path::Path::new(&rc_exe)
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
         let mut cmd = std::process::Command::new(&rc_exe);
-        cmd.args(["--launch-product=valorant", "--launch-patchline=live"]);
-        cmd.creation_flags(DETACHED_PROCESS);
+        cmd.args(["--launch-product=valorant", "--launch-patchline=live"])
+            .current_dir(&rc_dir);
         cmd.spawn().map_err(|e| format!("Failed to spawn Riot Client: {}", e))?;
     }
 

@@ -888,11 +888,13 @@ export default function App() {
   const disconnectCountRef = useRef<number>(0);
   const lobbyCountRef = useRef<number>(0);
   const isReconnectingRef = useRef<boolean>(false);
+  const [isReconnecting, setIsReconnecting] = useState<boolean>(false);
 
-  const triggerAutoReconnect = (reason: string) => {
-    if (!configRef.current.auto_reconnect) return;
+  const triggerAutoReconnect = (reason: string, force: boolean = false) => {
+    if (!force && !configRef.current.auto_reconnect) return;
     if (isReconnectingRef.current) return;
     isReconnectingRef.current = true;
+    setIsReconnecting(true);
     triggerWebhookEvent("Rejoining...", "disconnect");
     addLog(`[RECONNECT] Auto Reconnect triggered (${reason}). Launching VALORANT via Riot Client...`);
     invoke("launch_valorant")
@@ -905,17 +907,22 @@ export default function App() {
       .finally(() => {
         setTimeout(() => {
           isReconnectingRef.current = false;
-        }, 20000);
+          setIsReconnecting(false);
+        }, 15000);
       });
   };
 
-  // Auto Reconnect Startup Check: launch VALORANT 3.5s after app startup if enabled & offline
+  // Auto Reconnect Startup Check: launch VALORANT 2s after app startup if enabled & offline
   useEffect(() => {
     const startupTimer = setTimeout(() => {
-      if (configRef.current.auto_reconnect && !statusRef.current.game_live && !statusRef.current.is_connected) {
-        triggerAutoReconnect("App Startup");
-      }
-    }, 3500);
+      invoke<AppConfig>("get_config")
+        .then((cfg) => {
+          if (cfg?.auto_reconnect && !statusRef.current.game_live && !statusRef.current.is_connected) {
+            triggerAutoReconnect("App Startup");
+          }
+        })
+        .catch(() => { });
+    }, 2000);
     return () => clearTimeout(startupTimer);
   }, []);
 
@@ -3854,11 +3861,33 @@ export default function App() {
                   <div className="gate-status-fail">
                     <div className="gate-status-badge red">
                       <AlertTriangle size={16} />
-                      <span>VALORANT NOT FOUND</span>
+                      <span>{isReconnecting ? "LAUNCHING VALORANT..." : "VALORANT NOT FOUND"}</span>
                     </div>
                     <p className="gate-status-msg">
-                      Please start VALORANT before proceeding to the app.
+                      {isReconnecting
+                        ? "Auto Reconnect is starting VALORANT via Riot Client..."
+                        : "Please start VALORANT before proceeding to the app."}
                     </p>
+                    <button
+                      className="key-badge-btn"
+                      style={{
+                        marginTop: "12px",
+                        height: "32px",
+                        padding: "0 16px",
+                        fontSize: "12px",
+                        fontWeight: 700,
+                        color: "#38bdf8",
+                        borderColor: "rgba(56, 189, 248, 0.4)",
+                        cursor: isReconnecting ? "not-allowed" : "pointer",
+                        opacity: isReconnecting ? 0.6 : 1,
+                      }}
+                      disabled={isReconnecting}
+                      onClick={() => {
+                        triggerAutoReconnect("Gate Screen Manual Launch", true);
+                      }}
+                    >
+                      {isReconnecting ? "Launching..." : "Launch VALORANT"}
+                    </button>
                   </div>
                 )}
 
@@ -4781,7 +4810,7 @@ export default function App() {
                     <div>
                       <div className="pane-title">Auto Reconnect</div>
                       <div className="pane-subtitle">
-                        Auto restart VALORANT if disconnected/crashed.
+                        Auto restart VALORANT if disconnected/crashed (requires stay signed in active).
                       </div>
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
