@@ -33,7 +33,7 @@ import {
   GripVertical,
   History,
   Smartphone,
-  Bell,
+  Shield,
 } from "lucide-react";
 import { RemoteBridge } from "./remoteBridge";
 import { QRCodeSVG } from "qrcode.react";
@@ -396,15 +396,61 @@ interface ToastMsg {
   text: string;
 }
 
+export interface PairedDevice {
+  id: string;
+  name: string;
+  paired_at: string;
+}
+
+const generateRemoteCode = (): string => {
+  const chars = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
+  let res = "";
+  for (let i = 0; i < 8; i++) {
+    res += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return res;
+};
+
+const generateSecretToken = (): string => {
+  return Array.from(crypto.getRandomValues(new Uint8Array(16)))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+};
+
 export default function App() {
-  // Mobile Remote State
-  const [remoteRoomCode] = useState<string>(() => {
+  // Mobile Remote State (8-character alphanumeric + secret token)
+  const [remoteRoomCode, setRemoteRoomCode] = useState<string>(() => {
     const saved = localStorage.getItem("sagebot_remote_code");
-    if (saved && saved.length === 6) return saved;
-    const generated = Math.floor(100000 + Math.random() * 900000).toString();
+    if (saved && saved.length === 8) return saved;
+    const generated = generateRemoteCode();
     localStorage.setItem("sagebot_remote_code", generated);
     return generated;
   });
+
+  const [secretToken, setSecretToken] = useState<string>(() => {
+    const saved = localStorage.getItem("sagebot_remote_secret");
+    if (saved && saved.length >= 16) return saved;
+    const generated = generateSecretToken();
+    localStorage.setItem("sagebot_remote_secret", generated);
+    return generated;
+  });
+
+  const [pairedDevices, setPairedDevices] = useState<PairedDevice[]>(() => {
+    try {
+      const saved = localStorage.getItem("sagebot_paired_devices");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [pendingPairRequest, setPendingPairRequest] = useState<{
+    client_id: string;
+    proposed_name: string;
+  } | null>(null);
+  const [deviceNicknameInput, setDeviceNicknameInput] = useState<string>("");
+  const [showResetConfirmModal, setShowResetConfirmModal] = useState<boolean>(false);
+
   const [remoteClientConnected, setRemoteClientConnected] = useState<boolean>(false);
   const remoteBridgeRef = useRef<RemoteBridge | null>(null);
 
@@ -881,17 +927,10 @@ export default function App() {
 
       if (allowRemote) {
         const cleanMessage = message.replace(/\*\*/g, "").trim();
-        const title =
-          eventType === "disconnect"
-            ? "SageBot Connection"
-            : eventType === "rank_change"
-            ? "SageBot Rank Update"
-            : "SageBot Match Status";
-
         remoteBridgeRef.current.send({
           type: "notification",
           payload: {
-            title,
+            title: "SageBot",
             message: cleanMessage,
             eventType,
             timestamp: Date.now(),
@@ -1028,7 +1067,42 @@ export default function App() {
       },
       onMessage: async (data: any) => {
         if (!data) return;
+        const msgType = data.type || "";
         const action = data.action || (data.type === "request_sync" ? "request_sync" : "");
+
+        if (msgType === "request_pair") {
+          const { client_id, proposed_name, token } = data;
+          if (token && token === secretToken) {
+            bridge.send({
+              type: "pair_approved",
+              token: secretToken,
+              client_id,
+              device_name: proposed_name || "Phone",
+            });
+            sendStatusUpdate(bridge);
+            return;
+          }
+
+          const existing = pairedDevices.find((d) => d.id === client_id);
+          if (existing) {
+            bridge.send({
+              type: "pair_approved",
+              token: secretToken,
+              client_id,
+              device_name: existing.name,
+            });
+            sendStatusUpdate(bridge);
+            return;
+          }
+
+          setDeviceNicknameInput(proposed_name || "iPhone Duo");
+          setPendingPairRequest({
+            client_id,
+            proposed_name: proposed_name || "iPhone Duo",
+          });
+          return;
+        }
+
         if (!action) return;
 
         setRemoteClientConnected((prev) => {
@@ -1172,6 +1246,81 @@ export default function App() {
       if (unlistenFn) unlistenFn();
     };
   }, []);
+
+  // Remote Device Pairing Handlers
+  const handleApproveDevice = () => {
+    if (!pendingPairRequest) return;
+    const newDev: PairedDevice = {
+      id: pendingPairRequest.client_id,
+      name: deviceNicknameInput.trim() || pendingPairRequest.proposed_name || "Phone",
+      paired_at: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    };
+    const next = [...pairedDevices.filter((d) => d.id !== newDev.id), newDev];
+    setPairedDevices(next);
+    localStorage.setItem("sagebot_paired_devices", JSON.stringify(next));
+
+    if (remoteBridgeRef.current) {
+      remoteBridgeRef.current.send({
+        type: "pair_approved",
+        token: secretToken,
+        client_id: newDev.id,
+        device_name: newDev.name,
+      });
+      remoteBridgeRef.current.send({
+        type: "sync",
+        status: statusRef.current,
+        bot_running: runningRef.current,
+        roster: rosterRef.current,
+        storefront: storefrontRef.current,
+        logs: logsRef.current.slice(-8),
+      });
+    }
+    setPendingPairRequest(null);
+    showToast(`Approved device: ${newDev.name}`);
+  };
+
+  const handleDenyDevice = () => {
+    if (!pendingPairRequest) return;
+    if (remoteBridgeRef.current) {
+      remoteBridgeRef.current.send({
+        type: "pair_denied",
+        client_id: pendingPairRequest.client_id,
+      });
+    }
+    setPendingPairRequest(null);
+    showToast("Device pairing denied");
+  };
+
+  const handleRemoveDevice = (devId: string) => {
+    if (remoteBridgeRef.current) {
+      remoteBridgeRef.current.send({
+        type: "force_logout",
+        target_id: devId,
+      });
+    }
+    const next = pairedDevices.filter((d) => d.id !== devId);
+    setPairedDevices(next);
+    localStorage.setItem("sagebot_paired_devices", JSON.stringify(next));
+    showToast("Device removed and disconnected.");
+  };
+
+  const handleResetRemoteCode = () => {
+    if (remoteBridgeRef.current) {
+      remoteBridgeRef.current.send({
+        type: "force_logout",
+      });
+    }
+    const newCode = generateRemoteCode();
+    const newToken = generateSecretToken();
+    setRemoteRoomCode(newCode);
+    setSecretToken(newToken);
+    setPairedDevices([]);
+    localStorage.setItem("sagebot_remote_code", newCode);
+    localStorage.setItem("sagebot_remote_secret", newToken);
+    localStorage.setItem("sagebot_paired_devices", JSON.stringify([]));
+    setShowResetConfirmModal(false);
+    showToast("Code reset. All devices logged out.");
+  };
 
   // Hidden developer authentication listener (Ctrl + Shift + P)
   useEffect(() => {
@@ -2414,8 +2563,8 @@ export default function App() {
           isHoldingKeyRef.current = false;
         }
         hasLoggedClickAfkRef.current = false;
-    hasLoggedCommsRef.current = false;
-    hasLoggedChatRef.current = false;
+        hasLoggedCommsRef.current = false;
+        hasLoggedChatRef.current = false;
         timer = setTimeout(tick, 1000);
         return;
       }
@@ -5835,13 +5984,13 @@ export default function App() {
                       <Smartphone size={22} style={{ color: "var(--accent)" }} />
                       <div>
                         <div className="pane-title" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                          <span>Mobile Remote Control</span>
+                          <span>SageBot Mobile</span>
                           <span style={{ fontSize: "10px", color: "#38bdf8", background: "rgba(56, 189, 248, 0.15)", border: "1px solid rgba(56, 189, 248, 0.3)", padding: "1px 7px", borderRadius: "10px", fontWeight: 700 }}>
                             PWA
                           </span>
                         </div>
                         <div className="pane-subtitle" style={{ marginTop: "2px" }}>
-                          Control SageBot, view live score, match roster, and take live screenshots from your iPhone.
+                          Control SageBot and the game from your phone.
                         </div>
                       </div>
                     </div>
@@ -5857,27 +6006,25 @@ export default function App() {
                   <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "24px", marginTop: "20px", alignItems: "center", background: "rgba(0, 0, 0, 0.25)", padding: "20px", borderRadius: "12px", border: "1px solid var(--border-card)" }}>
                     <div>
                       <h4 style={{ fontSize: "14px", fontWeight: 700, color: "#ffffff", marginBottom: "6px" }}>
-                        Instant Scan with iPhone Camera
+                        QR Code
                       </h4>
                       <p style={{ fontSize: "12px", color: "var(--text-secondary)", lineHeight: 1.5, marginBottom: "14px" }}>
-                        Open your phone camera, scan this QR code, and tap <strong>Add to Home Screen</strong> in Safari. Works from anywhere on 4G/5G.
+                        Scan this QR code on your phone to control SageBot and the game.
                       </p>
 
                       <div style={{ display: "inline-flex", flexDirection: "column", gap: "4px" }}>
-                        <span style={{ fontSize: "11px", color: "var(--text-tertiary)", fontWeight: 600 }}>OR ENTER 6-DIGIT CODE</span>
+                        <span style={{ fontSize: "11px", color: "var(--text-tertiary)", fontWeight: 600 }}>OR ENTER 8-CHARACTER CODE</span>
                         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                           <span style={{ fontFamily: "monospace", fontSize: "24px", fontWeight: 800, letterSpacing: "4px", color: "#38bdf8", background: "rgba(56, 189, 248, 0.1)", padding: "6px 14px", borderRadius: "8px", border: "1px solid rgba(56, 189, 248, 0.3)" }}>
                             {remoteRoomCode}
                           </span>
                           <button
                             className="key-badge-btn"
-                            style={{ height: "40px", padding: "0 14px" }}
-                            onClick={() => {
-                              navigator.clipboard.writeText(remoteRoomCode);
-                              showToast("Room code copied!");
-                            }}
+                            style={{ height: "40px", padding: "0 14px", display: "flex", alignItems: "center", gap: "6px" }}
+                            onClick={() => setShowResetConfirmModal(true)}
                           >
-                            Copy Code
+                            <RotateCcw size={14} />
+                            <span>Reset Code</span>
                           </button>
                         </div>
                       </div>
@@ -5885,95 +6032,67 @@ export default function App() {
 
                     <div style={{ background: "#ffffff", padding: "12px", borderRadius: "12px", display: "flex", alignItems: "center", justifyContent: "center" }}>
                       <QRCodeSVG
-                        value={`https://sagebot-mobile.vercel.app/?room=${remoteRoomCode}`}
+                        value={`https://sagebot-mobile.vercel.app/?room=${remoteRoomCode}&token=${secretToken}`}
                         size={140}
                         level="M"
                       />
                     </div>
                   </div>
 
-                  <div style={{ marginTop: "16px", display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "10px" }}>
-                    <div style={{ background: "var(--bg-card)", padding: "12px", borderRadius: "8px", border: "1px solid var(--border-card)" }}>
-                      <span style={{ fontSize: "11px", fontWeight: 700, color: "#38bdf8", display: "block" }}>1. Live Status & Score</span>
-                      <span style={{ fontSize: "11px", color: "var(--text-secondary)", marginTop: "2px", display: "block" }}>Real-time match state, agent, and round score on your phone.</span>
-                    </div>
-                    <div style={{ background: "var(--bg-card)", padding: "12px", borderRadius: "8px", border: "1px solid var(--border-card)" }}>
-                      <span style={{ fontSize: "11px", fontWeight: 700, color: "#10b981", display: "block" }}>2. Remote Control</span>
-                      <span style={{ fontSize: "11px", color: "var(--text-secondary)", marginTop: "2px", display: "block" }}>Toggle bot power, Anti-AFK, Auto Queue, and Surrender with 1 tap.</span>
-                    </div>
-                    <div style={{ background: "var(--bg-card)", padding: "12px", borderRadius: "8px", border: "1px solid var(--border-card)" }}>
-                      <span style={{ fontSize: "11px", fontWeight: 700, color: "#a855f7", display: "block" }}>3. Live Screen Capture</span>
-                      <span style={{ fontSize: "11px", color: "var(--text-secondary)", marginTop: "2px", display: "block" }}>Tap to snap a real-time full screenshot of VALORANT on PC.</span>
-                    </div>
-                  </div>
-
-                  {/* Remote Notifications */}
+                  {/* Security & Connected Devices Section */}
                   <div style={{ marginTop: "20px", paddingTop: "18px", borderTop: "1px solid rgba(255, 255, 255, 0.08)" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
-                      <Bell size={16} style={{ color: "var(--accent)" }} />
-                      <span style={{ fontSize: "14px", fontWeight: 700, color: "#ffffff" }}>Phone Notifications</span>
+                      <Shield size={16} style={{ color: "var(--accent)" }} />
+                      <span style={{ fontSize: "14px", fontWeight: 700, color: "#ffffff" }}>Security &amp; Connected Devices</span>
                     </div>
                     <div className="pane-subtitle" style={{ marginBottom: "16px" }}>
-                      Push live notifications to your connected phone for game alerts and status updates.
+                      Manage paired mobile devices authorized to monitor and control SageBot.
                     </div>
 
-                    <div className="control-row" style={{ marginTop: "8px" }}>
-                      <div>
-                        <div className="control-title">Disconnect &amp; Reconnect</div>
-                        <div className="pane-subtitle">Alerts phone when VALORANT client disconnects or re-joins.</div>
+                    {pairedDevices.length === 0 ? (
+                      <div style={{ background: "rgba(0, 0, 0, 0.2)", border: "1px dashed rgba(255, 255, 255, 0.1)", padding: "20px", borderRadius: "10px", textAlign: "center" }}>
+                        <span style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
+                          No devices paired yet. Scan the QR code or enter the 8-character code on your phone to connect.
+                        </span>
                       </div>
-                      <label className="switch">
-                        <input
-                          type="checkbox"
-                          checked={config.remote_notify_disconnect ?? config.webhook_notify_disconnect ?? true}
-                          onChange={(e) => updateAndSaveConfig({
-                            remote_notify_disconnect: e.target.checked,
-                            webhook_notify_disconnect: e.target.checked,
-                          })}
-                        />
-                        <span className="slider round"></span>
-                      </label>
-                    </div>
-
-                    <div className="control-row" style={{ marginTop: "12px" }}>
-                      <div>
-                        <div className="control-title">Status Changes</div>
-                        <div className="pane-subtitle">Alerts phone for queue, agent select, match start, and match concludes.</div>
+                    ) : (
+                      <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                        {pairedDevices.map((dev) => (
+                          <div
+                            key={dev.id}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "space-between",
+                              background: "rgba(0, 0, 0, 0.25)",
+                              border: "1px solid var(--border-card)",
+                              padding: "10px 14px",
+                              borderRadius: "10px",
+                            }}
+                          >
+                            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                              <Smartphone size={18} style={{ color: "var(--accent)" }} />
+                              <div>
+                                <span style={{ fontSize: "13px", fontWeight: 700, color: "#ffffff", display: "block" }}>
+                                  {dev.name}
+                                </span>
+                                <span style={{ fontSize: "11px", color: "var(--text-tertiary)" }}>
+                                  Paired at {dev.paired_at}
+                                </span>
+                              </div>
+                            </div>
+                            <button
+                              className="key-badge-btn"
+                              style={{ height: "30px", padding: "0 10px", color: "#f87171", borderColor: "rgba(239, 68, 68, 0.3)", display: "flex", alignItems: "center", gap: "5px" }}
+                              onClick={() => handleRemoveDevice(dev.id)}
+                            >
+                              <Trash2 size={13} />
+                              <span>Remove</span>
+                            </button>
+                          </div>
+                        ))}
                       </div>
-                      <label className="switch">
-                        <input
-                          type="checkbox"
-                          checked={config.remote_notify_status ?? config.webhook_notify_status ?? true}
-                          onChange={(e) => updateAndSaveConfig({
-                            remote_notify_status: e.target.checked,
-                            webhook_notify_status: e.target.checked,
-                            webhook_notify_queue: e.target.checked,
-                            webhook_notify_agent_select: e.target.checked,
-                            webhook_notify_match_start: e.target.checked,
-                            webhook_notify_match_concludes: e.target.checked,
-                          })}
-                        />
-                        <span className="slider round"></span>
-                      </label>
-                    </div>
-
-                    <div className="control-row" style={{ marginTop: "12px" }}>
-                      <div>
-                        <div className="control-title">Rank Update</div>
-                        <div className="pane-subtitle">Alerts phone when your competitive rank or RR changes.</div>
-                      </div>
-                      <label className="switch">
-                        <input
-                          type="checkbox"
-                          checked={config.remote_notify_rank_change ?? config.webhook_notify_rank_change ?? true}
-                          onChange={(e) => updateAndSaveConfig({
-                            remote_notify_rank_change: e.target.checked,
-                            webhook_notify_rank_change: e.target.checked,
-                          })}
-                        />
-                        <span className="slider round"></span>
-                      </label>
-                    </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -6842,6 +6961,100 @@ export default function App() {
                 style={{ width: "100%" }}
               >
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Device Pairing Approval Modal */}
+      {pendingPairRequest && (
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ maxWidth: 440 }}>
+            <div className="modal-header">
+              <h3 style={{ margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
+                <span>📱</span> Device Pairing Request
+              </h3>
+            </div>
+            <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <p style={{ margin: 0, fontSize: "13px", color: "#cbd5e1" }}>
+                A new mobile device is requesting permission to pair with SageBot.
+              </p>
+              <div style={{ background: "#0b1120", padding: "10px 14px", borderRadius: 8, border: "1px solid #1e293b", fontSize: "12px", color: "#94a3b8" }}>
+                <div>Device ID: <span style={{ fontFamily: "monospace", color: "#e2e8f0" }}>{pendingPairRequest.client_id.slice(0, 16)}...</span></div>
+              </div>
+              <div>
+                <label style={{ fontSize: "12px", color: "#94a3b8", display: "block", marginBottom: 6 }}>
+                  Give this device a nickname:
+                </label>
+                <input
+                  type="text"
+                  value={deviceNicknameInput}
+                  onChange={(e) => setDeviceNicknameInput(e.target.value)}
+                  placeholder="e.g. iPhone Duo, iPad Living Room"
+                  style={{
+                    width: "100%",
+                    boxSizing: "border-box",
+                    padding: "8px 12px",
+                    background: "#0b1120",
+                    border: "1px solid #334155",
+                    borderRadius: 6,
+                    color: "#f8fafc",
+                    fontSize: "13px"
+                  }}
+                  autoFocus
+                />
+              </div>
+            </div>
+            <div className="modal-actions" style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+              <button
+                className="modal-btn secondary"
+                onClick={handleDenyDevice}
+              >
+                Deny
+              </button>
+              <button
+                className="modal-btn primary"
+                onClick={handleApproveDevice}
+                style={{ background: "#3b82f6", borderColor: "#60a5fa" }}
+              >
+                Approve & Pair
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reset Code Confirmation Modal */}
+      {showResetConfirmModal && (
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ maxWidth: 420 }}>
+            <div className="modal-header">
+              <h3 style={{ margin: 0, color: "#f87171", display: "flex", alignItems: "center", gap: 8 }}>
+                <span>⚠️</span> Reset Remote Pairing Code?
+              </h3>
+            </div>
+            <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <p style={{ margin: 0, fontSize: "13px", color: "#cbd5e1", lineHeight: "1.5" }}>
+                Resetting your pairing code will <strong>immediately disconnect and log out all connected mobile devices</strong> and generate a fresh 8-character code.
+              </p>
+              <p style={{ margin: 0, fontSize: "12px", color: "#94a3b8" }}>
+                You will need to re-pair any device you wish to use with SageBot.
+              </p>
+            </div>
+            <div className="modal-actions" style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+              <button
+                className="modal-btn secondary"
+                onClick={() => setShowResetConfirmModal(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="modal-btn danger"
+                onClick={handleResetRemoteCode}
+                style={{ background: "#dc2626", borderColor: "#ef4444", color: "#ffffff" }}
+              >
+                Reset & Disconnect All
               </button>
             </div>
           </div>
