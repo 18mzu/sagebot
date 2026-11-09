@@ -34,7 +34,10 @@ import {
   Eye,
   GripVertical,
   History,
+  Smartphone,
 } from "lucide-react";
+import Peer, { type DataConnection } from "peerjs";
+import { QRCodeSVG } from "qrcode.react";
 import "./App.css";
 import tauriConf from "../src-tauri/tauri.conf.json";
 
@@ -380,6 +383,7 @@ type TabType =
   | "autovote"
   | "music"
   | "media"
+  | "remote"
   | "webhook"
   | "changelog"
   | "settings"
@@ -391,6 +395,18 @@ interface ToastMsg {
 }
 
 export default function App() {
+  // Mobile Remote State
+  const [remoteRoomCode] = useState<string>(() => {
+    const saved = localStorage.getItem("sagebot_remote_code");
+    if (saved && saved.length === 6) return saved;
+    const generated = Math.floor(100000 + Math.random() * 900000).toString();
+    localStorage.setItem("sagebot_remote_code", generated);
+    return generated;
+  });
+  const [remoteClientConnected, setRemoteClientConnected] = useState<boolean>(false);
+  const remoteConnRef = useRef<DataConnection | null>(null);
+  const remotePeerRef = useRef<Peer | null>(null);
+
   const [activeTab, setActiveTab] = useState<TabType>("main");
   const [agents, setAgents] = useState<AgentInfo[]>([]);
 
@@ -917,6 +933,139 @@ export default function App() {
       .catch((err) => {
         console.error("Auto update check failed:", err);
       });
+    // Initialize PeerJS Remote Host
+    const pcPeerId = `sagebot-pc-${remoteRoomCode.toLowerCase()}`;
+    const peer = new Peer(pcPeerId, {
+      debug: 1,
+      config: {
+        iceServers: [
+          { urls: "stun:stun.l.google.com:19302" },
+          { urls: "stun:global.stun.twilio.com:3478" },
+        ],
+      },
+    });
+    remotePeerRef.current = peer;
+
+    peer.on("connection", (conn) => {
+      remoteConnRef.current = conn;
+      setRemoteClientConnected(true);
+      showToast("📱 Mobile Remote connected!");
+
+      const sendStatusUpdate = () => {
+        if (conn.open) {
+          conn.send({
+            type: "status",
+            payload: statusRef.current,
+          });
+          conn.send({
+            type: "config",
+            payload: {
+              bot_running: runningRef.current,
+              anti_afk_enabled: true,
+              auto_reconnect: configRef.current.auto_reconnect,
+              auto_ff_enabled: configRef.current.auto_ff_enabled,
+              auto_kj_turret: configRef.current.auto_kj_turret,
+              auto_queue_enabled: configRef.current.auto_queue_enabled,
+              auto_queue_mode: configRef.current.auto_queue_mode,
+              lock_random_agent: configRef.current.lock_random_agent,
+              low_detail: configRef.current.low_detail,
+            },
+          });
+        }
+      };
+
+      conn.on("open", () => {
+        sendStatusUpdate();
+      });
+
+      conn.on("data", async (data: any) => {
+        if (!data || !data.action) return;
+        switch (data.action) {
+          case "request_sync":
+            sendStatusUpdate();
+            break;
+          case "toggle_bot":
+            if (runningRef.current) {
+              stopSagebot("Mobile remote trigger");
+            } else {
+              startSagebot();
+            }
+            sendStatusUpdate();
+            break;
+          case "toggle_anti_afk":
+            showToast("Anti-AFK toggled via remote");
+            break;
+          case "toggle_auto_queue": {
+            const next = !configRef.current.auto_queue_enabled;
+            updateAndSaveConfig({ auto_queue_enabled: next });
+            sendStatusUpdate();
+            break;
+          }
+          case "toggle_auto_ff": {
+            const next = !configRef.current.auto_ff_enabled;
+            updateAndSaveConfig({ auto_ff_enabled: next });
+            sendStatusUpdate();
+            break;
+          }
+          case "toggle_auto_kj": {
+            const next = !configRef.current.auto_kj_turret;
+            updateAndSaveConfig({ auto_kj_turret: next });
+            sendStatusUpdate();
+            break;
+          }
+          case "toggle_auto_reconnect": {
+            const next = !configRef.current.auto_reconnect;
+            updateAndSaveConfig({ auto_reconnect: next });
+            sendStatusUpdate();
+            break;
+          }
+          case "toggle_random_agent": {
+            const next = !configRef.current.lock_random_agent;
+            updateAndSaveConfig({ lock_random_agent: next });
+            sendStatusUpdate();
+            break;
+          }
+          case "take_screenshot": {
+            try {
+              const b64 = await invoke<string>("capture_screen_base64");
+              conn.send({
+                type: "screenshot",
+                payload: b64,
+              });
+            } catch (err) {
+              conn.send({
+                type: "toast",
+                payload: `Screenshot failed: ${err}`,
+              });
+            }
+            break;
+          }
+          case "refresh_roster": {
+            try {
+              const r = await invoke<any>("get_live_match_roster");
+              conn.send({
+                type: "roster",
+                payload: r?.players || [],
+              });
+            } catch {
+              conn.send({
+                type: "roster",
+                payload: [],
+              });
+            }
+            break;
+          }
+        }
+      });
+
+      conn.on("close", () => {
+        setRemoteClientConnected(false);
+      });
+    });
+
+    return () => {
+      peer.destroy();
+    };
   }, []);
 
   // Disable default browser/WebView context menu on right-click
@@ -1462,12 +1611,12 @@ export default function App() {
                   kjTurretTimerRef.current = setTimeout(() => {
                     if (!runningRef.current) return;
                     addLog(`[AUTO TURRET] Round ${currentRound}: Equipping Turret (E)...`);
-                    invoke("trigger_key_press", { key: "E" }).catch(() => {});
+                    invoke("trigger_key_press", { key: "E" }).catch(() => { });
 
                     kjTurretSecondTimerRef.current = setTimeout(() => {
                       if (!runningRef.current) return;
                       addLog(`[AUTO TURRET] Round ${currentRound}: Placing Turret (L)...`);
-                      invoke("trigger_key_press", { key: "L" }).catch(() => {});
+                      invoke("trigger_key_press", { key: "L" }).catch(() => { });
                     }, 3000);
                   }, 15000);
                 }
@@ -3598,6 +3747,13 @@ export default function App() {
               <span>Voting</span>
             </button>
             <button
+              className={`nav-btn ${activeTab === "remote" ? "active" : ""}`}
+              onClick={() => setActiveTab("remote")}
+            >
+              <Smartphone size={14} />
+              <span>Remote</span>
+            </button>
+            <button
               className={`nav-btn ${activeTab === "webhook" ? "active" : ""}`}
               onClick={() => setActiveTab("webhook")}
             >
@@ -5597,6 +5753,90 @@ export default function App() {
               </div>
             )}
 
+            {/* TAB: MOBILE REMOTE */}
+            {activeTab === "remote" && (
+              <div className="tab-pane">
+                <div className="card">
+                  <div className="between-row">
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                      <Smartphone size={22} style={{ color: "var(--accent)" }} />
+                      <div>
+                        <div className="pane-title" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <span>Mobile Remote Control</span>
+                          <span style={{ fontSize: "10px", color: "#38bdf8", background: "rgba(56, 189, 248, 0.15)", border: "1px solid rgba(56, 189, 248, 0.3)", padding: "1px 7px", borderRadius: "10px", fontWeight: 700 }}>
+                            PWA
+                          </span>
+                        </div>
+                        <div className="pane-subtitle" style={{ marginTop: "2px" }}>
+                          Control SageBot, view live score, match roster, and take live screenshots from your iPhone.
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <span className={`status-pill ${remoteClientConnected ? "active" : ""}`} style={{ fontSize: "12px", display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                        <span style={{ width: 8, height: 8, borderRadius: "50%", background: remoteClientConnected ? "#10b981" : "#64748b" }}></span>
+                        {remoteClientConnected ? "Phone Connected" : "Ready to Pair"}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "24px", marginTop: "20px", alignItems: "center", background: "rgba(0, 0, 0, 0.25)", padding: "20px", borderRadius: "12px", border: "1px solid var(--border-card)" }}>
+                    <div>
+                      <h4 style={{ fontSize: "14px", fontWeight: 700, color: "#ffffff", marginBottom: "6px" }}>
+                        Instant Scan with iPhone Camera
+                      </h4>
+                      <p style={{ fontSize: "12px", color: "var(--text-secondary)", lineHeight: 1.5, marginBottom: "14px" }}>
+                        Open your phone camera, scan this QR code, and tap <strong>Add to Home Screen</strong> in Safari. Works from anywhere on 4G/5G.
+                      </p>
+
+                      <div style={{ display: "inline-flex", flexDirection: "column", gap: "4px" }}>
+                        <span style={{ fontSize: "11px", color: "var(--text-tertiary)", fontWeight: 600 }}>OR ENTER 6-DIGIT CODE</span>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <span style={{ fontFamily: "monospace", fontSize: "24px", fontWeight: 800, letterSpacing: "4px", color: "#38bdf8", background: "rgba(56, 189, 248, 0.1)", padding: "6px 14px", borderRadius: "8px", border: "1px solid rgba(56, 189, 248, 0.3)" }}>
+                            {remoteRoomCode}
+                          </span>
+                          <button
+                            className="key-badge-btn"
+                            style={{ height: "40px", padding: "0 14px" }}
+                            onClick={() => {
+                              navigator.clipboard.writeText(remoteRoomCode);
+                              showToast("Room code copied!");
+                            }}
+                          >
+                            Copy Code
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ background: "#ffffff", padding: "12px", borderRadius: "12px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      <QRCodeSVG
+                        value={`https://sagebot-mobile.vercel.app/?room=${remoteRoomCode}`}
+                        size={140}
+                        level="M"
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ marginTop: "16px", display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "10px" }}>
+                    <div style={{ background: "var(--bg-card)", padding: "12px", borderRadius: "8px", border: "1px solid var(--border-card)" }}>
+                      <span style={{ fontSize: "11px", fontWeight: 700, color: "#38bdf8", display: "block" }}>1. Live Status & Score</span>
+                      <span style={{ fontSize: "11px", color: "var(--text-secondary)", marginTop: "2px", display: "block" }}>Real-time match state, agent, and round score on your phone.</span>
+                    </div>
+                    <div style={{ background: "var(--bg-card)", padding: "12px", borderRadius: "8px", border: "1px solid var(--border-card)" }}>
+                      <span style={{ fontSize: "11px", fontWeight: 700, color: "#10b981", display: "block" }}>2. Remote Control</span>
+                      <span style={{ fontSize: "11px", color: "var(--text-secondary)", marginTop: "2px", display: "block" }}>Toggle bot power, Anti-AFK, Auto Queue, and Surrender with 1 tap.</span>
+                    </div>
+                    <div style={{ background: "var(--bg-card)", padding: "12px", borderRadius: "8px", border: "1px solid var(--border-card)" }}>
+                      <span style={{ fontSize: "11px", fontWeight: 700, color: "#a855f7", display: "block" }}>3. Live Screen Capture</span>
+                      <span style={{ fontSize: "11px", color: "var(--text-secondary)", marginTop: "2px", display: "block" }}>Tap to snap a real-time full screenshot of VALORANT on PC.</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* TAB 7: DISCORD INTEGRATION */}
             {activeTab === "webhook" && (
               <div className="tab-pane">
@@ -5941,7 +6181,7 @@ export default function App() {
                     <div>
                       <div className="control-title">Low Detail Mode</div>
                       <div className="pane-subtitle">
-                        Disables blurs, timers, and heavy animations to maximize in-game FPS.
+                        Reduce GPU works.
                       </div>
                     </div>
                     <label className="switch">

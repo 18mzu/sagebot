@@ -808,6 +808,14 @@ fn normalize_windows_path(p: &std::path::Path) -> String {
 }
 
 #[tauri::command]
+async fn capture_screen_base64() -> Result<String, String> {
+    let bytes = discord_bot::capture_valorant_screenshot()?;
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(format!("data:image/jpeg;base64,{}", b64))
+}
+
+#[tauri::command]
 fn minimize_window(window: tauri::Window) {
     let _ = window.minimize();
 }
@@ -1351,7 +1359,8 @@ pub fn run() {
             get_live_match_roster,
             get_latest_completed_match_score,
             fetch_player_match_kdas,
-            storefront::get_storefront
+            storefront::get_storefront,
+            capture_screen_base64
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

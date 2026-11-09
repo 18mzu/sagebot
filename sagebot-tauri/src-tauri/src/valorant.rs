@@ -652,6 +652,7 @@ pub fn resolve_agent_from_log() -> String {
                             let pawn = &sub[..quote_end];
                             if pawn.contains("Sarge") || pawn.contains("Brimstone") { return "Brimstone".to_string(); }
                             if pawn.contains("Rift") || pawn.contains("Astra") { return "Astra".to_string(); }
+                            if pawn.contains("BountyHunter") || pawn.contains("Fade") { return "Fade".to_string(); }
                             if pawn.contains("Hunter") || pawn.contains("Sova") { return "Sova".to_string(); }
                             if pawn.contains("Thorne") || pawn.contains("Sage") { return "Sage".to_string(); }
                             if pawn.contains("Wushu") || pawn.contains("Jett") { return "Jett".to_string(); }
@@ -663,7 +664,6 @@ pub fn resolve_agent_from_log() -> String {
                             if pawn.contains("Stealth") || pawn.contains("Yoru") { return "Yoru".to_string(); }
                             if pawn.contains("Cashew") || pawn.contains("Tejo") { return "Tejo".to_string(); }
                             if pawn.contains("Sequoia") || pawn.contains("Iso") { return "Iso".to_string(); }
-                            if pawn.contains("BountyHunter") || pawn.contains("Fade") { return "Fade".to_string(); }
                             if pawn.contains("Gumshoe") || pawn.contains("Cypher") { return "Cypher".to_string(); }
                             if pawn.contains("Mage") || pawn.contains("Harbor") { return "Harbor".to_string(); }
                             if pawn.contains("Sprinter") || pawn.contains("Neon") { return "Neon".to_string(); }
