@@ -483,6 +483,15 @@ impl ValorantClient {
         let party_id = party_json.get("CurrentPartyID").and_then(|v| v.as_str()).ok_or_else(|| "Missing CurrentPartyID".to_string())?;
 
         // 2. Set queue to desired gamemode
+        let make_default_url = format!("https://{}/parties/v1/parties/{}/makedefault?queueID={}", glz_host, party_id, queue_id);
+        let _ = self.glz_client.post(&make_default_url)
+            .header("Authorization", format!("Bearer {}", access_token))
+            .header("X-Riot-Entitlements-JWT", &jwt)
+            .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+            .header("X-Riot-ClientVersion", &client_version)
+            .header("Content-Length", "0")
+            .send().await;
+
         let queue_url = format!("https://{}/parties/v1/parties/{}/queue", glz_host, party_id);
         let queue_body = serde_json::json!({
             "queueID": queue_id,

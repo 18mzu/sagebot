@@ -1286,8 +1286,8 @@ export default function App() {
             break;
           }
           case "remote_lock_agent": {
-            const id = data.agentId || data.agent_id;
-            const agentName = data.agentName || "Agent";
+            const id = data.agentId || data.payload?.agentId || data.agent_id || data.payload?.agent_id;
+            const agentName = data.agentName || data.payload?.agentName || "Agent";
             try {
               const resMsg = await invoke<string>("lock_agent_now", {
                 agent_id: id,
@@ -1319,7 +1319,17 @@ export default function App() {
             break;
           }
           case "start_matchmaking": {
-            const queueMode = data.queueId || data.queue_id || data.queueMode || "competitive";
+            const queueMode =
+              data.queueId ||
+              data.payload?.queueId ||
+              data.queue_id ||
+              data.payload?.queue_id ||
+              data.queueMode ||
+              data.payload?.queueMode ||
+              "competitive";
+            // Synchronize with PC config so PC auto-queue loop uses the selected mode
+            updateAndSaveConfig({ auto_queue_mode: queueMode });
+            configRef.current.auto_queue_mode = queueMode;
             try {
               await invoke("start_matchmaking_queue", { queue_mode: queueMode, queueMode });
               showToast(`Matchmaking started (${queueMode})`);
@@ -1356,12 +1366,29 @@ export default function App() {
     });
     remoteBridgeRef.current = bridge;
 
-    const syncInterval = setInterval(() => {
-      sendStatusUpdate(bridge);
-    }, 2500);
+    let syncTimeout: any = null;
+    let isBridgeDestroyed = false;
+
+    const scheduleSync = () => {
+      if (isBridgeDestroyed) return;
+      const ms = (statusRef.current.match_state || "").toUpperCase();
+      const isLobbyOrQueue =
+        ms.includes("LOBBY") ||
+        ms.includes("MENU") ||
+        ms.includes("QUEUE") ||
+        statusRef.current.match_state === "In Lobby" ||
+        statusRef.current.match_state === "In Queue";
+      const delay = isLobbyOrQueue ? 1000 : 2500;
+      syncTimeout = setTimeout(() => {
+        sendStatusUpdate(bridge);
+        scheduleSync();
+      }, delay);
+    };
+    scheduleSync();
 
     return () => {
-      clearInterval(syncInterval);
+      isBridgeDestroyed = true;
+      if (syncTimeout) clearTimeout(syncTimeout);
       bridge.destroy();
       remoteBridgeRef.current = null;
     };
@@ -1510,17 +1537,41 @@ export default function App() {
     setAuthInput("");
   };
 
-  // Poll live status every 1.5 seconds
+  // Poll live status: 1 second when In Lobby or In Queue, 1.5 seconds otherwise
   useEffect(() => {
+    let pollTimeout: any = null;
+    let isCancelled = false;
+
+    const scheduleNextPoll = () => {
+      if (isCancelled) return;
+      const ms = (statusRef.current.match_state || "").toUpperCase();
+      const isLobbyOrQueue =
+        ms.includes("LOBBY") ||
+        ms.includes("MENU") ||
+        ms.includes("QUEUE") ||
+        statusRef.current.match_state === "In Lobby" ||
+        statusRef.current.match_state === "In Queue";
+      const delay = isLobbyOrQueue ? 1000 : 1500;
+      pollTimeout = setTimeout(() => {
+        pollStatus();
+      }, delay);
+    };
+
     const pollStatus = () => {
-      if (isPollingRef.current) return;
+      if (isCancelled) return;
+      if (isPollingRef.current) {
+        scheduleNextPoll();
+        return;
+      }
       if (Date.now() < suppressDetectionUntilRef.current) {
+        scheduleNextPoll();
         return;
       }
       isPollingRef.current = true;
 
       invoke<StatusResponse>("get_client_status")
         .then((res) => {
+          if (isCancelled) return;
           // Optimized deep-comparison to prevent unnecessary React re-renders when state hasn't changed
           setStatus((prev) => {
             if (
@@ -1546,6 +1597,19 @@ export default function App() {
             return res;
           });
           statusRef.current = res;
+
+          // Push immediate sync to mobile remote
+          if (remoteBridgeRef.current) {
+            remoteBridgeRef.current.send({
+              type: "sync",
+              status: res,
+              bot_running: runningRef.current,
+              roster: rosterRef.current,
+              storefront: storefrontRef.current,
+              pregame: pregameRef.current,
+              logs: logsRef.current.slice(-8),
+            });
+          }
 
           // Sync rank change to webhook if rank updated in live presence
           if (res.rank_name && res.rank_name !== "Unranked" && res.rank_name !== "-" && res.rank_name !== "") {
@@ -1988,11 +2052,14 @@ export default function App() {
         })
         .finally(() => {
           isPollingRef.current = false;
+          scheduleNextPoll();
         });
     };
     pollStatus();
-    const interval = setInterval(pollStatus, 1500);
-    return () => clearInterval(interval);
+    return () => {
+      isCancelled = true;
+      if (pollTimeout) clearTimeout(pollTimeout);
+    };
   }, [gatePassed]);
 
   // Listen for Global Hotkey (F9 / bound hotkey) via native Rust listener
