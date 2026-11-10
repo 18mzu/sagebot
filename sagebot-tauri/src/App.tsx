@@ -1286,15 +1286,19 @@ export default function App() {
             break;
           }
           case "remote_lock_agent": {
-            const { agentId, agentName } = data;
+            const id = data.agentId || data.agent_id;
+            const agentName = data.agentName || "Agent";
             try {
-              const resMsg = await invoke<string>("lock_agent_now", { agentId });
-              showToast(`Remote locked: ${agentName || "Agent"}`);
+              const resMsg = await invoke<string>("lock_agent_now", {
+                agent_id: id,
+                agentId: id,
+              });
+              showToast(`Remote locked: ${agentName}`);
               bridge.send({
                 type: "lock_result",
                 success: true,
-                agentId,
-                message: resMsg || `Locked ${agentName || "Agent"}`
+                agentId: id,
+                message: resMsg || `Locked ${agentName}`
               });
               try {
                 const pg = await invoke<any>("get_pregame_state");
@@ -1308,9 +1312,32 @@ export default function App() {
               bridge.send({
                 type: "lock_result",
                 success: false,
-                agentId,
+                agentId: id,
                 message: String(err)
               });
+            }
+            break;
+          }
+          case "start_matchmaking": {
+            const queueMode = data.queueId || "competitive";
+            try {
+              await invoke("start_matchmaking_queue", { queueMode });
+              showToast(`Matchmaking started (${queueMode})`);
+              bridge.send({ type: "toast", payload: `Queue started: ${queueMode}` });
+            } catch (err: any) {
+              showToast(`Matchmaking error: ${err}`);
+              bridge.send({ type: "toast", payload: `Cannot start queue: ${err}` });
+            }
+            break;
+          }
+          case "cancel_matchmaking": {
+            try {
+              await invoke("cancel_matchmaking_queue");
+              showToast("Matchmaking canceled");
+              bridge.send({ type: "toast", payload: "Matchmaking canceled." });
+            } catch (err: any) {
+              showToast(`Cancel queue failed: ${err}`);
+              bridge.send({ type: "toast", payload: `Failed to cancel queue: ${err}` });
             }
             break;
           }

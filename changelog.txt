@@ -6,6 +6,8 @@
 - Smart Team Composition detector (dynamic missing-role chips)
 - Instant override of background PC locker/randomizer on mobile selection
 - Party indicator capsules and SageBot theme typography on mobile
+- Remote Matchmaking controls (Find Match with gamemode picker & Stop Queue)
+- Fixed agent locking command parameter compatibility across WebRTC and local Tauri invoke
 - Removed Discord Integration
 - Removed Auto Killjoy Turret
 - Streamlined startup directly to dashboard

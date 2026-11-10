@@ -518,6 +518,40 @@ impl ValorantClient {
         Err(err_desc)
     }
 
+    pub async fn leave_queue(&self) -> Result<bool, String> {
+        let (access_token, jwt) = self.get_riot_tokens().await?;
+        let session = self.get_session().await?;
+        let puuid = session.get("puuid").and_then(|v| v.as_str()).ok_or_else(|| "Missing puuid in session".to_string())?;
+        let glz_host = discover_glz_host();
+        let client_version = discover_client_version();
+
+        let party_player_url = format!("https://{}/parties/v1/players/{}", glz_host, puuid);
+        let party_res = self.glz_client.get(&party_player_url)
+            .header("Authorization", format!("Bearer {}", access_token))
+            .header("X-Riot-Entitlements-JWT", &jwt)
+            .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+            .header("X-Riot-ClientVersion", &client_version)
+            .send().await.map_err(|e| format!("Party lookup failed: {}", e))?;
+
+        if !party_res.status().is_success() {
+            return Err("Player not in a party".to_string());
+        }
+        let party_json: serde_json::Value = party_res.json().await.map_err(|e| e.to_string())?;
+        let party_id = party_json.get("CurrentPartyID").and_then(|v| v.as_str()).ok_or_else(|| "Missing CurrentPartyID".to_string())?;
+
+        let leave_url = format!("https://{}/parties/v1/parties/{}/matchmaking/leave", glz_host, party_id);
+        let leave_res = self.glz_client.post(&leave_url)
+            .header("Authorization", format!("Bearer {}", access_token))
+            .header("X-Riot-Entitlements-JWT", &jwt)
+            .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+            .header("X-Riot-ClientVersion", &client_version)
+            .header("Content-Length", "0")
+            .body("")
+            .send().await.map_err(|e| format!("Cancel queue request failed: {}", e))?;
+
+        Ok(leave_res.status().is_success())
+    }
+
     pub async fn get_player_party_state(&self, puuid: &str) -> Result<(String, String), String> {
         let (access_token, jwt) = self.get_riot_tokens().await?;
         let glz_host = discover_glz_host();

@@ -419,7 +419,8 @@ async fn send_webhook_event(
 }
 
 #[tauri::command]
-async fn lock_agent_now(agent_id: String) -> Result<String, String> {
+async fn lock_agent_now(agent_id: Option<String>, agentId: Option<String>) -> Result<String, String> {
+    let target_agent_id = agent_id.or(agentId).ok_or_else(|| "Missing agent parameter".to_string())?;
     let lockfile = LockfileData::read_from_disk()?;
     let client = ValorantClient::new(lockfile)?;
     let session = client.get_session().await?;
@@ -431,12 +432,12 @@ async fn lock_agent_now(agent_id: String) -> Result<String, String> {
     let client_version = valorant::discover_client_version();
 
     let pregame = client.get_pregame_player_glz(puuid, &access_token, &jwt, &glz_host, &client_version).await
-        .map_err(|e| format!("You are not currently in Agent Select / Pre-Game ({})", e))?;
+        .map_err(|e| format!("You are not currently in Agent Select ({})", e))?;
     let match_id = pregame.get("MatchID").and_then(|v| v.as_str())
-        .ok_or_else(|| "You are not currently in Agent Select / Pre-Game".to_string())?;
+        .ok_or_else(|| "You are not currently in Agent Select".to_string())?;
 
-    let _ = client.select_agent_glz(match_id, &agent_id, &access_token, &jwt, &glz_host, &client_version).await;
-    let locked = client.lock_agent_glz(match_id, &agent_id, &access_token, &jwt, &glz_host, &client_version).await?;
+    let _ = client.select_agent_glz(match_id, &target_agent_id, &access_token, &jwt, &glz_host, &client_version).await;
+    let locked = client.lock_agent_glz(match_id, &target_agent_id, &access_token, &jwt, &glz_host, &client_version).await?;
 
     if locked {
         HAS_MANUALLY_LOCKED.store(true, Ordering::SeqCst);
@@ -1331,13 +1332,20 @@ async fn resize_to_dashboard(window: tauri::Window) {
 
 #[tauri::command]
 async fn start_matchmaking_queue(queue_mode: Option<String>) -> Result<bool, String> {
-    if !IS_BOT_RUNNING.load(Ordering::Relaxed) {
-        return Ok(false);
-    }
     let mode = queue_mode.unwrap_or_else(|| "competitive".to_string());
     if let Ok(lockfile) = LockfileData::read_from_disk() {
         if let Ok(client) = ValorantClient::new(lockfile) {
             return client.start_queue(&mode).await;
+        }
+    }
+    Err("VALORANT client not available".to_string())
+}
+
+#[tauri::command]
+async fn cancel_matchmaking_queue() -> Result<bool, String> {
+    if let Ok(lockfile) = LockfileData::read_from_disk() {
+        if let Ok(client) = ValorantClient::new(lockfile) {
+            return client.leave_queue().await;
         }
     }
     Err("VALORANT client not available".to_string())
@@ -1564,6 +1572,7 @@ pub fn run() {
             trigger_comms_sequence,
             start_competitive_queue,
             start_matchmaking_queue,
+            cancel_matchmaking_queue,
             send_webhook_event,
             get_live_match_roster,
             get_latest_completed_match_score,
