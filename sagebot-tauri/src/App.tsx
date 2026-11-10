@@ -35,7 +35,7 @@ import {
   Shield,
 } from "lucide-react";
 import { RemoteHost, type PairRequest } from "./remoteHost";
-import { generatePairCode, randomHex } from "./secureChannel";
+import { formatCodeDisplay, generatePairCode, randomHex } from "./secureChannel";
 import { QRCodeSVG } from "qrcode.react";
 import "./App.css";
 import tauriConf from "../src-tauri/tauri.conf.json";
@@ -5932,8 +5932,8 @@ export default function App() {
                       <div style={{ display: "inline-flex", flexDirection: "column", gap: "4px" }}>
                         <span style={{ fontSize: "11px", color: "var(--text-tertiary)", fontWeight: 600 }}>OR ENTER 8-CHARACTER CODE</span>
                         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                          <span style={{ fontFamily: "monospace", fontSize: "24px", fontWeight: 800, letterSpacing: "4px", color: "#38bdf8", background: "rgba(56, 189, 248, 0.1)", padding: "6px 14px", borderRadius: "8px", border: "1px solid rgba(56, 189, 248, 0.3)" }}>
-                            {remoteRoomCode}
+                          <span style={{ fontFamily: "monospace", fontSize: "24px", fontWeight: 800, letterSpacing: "3px", color: "#38bdf8", background: "rgba(56, 189, 248, 0.1)", padding: "6px 14px", borderRadius: "8px", border: "1px solid rgba(56, 189, 248, 0.3)" }}>
+                            {formatCodeDisplay(remoteRoomCode)}
                           </span>
                           <button
                             className="key-badge-btn"
@@ -6007,7 +6007,7 @@ export default function App() {
                           checked={remoteUniqueControl}
                           onChange={handleToggleUniqueControl}
                         />
-                        <span className="slider" />
+                        <span className="slider round" />
                       </label>
                     </div>
 

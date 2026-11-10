@@ -692,6 +692,7 @@ body, html, #root {
   background-color: #323241;
   transition: .2s;
   border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 22px;
 }
 
 .slider:before {
@@ -703,6 +704,7 @@ body, html, #root {
   bottom: 2px;
   background-color: white;
   transition: .2s;
+  border-radius: 50%;
 }
 
 input:checked + .slider {
