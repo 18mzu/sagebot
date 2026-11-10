@@ -32,7 +32,6 @@ pub struct AppConfig {
     pub agents_enabled: bool,         // Master toggle for Agents Selection
     pub instalock_enabled: bool,
     pub lock_delay: u64,              // In seconds (5 to 70)
-    pub starter_fallback_enabled: bool,
     pub lock_random_agent: bool,
     pub selected_agents: Vec<String>,
     pub music_volume: u32,            // 0 - 100
@@ -41,7 +40,6 @@ pub struct AppConfig {
     pub auto_derank_enabled: bool,
     pub auto_derank_target_rank: String,
     pub auto_derank_match_limit: u32, // 0 = unlimited
-    pub auto_reconnect: bool,         // Auto Reconnect on Disconnect
     pub low_detail: bool,             // Low Detail Mode (performance / minimal GPU)
     pub auto_queue_enabled: bool,
     pub auto_queue_mode: String,      // competitive, unrated, swiftplay, spikerush, deathmatch, hurm, ggteam
@@ -51,9 +49,6 @@ pub struct AppConfig {
     pub comms_random: bool,
     pub comms_delay: u64,
     pub custom_macro_json: String,
-    pub discord_bot_enabled: bool,
-    pub discord_bot_token: String,
-    pub discord_bot_owner_id: String,
 }
 
 fn default_true() -> bool {
@@ -90,7 +85,6 @@ impl Default for AppConfig {
             agents_enabled: true,
             instalock_enabled: false,
             lock_delay: 20,
-            starter_fallback_enabled: false,
             lock_random_agent: false,
             selected_agents: Vec::new(),
             music_volume: 80,
@@ -99,7 +93,6 @@ impl Default for AppConfig {
             auto_derank_enabled: false,
             auto_derank_target_rank: String::new(),
             auto_derank_match_limit: 0,
-            auto_reconnect: false,
             low_detail: false,
             auto_queue_enabled: false,
             auto_queue_mode: "competitive".to_string(),
@@ -109,9 +102,6 @@ impl Default for AppConfig {
             comms_random: false,
             comms_delay: 5,
             custom_macro_json: String::new(),
-            discord_bot_enabled: false,
-            discord_bot_token: String::new(),
-            discord_bot_owner_id: String::new(),
         }
     }
 }
@@ -253,9 +243,6 @@ impl AppConfig {
                                     cfg.auto_vote_mode = m;
                                 }
                             }
-                            ("settings", "autoreconnect") => {
-                                cfg.auto_reconnect = val == "1";
-                            }
                             ("settings", "lowdetail") => {
                                 cfg.low_detail = val == "1" || val.eq_ignore_ascii_case("true");
                             }
@@ -315,15 +302,6 @@ impl AppConfig {
                                     cfg.chat_text = val.to_string();
                                 }
                             }
-                            ("discord", "bottoken") => {
-                                cfg.discord_bot_token = val.to_string();
-                            }
-                            ("discord", "ownerid") | ("discord", "userid") => {
-                                cfg.discord_bot_owner_id = val.to_string();
-                            }
-                            ("discord", "enabled") => {
-                                cfg.discord_bot_enabled = val == "1";
-                            }
                             ("agents", "enabled") => {
                                 cfg.agents_enabled = val == "1";
                             }
@@ -334,9 +312,6 @@ impl AppConfig {
                                 if let Ok(d) = val.parse::<u64>() {
                                     cfg.lock_delay = d;
                                 }
-                            }
-                            ("agents", "starterfallback") => {
-                                cfg.starter_fallback_enabled = val == "1";
                             }
                             ("agents", "selectedagents") => {
                                 cfg.selected_agents = val.split(',')
@@ -371,7 +346,6 @@ impl AppConfig {
             "[Settings]\r\n\
             PlayPause={}\r\n\
             AutoVote={}\r\n\
-            AutoReconnect={}\r\n\
             LowDetail={}\r\n\
             \r\n\
             [Chat]\r\n\
@@ -390,20 +364,13 @@ impl AppConfig {
             CommsRandom={}\r\n\
             CommsDelay={}\r\n\
             \r\n\
-            [Discord]\r\n\
-            BotToken={}\r\n\
-            OwnerId={}\r\n\
-            Enabled={}\r\n\
-            \r\n\
             [Agents]\r\n\
             Enabled={}\r\n\
             Instalock={}\r\n\
             LockDelay={}\r\n\
-            StarterFallback={}\r\n\
             SelectedAgents={}\r\n",
             hotkey_vk,
             self.auto_vote_mode,
-            if self.auto_reconnect { 1 } else { 0 },
             if self.low_detail { 1 } else { 0 },
             if self.chat_enabled { 1 } else { 0 },
             self.chat_target,
@@ -417,13 +384,9 @@ impl AppConfig {
             self.comms_second_num,
             if self.comms_random { 1 } else { 0 },
             self.comms_delay,
-            self.discord_bot_token,
-            self.discord_bot_owner_id,
-            if self.discord_bot_enabled { 1 } else { 0 },
             if self.agents_enabled { 1 } else { 0 },
             if self.instalock_enabled { 1 } else { 0 },
             self.lock_delay,
-            if self.starter_fallback_enabled { 1 } else { 0 },
             agents_str
         );
 

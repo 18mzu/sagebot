@@ -23,21 +23,18 @@ pub fn start_background_locker(config_state: Arc<Mutex<AppConfig>>) {
             };
             tokio::time::sleep(Duration::from_millis(sleep_ms)).await;
 
-            let (agents_enabled, instalock, lock_delay, fallback, lock_random_agent, selected_agents, webhook_url, webhook_user_id, webhook_enabled, webhook_notify_agent_select, bot_token) = {
+            let (agents_enabled, instalock, lock_delay, lock_random_agent, selected_agents, webhook_url, webhook_user_id, webhook_enabled, webhook_notify_agent_select) = {
                 if let Ok(cfg) = config_state.lock() {
-                    let uid = if !cfg.discord_bot_owner_id.is_empty() { cfg.discord_bot_owner_id.clone() } else { cfg.webhook_user_id.clone() };
                     (
                         cfg.agents_enabled,
                         cfg.instalock_enabled,
                         cfg.lock_delay,
-                        cfg.starter_fallback_enabled,
                         cfg.lock_random_agent,
                         cfg.selected_agents.clone(),
                         cfg.webhook_url.clone(),
-                        uid,
-                        cfg.webhook_enabled || cfg.discord_bot_enabled,
+                        cfg.webhook_user_id.clone(),
+                        cfg.webhook_enabled,
                         cfg.webhook_notify_agent_select,
-                        cfg.discord_bot_token.clone(),
                     )
                 } else {
                     continue;
@@ -57,10 +54,10 @@ pub fn start_background_locker(config_state: Arc<Mutex<AppConfig>>) {
                 continue;
             }
 
-            // Run locker if agent selection is enabled (with queued agents OR random agent) OR starter fallback is enabled
+            // Run locker if agent selection is enabled (with queued agents OR random agent)
             let has_custom_agents = agents_enabled && !selected_agents.is_empty();
             let has_random = agents_enabled && lock_random_agent;
-            if !has_custom_agents && !has_random && !fallback {
+            if !has_custom_agents && !has_random {
                 continue;
             }
 
@@ -194,37 +191,14 @@ pub fn start_background_locker(config_state: Arc<Mutex<AppConfig>>) {
                 }
             }
 
-            // 2. If selected agents failed (or none selected) and starter fallback is enabled
-            if !locked && fallback {
-                // Official starter 5 agents guaranteed to be owned by all accounts
-                let starters = vec![
-                    "569fdd95-4d10-43ab-ca70-79becc718b46", // Sage
-                    "add6443a-41bd-e414-f6ad-e58d267f4e95", // Jett
-                    "eb93336a-449b-9c1b-0a54-a891f7921d69", // Phoenix
-                    "320b2a48-4d9b-a075-30f1-1f93a9b638fa", // Sova
-                    "9f0d8ba9-4140-b941-57d3-a7ad57c6b417", // Brimstone
-                ];
-
-                for starter_id in starters {
-                    let _ = client.select_agent_glz(&match_id, starter_id, &access_token, &jwt, &glz_host, &client_version).await;
-                    if let Ok(success) = client.lock_agent_glz(&match_id, starter_id, &access_token, &jwt, &glz_host, &client_version).await {
-                        if success {
-                            locked = true;
-                            locked_agent_id = starter_id.to_string();
-                            break;
-                        }
-                    }
-                }
-            }
-
             if locked {
                 has_locked_in_match = true;
-                if webhook_enabled && webhook_notify_agent_select && (!webhook_url.is_empty() || (!bot_token.is_empty() && !webhook_user_id.is_empty())) {
+                if webhook_enabled && webhook_notify_agent_select && !webhook_url.is_empty() {
                     let agent_name = crate::valorant::resolve_agent_name_by_id(&locked_agent_id);
                     let desc = format!("Successfully locked **{}**!", agent_name);
                     let _ = send_unified_discord_notification(
                         &webhook_url,
-                        &bot_token,
+                        "",
                         &webhook_user_id,
                         &desc,
                     ).await;

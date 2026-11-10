@@ -5,7 +5,6 @@ mod agents_data;
 mod locker;
 mod tracker;
 mod storefront;
-mod discord_bot;
 mod paths;
 
 use config::AppConfig;
@@ -363,32 +362,6 @@ async fn test_discord_webhook(url: String, user_id: String, bot_token: Option<St
 }
 
 #[tauri::command]
-async fn test_discord_bot(token: String, owner_id: String) -> Result<String, String> {
-    let tok = token.trim();
-    if tok.is_empty() {
-        return Err("Bot Token cannot be empty".to_string());
-    }
-    let client = reqwest::Client::new();
-    let resp = client.get("https://discord.com/api/v10/users/@me")
-        .header("Authorization", format!("Bot {}", tok))
-        .send().await
-        .map_err(|e| format!("Network error: {}", e))?;
-
-    if resp.status().is_success() {
-        if let Ok(json) = resp.json::<serde_json::Value>().await {
-            let username = json.get("username").and_then(|u| u.as_str()).unwrap_or("SageBot");
-            if !owner_id.trim().is_empty() {
-                let _ = webhook::send_bot_dm(tok, &owner_id, "🤖 **SageBot Connected!** Discord Bot DM notifications are linked.").await;
-            }
-            return Ok(format!("Connected as @{}", username));
-        }
-        Ok("Token verified successfully!".to_string())
-    } else {
-        Err(format!("Discord rejected token (HTTP {})", resp.status()))
-    }
-}
-
-#[tauri::command]
 async fn send_webhook_event(
     message: Option<String>,
     title: Option<String>,
@@ -403,17 +376,15 @@ async fn send_webhook_event(
     if text.is_empty() {
         return Ok(());
     }
-    let (url, bot_token, user_id, enabled) = {
+    let (url, user_id, enabled) = {
         if let Ok(cfg) = state.config.lock() {
-            let uid = if !cfg.discord_bot_owner_id.is_empty() { cfg.discord_bot_owner_id.clone() } else { cfg.webhook_user_id.clone() };
-            let is_enabled = cfg.webhook_enabled || cfg.discord_bot_enabled;
-            (cfg.webhook_url.clone(), cfg.discord_bot_token.clone(), uid, is_enabled)
+            (cfg.webhook_url.clone(), cfg.webhook_user_id.clone(), cfg.webhook_enabled)
         } else {
             return Ok(());
         }
     };
-    if enabled && (!url.is_empty() || (!bot_token.is_empty() && !user_id.is_empty())) {
-        webhook::send_unified_discord_notification(&url, &bot_token, &user_id, &text).await?;
+    if enabled && !url.is_empty() {
+        webhook::send_unified_discord_notification(&url, "", &user_id, &text).await?;
     }
     Ok(())
 }
@@ -997,7 +968,7 @@ fn normalize_windows_path(p: &std::path::Path) -> String {
 
 #[tauri::command]
 async fn capture_screen_base64() -> Result<String, String> {
-    let bytes = discord_bot::capture_valorant_screenshot()?;
+    let bytes = valorant::capture_valorant_screenshot()?;
     use base64::Engine;
     let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
     Ok(format!("data:image/jpeg;base64,{}", b64))
@@ -1520,9 +1491,6 @@ pub fn run() {
     // Launch background locker worker
     locker::start_background_locker(Arc::clone(&initial_config));
 
-    // Launch background self-hosted Discord bot worker
-    discord_bot::start_discord_bot_service(Arc::clone(&initial_config));
-
     // Launch continuous VALORANT window focus monitor
     valorant::start_focus_monitor();
 
@@ -1545,7 +1513,6 @@ pub fn run() {
             get_client_status,
             fetch_owned_agents,
             test_discord_webhook,
-            test_discord_bot,
             set_bot_running,
             set_ingame_focus_state,
             lock_agent_now,

@@ -1623,4 +1623,107 @@ pub fn start_focus_monitor() {
     });
 }
 
+// Win32 GDI Screenshot of VALORANT window
+pub fn capture_valorant_screenshot() -> Result<Vec<u8>, String> {
+    focus_valorant_window();
+    std::thread::sleep(std::time::Duration::from_millis(350));
+
+    unsafe {
+        use windows_sys::Win32::Foundation::RECT;
+        use windows_sys::Win32::Graphics::Gdi::*;
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+
+        let hwnd = if let Some(h) = find_valorant_window() {
+            h as _
+        } else {
+            let window_title: Vec<u16> = "VALORANT".encode_utf16().chain(Some(0)).collect();
+            let mut h = FindWindowW(std::ptr::null(), window_title.as_ptr());
+            if h == std::ptr::null_mut() {
+                let class_name: Vec<u16> = "UnrealWindow".encode_utf16().chain(Some(0)).collect();
+                h = FindWindowW(class_name.as_ptr(), std::ptr::null());
+            }
+            h
+        };
+
+        let mut rect = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        if hwnd != std::ptr::null_mut() && GetWindowRect(hwnd, &mut rect) != 0 && rect.right > rect.left && rect.bottom > rect.top {
+            // Found VALORANT window bounds
+        } else {
+            rect.left = 0;
+            rect.top = 0;
+            rect.right = GetSystemMetrics(SM_CXSCREEN);
+            rect.bottom = GetSystemMetrics(SM_CYSCREEN);
+        }
+
+        let width = rect.right - rect.left;
+        let height = rect.bottom - rect.top;
+
+        if width <= 0 || height <= 0 {
+            return Err("Invalid screen dimensions".to_string());
+        }
+
+        let hdc_screen = GetDC(std::ptr::null_mut());
+        if hdc_screen == std::ptr::null_mut() {
+            return Err("Failed to get screen DC".to_string());
+        }
+
+        let hdc_mem = CreateCompatibleDC(hdc_screen);
+        let hbm = CreateCompatibleBitmap(hdc_screen, width, height);
+        let old_obj = SelectObject(hdc_mem, hbm);
+
+        let rop = SRCCOPY | 0x40000000;
+        BitBlt(hdc_mem, 0, 0, width, height, hdc_screen, rect.left, rect.top, rop);
+
+        let mut bi = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: width,
+                biHeight: -height,
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB,
+                biSizeImage: (width * height * 4) as u32,
+                biXPelsPerMeter: 0,
+                biYPelsPerMeter: 0,
+                biClrUsed: 0,
+                biClrImportant: 0,
+            },
+            bmiColors: [RGBQUAD { rgbBlue: 0, rgbGreen: 0, rgbRed: 0, rgbReserved: 0 }],
+        };
+
+        let mut bgra = vec![0u8; (width * height * 4) as usize];
+        GetDIBits(
+            hdc_mem,
+            hbm,
+            0,
+            height as u32,
+            bgra.as_mut_ptr() as *mut _,
+            &mut bi,
+            DIB_RGB_COLORS,
+        );
+
+        SelectObject(hdc_mem, old_obj);
+        DeleteObject(hbm);
+        DeleteDC(hdc_mem);
+        ReleaseDC(std::ptr::null_mut(), hdc_screen);
+
+        let mut rgb = Vec::with_capacity((width * height * 3) as usize);
+        for pixel in bgra.chunks_exact(4) {
+            let b = pixel[0];
+            let g = pixel[1];
+            let r = pixel[2];
+            rgb.push(r);
+            rgb.push(g);
+            rgb.push(b);
+        }
+
+        let mut jpeg_buf = Vec::new();
+        let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg_buf, 80);
+        encoder.encode(&rgb, width as u32, height as u32, image::ExtendedColorType::Rgb8)
+            .map_err(|e| format!("Failed to encode JPEG screenshot: {}", e))?;
+
+        Ok(jpeg_buf)
+    }
+}
+
 

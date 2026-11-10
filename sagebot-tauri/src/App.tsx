@@ -89,6 +89,18 @@ const COMMS_CATEGORIES = [
   },
 ];
 
+const GAMEMODE_NAMES: Record<string, string> = {
+  competitive: "Competitive",
+  unrated: "Unrated",
+  swiftplay: "Swiftplay",
+  spikerush: "Spike Rush",
+  hurm: "Team Deathmatch",
+  deathmatch: "Deathmatch",
+  ggteam: "Escalation",
+  onefa: "Replication",
+  snowball: "Snowball Fight",
+};
+
 const WEAPON_SKIN_GROUPS = [
   {
     category: "Sidearms",
@@ -196,12 +208,10 @@ interface AppConfig {
   remote_notify_disconnect?: boolean;
   remote_notify_status?: boolean;
   remote_notify_rank_change?: boolean;
-  auto_reconnect?: boolean;
   low_detail?: boolean;
   agents_enabled: boolean;
   instalock_enabled: boolean;
   lock_delay: number;
-  starter_fallback_enabled: boolean;
   lock_random_agent?: boolean;
   selected_agents: string[];
   music_volume: number;
@@ -218,9 +228,6 @@ interface AppConfig {
   comms_random?: boolean;
   comms_delay?: number;
   custom_macro_json?: string;
-  discord_bot_enabled?: boolean;
-  discord_bot_token?: string;
-  discord_bot_owner_id?: string;
 }
 
 interface StatusResponse {
@@ -522,12 +529,10 @@ export default function App() {
     remote_notify_disconnect: true,
     remote_notify_status: true,
     remote_notify_rank_change: true,
-    auto_reconnect: false,
     low_detail: false,
     agents_enabled: true,
     instalock_enabled: false,
     lock_delay: 20,
-    starter_fallback_enabled: false,
     selected_agents: [],
     music_volume: 80,
     auto_focus_game: false,
@@ -543,9 +548,6 @@ export default function App() {
     comms_random: false,
     comms_delay: 5,
     custom_macro_json: "",
-    discord_bot_enabled: false,
-    discord_bot_token: "",
-    discord_bot_owner_id: "",
   });
 
   const [isRunning, setIsRunning] = useState<boolean>(false);
@@ -825,12 +827,10 @@ export default function App() {
   // Pre Fully Auto Play state storage (for reverting when turned off)
   const preAutoDerankStateRef = useRef<{
     auto_queue_enabled: boolean;
-    starter_fallback_enabled: boolean;
     lock_random_agent?: boolean;
     auto_focus_game: boolean;
   }>({
     auto_queue_enabled: false,
-    starter_fallback_enabled: false,
     auto_focus_game: false,
   });
 
@@ -882,41 +882,6 @@ export default function App() {
   });
   const disconnectCountRef = useRef<number>(0);
   const lobbyCountRef = useRef<number>(0);
-  const isReconnectingRef = useRef<boolean>(false);
-
-  const triggerAutoReconnect = (reason: string, force: boolean = false) => {
-    if (!force && !configRef.current.auto_reconnect) return;
-    if (isReconnectingRef.current) return;
-    isReconnectingRef.current = true;
-    triggerWebhookEvent("Rejoining...", "disconnect");
-    addLog(`[RECONNECT] Auto Reconnect triggered (${reason}). Launching VALORANT via Riot Client...`);
-    invoke("launch_valorant")
-      .then(() => {
-        addLog("[RECONNECT] VALORANT launched. Waiting to rejoin match...");
-      })
-      .catch((err) => {
-        addLog(`[RECONNECT] Failed to launch VALORANT: ${err}`);
-      })
-      .finally(() => {
-        setTimeout(() => {
-          isReconnectingRef.current = false;
-        }, 15000);
-      });
-  };
-
-  // Auto Reconnect Startup Check: launch VALORANT 2s after app startup if enabled & offline
-  useEffect(() => {
-    const startupTimer = setTimeout(() => {
-      invoke<AppConfig>("get_config")
-        .then((cfg) => {
-          if (cfg?.auto_reconnect && !statusRef.current.game_live && !statusRef.current.is_connected) {
-            triggerAutoReconnect("App Startup");
-          }
-        })
-        .catch(() => { });
-    }, 2000);
-    return () => clearTimeout(startupTimer);
-  }, []);
 
   // Audio Player State
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -985,9 +950,9 @@ export default function App() {
       }
     }
 
-    // 2. Dispatch to Discord webhook/bot if configured
-    const isEnabled = (cfg.webhook_enabled || cfg.discord_bot_enabled) ?? false;
-    const hasTarget = Boolean((cfg.discord_bot_token?.trim() && (cfg.discord_bot_owner_id?.trim() || cfg.webhook_user_id?.trim())) || cfg.webhook_url?.trim());
+    // 2. Dispatch to Discord webhook if configured
+    const isEnabled = cfg.webhook_enabled ?? false;
+    const hasTarget = Boolean(cfg.webhook_url?.trim());
     if (!isEnabled || !hasTarget) return;
 
     if (eventType === "disconnect" && cfg.webhook_notify_disconnect === false) return;
@@ -1039,7 +1004,6 @@ export default function App() {
           if (!cfg.auto_derank_enabled) {
             preAutoDerankStateRef.current = {
               auto_queue_enabled: cfg.auto_queue_enabled,
-              starter_fallback_enabled: cfg.starter_fallback_enabled,
               auto_focus_game: !!cfg.auto_focus_game,
             };
           }
@@ -1108,6 +1072,13 @@ export default function App() {
         storefront: storefrontRef.current,
         pregame: pregameRef.current,
         logs: logsRef.current.slice(-8),
+        config: {
+          anti_afk_mode: configRef.current.anti_afk_mode,
+          anti_afk_key: configRef.current.anti_afk_key,
+          anti_afk_slow_mode: configRef.current.anti_afk_slow_mode,
+          auto_queue_mode: configRef.current.auto_queue_mode,
+          auto_queue_enabled: configRef.current.auto_queue_enabled,
+        },
       });
     };
 
@@ -1306,7 +1277,7 @@ export default function App() {
                   pregameRef.current = pg;
                   bridge.send({ type: "pregame", payload: pg });
                 }
-              } catch {}
+              } catch { }
             } catch (err: any) {
               showToast(`Remote lock failed: ${err}`);
               bridge.send({
@@ -1327,13 +1298,14 @@ export default function App() {
               data.queueMode ||
               data.payload?.queueMode ||
               "competitive";
+            const modeName = GAMEMODE_NAMES[queueMode.toLowerCase()] || queueMode;
             // Synchronize with PC config so PC auto-queue loop uses the selected mode
             updateAndSaveConfig({ auto_queue_mode: queueMode });
             configRef.current.auto_queue_mode = queueMode;
             try {
               await invoke("start_matchmaking_queue", { queue_mode: queueMode, queueMode });
-              showToast(`Matchmaking started (${queueMode})`);
-              bridge.send({ type: "toast", payload: `Queue started: ${queueMode}` });
+              showToast(`Matchmaking started (${modeName})`);
+              bridge.send({ type: "toast", payload: `Queue started: ${modeName}` });
             } catch (err: any) {
               showToast(`Matchmaking error: ${err}`);
               bridge.send({ type: "toast", payload: `Cannot start queue: ${err}` });
@@ -1413,6 +1385,17 @@ export default function App() {
     };
     window.addEventListener("keydown", handlePreventReload, true);
     return () => window.removeEventListener("keydown", handlePreventReload, true);
+  }, []);
+
+  // Notify connected mobile remote immediately when SageBot PC closes
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (remoteBridgeRef.current) {
+        remoteBridgeRef.current.send({ type: "pc_disconnected" });
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, []);
 
   // Listen for background download progress events
@@ -1608,6 +1591,13 @@ export default function App() {
               storefront: storefrontRef.current,
               pregame: pregameRef.current,
               logs: logsRef.current.slice(-8),
+              config: {
+                anti_afk_mode: configRef.current.anti_afk_mode,
+                anti_afk_key: configRef.current.anti_afk_key,
+                anti_afk_slow_mode: configRef.current.anti_afk_slow_mode,
+                auto_queue_mode: configRef.current.auto_queue_mode,
+                auto_queue_enabled: configRef.current.auto_queue_enabled,
+              },
             });
           }
 
@@ -1709,7 +1699,7 @@ export default function App() {
                   }
                 }
               })
-              .catch(() => {});
+              .catch(() => { });
 
             if (trackerFetchedStagesRef.current.matchId !== currentMatchId || !trackerFetchedStagesRef.current.pregame) {
               trackerFetchedStagesRef.current = {
@@ -1936,9 +1926,6 @@ export default function App() {
               return;
             }
             if (devBypassRef.current) {
-              if (configRef.current.auto_reconnect && !isReconnectingRef.current && runningRef.current) {
-                triggerAutoReconnect("Offline Testing Mode");
-              }
               return;
             }
             // VALORANT is not running or lockfiles lost
@@ -1952,13 +1939,9 @@ export default function App() {
                 "VALORANT disconnected.",
                 "disconnect"
               );
-
-              // Auto Reconnect execution
-              triggerAutoReconnect("VALORANT Disconnected");
             }
           } else {
             disconnectCountRef.current = 0;
-            isReconnectingRef.current = false;
             wasGameReadyRef.current = true;
 
             // Auto Matchmaking Queue (Active when auto_queue_enabled OR auto_derank_enabled)
@@ -2028,9 +2011,6 @@ export default function App() {
         })
         .catch(() => {
           if (devBypassRef.current) {
-            if (configRef.current.auto_reconnect && !isReconnectingRef.current && runningRef.current) {
-              triggerAutoReconnect("Offline Testing Mode");
-            }
             return;
           }
           if (wasGameReadyRef.current) {
@@ -2045,9 +2025,6 @@ export default function App() {
               "VALORANT disconnected.",
               "disconnect"
             );
-
-            // Auto Reconnect execution
-            triggerAutoReconnect("VALORANT Process Lost");
           }
         })
         .finally(() => {
@@ -2203,12 +2180,10 @@ export default function App() {
     if (!updated.auto_derank_enabled) {
       if (
         partial.auto_queue_enabled !== undefined ||
-        partial.starter_fallback_enabled !== undefined ||
         partial.auto_focus_game !== undefined
       ) {
         preAutoDerankStateRef.current = {
           auto_queue_enabled: updated.auto_queue_enabled,
-          starter_fallback_enabled: updated.starter_fallback_enabled,
           auto_focus_game: !!updated.auto_focus_game,
         };
       }
@@ -2469,11 +2444,6 @@ export default function App() {
     setLogs(["Logs cleared.", "SageBot started."]);
     setIsRunning(true);
     invoke("set_bot_running", { running: true }).catch(() => { });
-
-    // Auto Reconnect trigger on start if VALORANT is not running
-    if (configRef.current.auto_reconnect && !statusRef.current.game_live) {
-      triggerAutoReconnect("SageBot Started");
-    }
 
     // Mandatory Auto Focus handling on start if already in match
     const st = statusRef.current;
@@ -4609,7 +4579,6 @@ export default function App() {
                           if (enabled) {
                             preAutoDerankStateRef.current = {
                               auto_queue_enabled: config.auto_queue_enabled,
-                              starter_fallback_enabled: false,
                               auto_focus_game: false,
                             };
                             updateAndSaveConfig({
@@ -4751,55 +4720,6 @@ export default function App() {
                         </select>
                       </div>
                     )}
-                  </div>
-                </div>
-
-                {/* Auto Reconnect */}
-                <div className="card">
-                  <div className="between-row">
-                    <div>
-                      <div className="pane-title">Auto Reconnect</div>
-                      <div className="pane-subtitle">
-                        Auto restart VALORANT if disconnected/crashed (requires stay signed in active).
-                      </div>
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                      <button
-                        className="btn-secondary"
-                        style={{
-                          height: "28px",
-                          padding: "0 12px",
-                          fontSize: "12px",
-                          fontWeight: 600,
-                          borderRadius: "6px",
-                          color: "#cbd5e1",
-                          background: "#1e293b",
-                          border: "1px solid rgba(148, 163, 184, 0.2)",
-                          cursor: "pointer",
-                          transition: "all 0.15s ease",
-                        }}
-                        onClick={() => {
-                          addLog("[RECONNECT] Manual test: Launching VALORANT via Riot Client...");
-                          invoke("launch_valorant")
-                            .then(() => addLog("[RECONNECT] VALORANT launch command sent successfully."))
-                            .catch((err) => addLog(`[RECONNECT] Failed: ${err}`));
-                        }}
-                      >
-                        Test
-                      </button>
-                      <label className="switch">
-                        <input
-                          type="checkbox"
-                          checked={config.auto_reconnect ?? false}
-                          onChange={(e) => {
-                            const val = e.target.checked;
-                            updateAndSaveConfig({ auto_reconnect: val });
-                            addLog(val ? "[CONFIG] Auto Reconnect enabled." : "[CONFIG] Auto Reconnect disabled.");
-                          }}
-                        />
-                        <span className="slider round"></span>
-                      </label>
-                    </div>
                   </div>
                 </div>
 
@@ -6038,7 +5958,7 @@ export default function App() {
                       <Smartphone size={22} style={{ color: "var(--accent)" }} />
                       <div>
                         <div className="pane-title" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                          <span>SageBot Mobile</span>
+                          <span>SageBot Remote Control</span>
                         </div>
                         <div className="pane-subtitle" style={{ marginTop: "2px" }}>
                           Control SageBot and the game from your phone.
@@ -6079,7 +5999,7 @@ export default function App() {
                           </button>
                         </div>
                         <div style={{ marginTop: "8px", fontSize: "12px", color: "var(--text-tertiary)" }}>
-                          in this link:{" "}
+                          through the link:{" "}
                           <a
                             href="https://sagebot-mobile.vercel.app/"
                             target="_blank"
