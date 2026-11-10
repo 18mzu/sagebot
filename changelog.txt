@@ -1,5 +1,6 @@
 [v4.0]
 - removed Discord Integration
-- added Remote with very few functions
+- added Remote 
 - removed Auto Killjoy Turret
+- removed Auto Reconnect (RiotClientServices reason)
 - updated protected screen (removed*)

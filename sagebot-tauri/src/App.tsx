@@ -6001,12 +6001,12 @@ export default function App() {
                         <div style={{ marginTop: "8px", fontSize: "12px", color: "var(--text-tertiary)" }}>
                           through the link:{" "}
                           <a
-                            href="https://sagebot-mobile.vercel.app/"
+                            href="https://sagebot-remote.vercel.app/"
                             target="_blank"
                             rel="noreferrer"
                             style={{ color: "#38bdf8", textDecoration: "underline", fontWeight: 600 }}
                           >
-                            https://sagebot-mobile.vercel.app/
+                            https://sagebot-remote.vercel.app/
                           </a>
                         </div>
                       </div>
@@ -6014,7 +6014,7 @@ export default function App() {
 
                     <div style={{ background: "#ffffff", padding: "12px", borderRadius: "12px", display: "flex", alignItems: "center", justifyContent: "center" }}>
                       <QRCodeSVG
-                        value={`https://sagebot-mobile.vercel.app/?room=${remoteRoomCode}&token=${secretToken}`}
+                        value={`https://sagebot-remote.vercel.app/?room=${remoteRoomCode}&token=${secretToken}`}
                         size={140}
                         level="M"
                       />
