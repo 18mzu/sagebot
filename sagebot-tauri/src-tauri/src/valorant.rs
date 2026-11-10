@@ -206,8 +206,8 @@ pub fn is_valorant_process_running() -> bool {
 
 #[derive(Clone)]
 pub struct ValorantClient {
-    client: reqwest::Client,
-    glz_client: reqwest::Client,
+    pub client: reqwest::Client,
+    pub glz_client: reqwest::Client,
     pub lockfile: LockfileData,
     base_url: String,
 }
@@ -323,6 +323,8 @@ impl ValorantClient {
             .header("X-Riot-Entitlements-JWT", jwt)
             .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
             .header("X-Riot-ClientVersion", client_version)
+            .header("Content-Length", "0")
+            .body("")
             .send().await
             .map_err(|e| e.to_string())?;
         Ok(resp.status().is_success())
@@ -343,9 +345,18 @@ impl ValorantClient {
             .header("X-Riot-Entitlements-JWT", jwt)
             .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
             .header("X-Riot-ClientVersion", client_version)
+            .header("Content-Length", "0")
+            .body("")
             .send().await
             .map_err(|e| e.to_string())?;
-        Ok(resp.status().is_success())
+
+        let status = resp.status();
+        if status.is_success() {
+            Ok(true)
+        } else {
+            let body = resp.text().await.unwrap_or_default();
+            Err(format!("HTTP {} ({})", status, body))
+        }
     }
 
     pub async fn get_pregame_player(&self, puuid: &str) -> Result<serde_json::Value, String> {

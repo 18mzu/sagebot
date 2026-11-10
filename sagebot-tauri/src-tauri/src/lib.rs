@@ -25,6 +25,7 @@ pub static HAS_MANUALLY_LOCKED: AtomicBool = AtomicBool::new(false);
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PregameTeammate {
     pub puuid: String,
+    pub player_name: String,
     pub character_id: String,
     pub character_name: String,
     pub role: String,
@@ -466,7 +467,18 @@ async fn get_pregame_state() -> Result<Option<PregameState>, String> {
         Some(p) => p.to_string(),
         None => return Ok(None),
     };
-    let pregame_player = match client.get_pregame_player(&my_puuid).await {
+
+    let (access_token, jwt) = match client.get_riot_tokens().await {
+        Ok(t) => t,
+        Err(_) => return Ok(None),
+    };
+    let glz_host = valorant::discover_glz_host();
+    let client_version = valorant::discover_client_version();
+    let parts: Vec<&str> = glz_host.split('.').collect();
+    let shard = if parts.len() >= 2 { parts[1] } else { "ap" };
+    let pd_host = format!("pd.{}.a.pvp.net", shard);
+
+    let pregame_player = match client.get_pregame_player_glz(&my_puuid, &access_token, &jwt, &glz_host, &client_version).await {
         Ok(p) => p,
         Err(_) => return Ok(None),
     };
@@ -474,8 +486,20 @@ async fn get_pregame_state() -> Result<Option<PregameState>, String> {
         Some(mid) if !mid.is_empty() => mid.to_string(),
         _ => return Ok(None),
     };
-    let pmatch = match client.get_pregame_match(&match_id).await {
-        Ok(m) => m,
+
+    let match_url = format!("https://{}/pregame/v1/matches/{}", glz_host, match_id);
+    let match_resp = match client.glz_client.get(&match_url)
+        .header("Authorization", format!("Bearer {}", access_token))
+        .header("X-Riot-Entitlements-JWT", &jwt)
+        .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+        .header("X-Riot-ClientVersion", &client_version)
+        .send().await {
+        Ok(r) => r,
+        Err(_) => return Ok(None),
+    };
+
+    let pmatch: serde_json::Value = match match_resp.json().await {
+        Ok(j) => j,
         Err(_) => return Ok(None),
     };
 
@@ -499,7 +523,9 @@ async fn get_pregame_state() -> Result<Option<PregameState>, String> {
     let mut picked_roles = std::collections::HashSet::new();
 
     let mut players_list = Vec::new();
-    if let Some(teams) = pmatch.get("Teams").and_then(|t| t.as_array()) {
+    if let Some(ally) = pmatch.get("AllyTeam").and_then(|a| a.get("Players")).and_then(|p| p.as_array()) {
+        players_list = ally.clone();
+    } else if let Some(teams) = pmatch.get("Teams").and_then(|t| t.as_array()) {
         for team in teams {
             if let Some(pls) = team.get("Players").and_then(|p| p.as_array()) {
                 let has_me = pls.iter().any(|pl| pl.get("Subject").and_then(|s| s.as_str()) == Some(&my_puuid));
@@ -509,9 +535,19 @@ async fn get_pregame_state() -> Result<Option<PregameState>, String> {
                 }
             }
         }
-    } else if let Some(ally) = pmatch.get("AllyTeam").and_then(|a| a.get("Players")).and_then(|p| p.as_array()) {
-        players_list = ally.clone();
     }
+
+    // Collect all PUUIDs to fetch real player names
+    let mut puuids = Vec::new();
+    for pl in &players_list {
+        if let Some(s) = pl.get("Subject").and_then(|v| v.as_str()) {
+            if !s.is_empty() {
+                puuids.push(s.to_string());
+            }
+        }
+    }
+
+    let names_map = tracker::fetch_unmasked_names(&client.glz_client, &pd_host, &puuids, &access_token, &jwt, &client_version).await;
 
     for pl in players_list {
         let subj = pl.get("Subject").and_then(|s| s.as_str()).unwrap_or("").to_string();
@@ -527,6 +563,14 @@ async fn get_pregame_state() -> Result<Option<PregameState>, String> {
         };
         let role = if !char_id.is_empty() { find_role(&char_id) } else { String::new() };
 
+        let player_name = if is_self {
+            "YOU".to_string()
+        } else if let Some(n) = names_map.get(&subj) {
+            n.clone()
+        } else {
+            "Teammate".to_string()
+        };
+
         if !role.is_empty() && (is_locked || !char_id.is_empty()) {
             picked_roles.insert(role.clone());
         }
@@ -537,6 +581,7 @@ async fn get_pregame_state() -> Result<Option<PregameState>, String> {
 
         teammates.push(PregameTeammate {
             puuid: subj,
+            player_name,
             character_id: char_id,
             character_name,
             role,

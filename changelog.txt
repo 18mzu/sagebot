@@ -1,6 +1,8 @@
 [v4.0]
 - Remote Agent Selection via Mobile Remote with lock verification dialog
-- Real-time pregame teammate pick synchronization
+- Real-time pregame teammate pick synchronization via regional GLZ API
+- Unmasked real Riot player names in pregame lobby
+- Match Found warning prompt (Keep PC Auto vs Choose Agent Manually)
 - Smart Team Composition detector (dynamic missing-role chips)
 - Instant override of background PC locker/randomizer on mobile selection
 - Party indicator capsules and SageBot theme typography on mobile

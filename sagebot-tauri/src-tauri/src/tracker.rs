@@ -1047,7 +1047,7 @@ async fn fetch_player_full_stats(
 }
 
 // Fetch unmasked player names via PUT /name-service/v2/players
-async fn fetch_unmasked_names(
+pub(crate) async fn fetch_unmasked_names(
     client: &reqwest::Client,
     pd_host: &str,
     puuids: &[String],

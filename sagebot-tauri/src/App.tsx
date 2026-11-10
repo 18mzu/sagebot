@@ -1599,7 +1599,7 @@ export default function App() {
                 b.send({
                   type: "notification",
                   title: "SageBot",
-                  message: "Match Found! Do you want to choose your agent?",
+                  message: "Match found! Open SageBot to manually choose your agent.",
                   eventType: "match_found",
                 });
               }
