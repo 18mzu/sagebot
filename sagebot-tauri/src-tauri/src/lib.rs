@@ -1331,8 +1331,12 @@ async fn resize_to_dashboard(window: tauri::Window) {
 }
 
 #[tauri::command]
-async fn start_matchmaking_queue(queue_mode: Option<String>) -> Result<bool, String> {
-    let mode = queue_mode.unwrap_or_else(|| "competitive".to_string());
+async fn start_matchmaking_queue(
+    queue_mode: Option<String>,
+    #[allow(non_snake_case)] queueMode: Option<String>,
+) -> Result<bool, String> {
+    let mode = queue_mode.or(queueMode).unwrap_or_else(|| "competitive".to_string());
+    println!("[Matchmaking] start_matchmaking_queue called with mode: {}", mode);
     if let Ok(lockfile) = LockfileData::read_from_disk() {
         if let Ok(client) = ValorantClient::new(lockfile) {
             return client.start_queue(&mode).await;
@@ -1353,7 +1357,7 @@ async fn cancel_matchmaking_queue() -> Result<bool, String> {
 
 #[tauri::command]
 async fn start_competitive_queue() -> Result<bool, String> {
-    start_matchmaking_queue(Some("competitive".to_string())).await
+    start_matchmaking_queue(Some("competitive".to_string()), None).await
 }
 
 #[tauri::command]

@@ -484,14 +484,28 @@ impl ValorantClient {
 
         // 2. Set queue to desired gamemode
         let queue_url = format!("https://{}/parties/v1/parties/{}/queue", glz_host, party_id);
-        let queue_body = serde_json::json!({ "queueID": queue_id });
-        let _ = self.glz_client.post(&queue_url)
+        let queue_body = serde_json::json!({
+            "queueID": queue_id,
+            "queueId": queue_id
+        });
+        println!("[Matchmaking] Changing party {} queue to {}", party_id, queue_id);
+        let queue_res = self.glz_client.post(&queue_url)
             .header("Authorization", format!("Bearer {}", access_token))
             .header("X-Riot-Entitlements-JWT", &jwt)
             .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
             .header("X-Riot-ClientVersion", &client_version)
             .json(&queue_body)
             .send().await;
+
+        if let Ok(res) = queue_res {
+            if !res.status().is_success() {
+                let status = res.status();
+                let body = res.text().await.unwrap_or_default();
+                eprintln!("[Matchmaking] Warning: Set queue returned HTTP {}: {}", status, body);
+            } else {
+                println!("[Matchmaking] Successfully set party queue to {}", queue_id);
+            }
+        }
 
         // 3. Enter matchmaking (/matchmaking/join)
         let join_url = format!("https://{}/parties/v1/parties/{}/matchmaking/join", glz_host, party_id);

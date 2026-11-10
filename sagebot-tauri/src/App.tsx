@@ -1319,9 +1319,9 @@ export default function App() {
             break;
           }
           case "start_matchmaking": {
-            const queueMode = data.queueId || "competitive";
+            const queueMode = data.queueId || data.queue_id || data.queueMode || "competitive";
             try {
-              await invoke("start_matchmaking_queue", { queueMode });
+              await invoke("start_matchmaking_queue", { queue_mode: queueMode, queueMode });
               showToast(`Matchmaking started (${queueMode})`);
               bridge.send({ type: "toast", payload: `Queue started: ${queueMode}` });
             } catch (err: any) {
@@ -1908,7 +1908,7 @@ export default function App() {
                 if (!isQueueingRef.current && Date.now() - lastQueueTimeRef.current > 10000) {
                   lastQueueTimeRef.current = Date.now();
                   const targetMode = configRef.current.auto_queue_mode || "competitive";
-                  invoke<boolean>("start_matchmaking_queue", { queueMode: targetMode })
+                  invoke<boolean>("start_matchmaking_queue", { queue_mode: targetMode, queueMode: targetMode })
                     .then((ok) => {
                       if (ok) {
                         isQueueingRef.current = true;
