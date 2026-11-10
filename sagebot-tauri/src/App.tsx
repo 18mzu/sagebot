@@ -34,7 +34,8 @@ import {
   Smartphone,
   Shield,
 } from "lucide-react";
-import { RemoteBridge } from "./remoteBridge";
+import { RemoteHost, type PairRequest } from "./remoteHost";
+import { generatePairCode, randomHex } from "./secureChannel";
 import { QRCodeSVG } from "qrcode.react";
 import "./App.css";
 import tauriConf from "../src-tauri/tauri.conf.json";
@@ -405,63 +406,58 @@ export interface PairedDevice {
   id: string;
   name: string;
   paired_at: string;
+  /** Per-device AES-256 session key (base64). Deleting it revokes the device. */
+  key: string;
 }
 
-const generateRemoteCode = (): string => {
-  const chars = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
-  let res = "";
-  for (let i = 0; i < 8; i++) {
-    res += chars[Math.floor(Math.random() * chars.length)];
-  }
-  return res;
-};
-
-const generateSecretToken = (): string => {
-  return Array.from(crypto.getRandomValues(new Uint8Array(16)))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
+const loadOrCreate = (storageKey: string, isValid: (v: string) => boolean, create: () => string): string => {
+  const saved = localStorage.getItem(storageKey);
+  if (saved && isValid(saved)) return saved;
+  const generated = create();
+  localStorage.setItem(storageKey, generated);
+  return generated;
 };
 
 export default function App() {
-  // Mobile Remote State (8-character alphanumeric + secret token)
-  const [remoteRoomCode, setRemoteRoomCode] = useState<string>(() => {
-    const saved = localStorage.getItem("sagebot_remote_code");
-    if (saved && saved.length === 8) return saved;
-    const generated = generateRemoteCode();
-    localStorage.setItem("sagebot_remote_code", generated);
-    return generated;
-  });
+  // Remote: 8-character code (pairing address), QR token (skips approval) and this PC's private channel id
+  const [remoteRoomCode, setRemoteRoomCode] = useState<string>(() =>
+    loadOrCreate("sagebot_remote_code", (v) => v.length === 8, generatePairCode)
+  );
 
-  const [secretToken, setSecretToken] = useState<string>(() => {
-    const saved = localStorage.getItem("sagebot_remote_secret");
-    if (saved && saved.length >= 16) return saved;
-    const generated = generateSecretToken();
-    localStorage.setItem("sagebot_remote_secret", generated);
-    return generated;
-  });
+  const [secretToken, setSecretToken] = useState<string>(() =>
+    loadOrCreate("sagebot_remote_secret", (v) => v.length >= 32, () => randomHex(32))
+  );
+
+  const [remoteChannelId, setRemoteChannelId] = useState<string>(() =>
+    loadOrCreate("sagebot_remote_channel", (v) => v.length === 32, () => randomHex(16))
+  );
 
   const [pairedDevices, setPairedDevices] = useState<PairedDevice[]>(() => {
     try {
       const saved = localStorage.getItem("sagebot_paired_devices");
-      return saved ? JSON.parse(saved) : [];
+      const list: PairedDevice[] = saved ? JSON.parse(saved) : [];
+      // Devices paired with the old insecure protocol have no key and must pair again.
+      return list.filter((d) => d && typeof d.key === "string" && d.key.length > 0);
     } catch {
       return [];
     }
   });
 
-  const [pendingPairRequest, setPendingPairRequest] = useState<{
-    client_id: string;
-    proposed_name: string;
-  } | null>(null);
+  const [remoteUniqueControl, setRemoteUniqueControl] = useState<boolean>(
+    () => localStorage.getItem("sagebot_remote_unique") === "true"
+  );
+
+  const [pendingPairRequest, setPendingPairRequest] = useState<PairRequest | null>(null);
   const [deviceNicknameInput, setDeviceNicknameInput] = useState<string>("");
   const [showResetConfirmModal, setShowResetConfirmModal] = useState<boolean>(false);
 
   const [remoteClientConnected, setRemoteClientConnected] = useState<boolean>(false);
-  const remoteBridgeRef = useRef<RemoteBridge | null>(null);
+  const remoteBridgeRef = useRef<RemoteHost | null>(null);
   const pairedDevicesRef = useRef<PairedDevice[]>(pairedDevices);
   const secretTokenRef = useRef<string>(secretToken);
-  const remoteRoomCodeRef = useRef<string>(remoteRoomCode);
-  const pendingPairRequestRef = useRef<any>(null);
+  const remoteUniqueControlRef = useRef<boolean>(remoteUniqueControl);
+  const remoteLastSeenRef = useRef<number>(0);
+  const pendingPairRequestRef = useRef<PairRequest | null>(null);
 
   useEffect(() => {
     pairedDevicesRef.current = pairedDevices;
@@ -470,8 +466,8 @@ export default function App() {
     secretTokenRef.current = secretToken;
   }, [secretToken]);
   useEffect(() => {
-    remoteRoomCodeRef.current = remoteRoomCode;
-  }, [remoteRoomCode]);
+    remoteUniqueControlRef.current = remoteUniqueControl;
+  }, [remoteUniqueControl]);
   useEffect(() => {
     pendingPairRequestRef.current = pendingPairRequest;
   }, [pendingPairRequest]);
@@ -1059,9 +1055,9 @@ export default function App() {
       });
   }, []);
 
-  // Dedicated Lifecycle for Dual-Broker Remote Bridge (re-subscribes cleanly when remoteRoomCode changes)
+  // Remote host lifecycle (restarts cleanly when the code or channel is reset)
   useEffect(() => {
-    const sendStatusUpdate = (bridgeInstance?: RemoteBridge | null) => {
+    const sendStatusUpdate = (bridgeInstance?: RemoteHost | null) => {
       const b = bridgeInstance ?? remoteBridgeRef.current;
       if (!b) return;
       b.send({
@@ -1082,88 +1078,37 @@ export default function App() {
       });
     };
 
-    const bridge = new RemoteBridge(remoteRoomCode, "pc", {
-      onBrokerReady: () => {
-        sendStatusUpdate(bridge);
+    const bridge = new RemoteHost({
+      code: remoteRoomCode,
+      channelId: remoteChannelId,
+      getToken: () => secretTokenRef.current,
+      getDevices: () => pairedDevicesRef.current,
+      canAcceptDevice: (cid) =>
+        !remoteUniqueControlRef.current || pairedDevicesRef.current.every((d) => d.id === cid),
+      onReady: () => sendStatusUpdate(bridge),
+      onPairRequest: (req) => {
+        setDeviceNicknameInput(req.proposed_name);
+        setPendingPairRequest(req);
       },
-      onMessage: async (data: any) => {
-        if (!data) return;
-        const msgType = data.type || "";
-        const action = data.action || (data.type === "request_sync" ? "request_sync" : "");
-
-        if (msgType === "verify_pair" || msgType === "request_pair") {
-          const { client_id, proposed_name, token, code } = data;
-          const currentCode = remoteRoomCodeRef.current;
-          const currentToken = secretTokenRef.current;
-          const currentList = pairedDevicesRef.current;
-
-          // 1. Verify code if provided
-          if (code && typeof code === "string" && code.trim().toUpperCase() !== currentCode.trim().toUpperCase()) {
-            bridge.send({
-              type: "invalid_code",
-              message: "Invalid pairing code. Check code on PC."
-            });
-            return;
-          }
-
-          // 2. If client provided matching secret token (e.g. from QR scan)
-          if (token && token === currentToken) {
-            const existing = currentList.find((d) => d.id === client_id);
-            const devName = existing?.name || proposed_name || "Phone";
-            if (!existing) {
-              const newDev: PairedDevice = {
-                id: client_id,
-                name: devName,
-                paired_at: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-              };
-              const updated = [...currentList, newDev];
-              pairedDevicesRef.current = updated;
-              setPairedDevices(updated);
-              localStorage.setItem("sagebot_paired_devices", JSON.stringify(updated));
-              showToast(`Connected: ${devName}`);
-            }
-            bridge.send({
-              type: "pair_approved",
-              token: currentToken,
-              client_id,
-              device_name: devName,
-            });
-            sendStatusUpdate(bridge);
-            return;
-          }
-
-          // 3. If client_id was previously approved
-          const existing = currentList.find((d) => d.id === client_id);
-          if (existing) {
-            bridge.send({
-              type: "pair_approved",
-              token: currentToken,
-              client_id,
-              device_name: existing.name,
-            });
-            sendStatusUpdate(bridge);
-            return;
-          }
-
-          // 4. Code is valid, acknowledge to mobile that approval is required on PC
-          bridge.send({
-            type: "approval_required",
-            client_id,
-          });
-
-          // Open approval modal on PC (only set once so typing is never interrupted)
-          if (!pendingPairRequestRef.current) {
-            setDeviceNicknameInput(proposed_name || "Phone");
-            setPendingPairRequest({
-              client_id,
-              proposed_name: proposed_name || "Phone",
-            });
-          }
-          return;
-        }
-
-        if (!action) return;
-
+      onPairCancelled: (cid) => {
+        if (pendingPairRequestRef.current?.client_id === cid) setPendingPairRequest(null);
+      },
+      onDevicePaired: (dev) => {
+        const newDev: PairedDevice = {
+          ...dev,
+          paired_at: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        };
+        const next = [...pairedDevicesRef.current.filter((d) => d.id !== dev.id), newDev];
+        pairedDevicesRef.current = next;
+        setPairedDevices(next);
+        localStorage.setItem("sagebot_paired_devices", JSON.stringify(next));
+        remoteLastSeenRef.current = Date.now();
+        setRemoteClientConnected(true);
+        setTimeout(() => sendStatusUpdate(bridge), 250);
+        showToast(`Paired: ${dev.name}`);
+      },
+      onCommand: async (_cid, data) => {
+        remoteLastSeenRef.current = Date.now();
         setRemoteClientConnected((prev) => {
           if (!prev) {
             showToast("Mobile Remote connected");
@@ -1171,9 +1116,13 @@ export default function App() {
           return true;
         });
 
+        const action = typeof data.action === "string" ? data.action : "";
         switch (action) {
+          case "hello":
           case "request_sync":
             sendStatusUpdate(bridge);
+            break;
+          case "ping":
             break;
           case "toggle_bot":
             if (runningRef.current) {
@@ -1358,13 +1307,22 @@ export default function App() {
     };
     scheduleSync();
 
+    // The phone pings every 5s; consider it gone after 15s of silence
+    const presenceTimer = setInterval(() => {
+      if (Date.now() - remoteLastSeenRef.current > 15000) {
+        setRemoteClientConnected(false);
+      }
+    }, 3000);
+
     return () => {
       isBridgeDestroyed = true;
       if (syncTimeout) clearTimeout(syncTimeout);
+      clearInterval(presenceTimer);
       bridge.destroy();
       remoteBridgeRef.current = null;
+      setRemoteClientConnected(false);
     };
-  }, [remoteRoomCode]);
+  }, [remoteRoomCode, remoteChannelId]);
 
   // Disable default browser/WebView context menu on right-click
   useEffect(() => {
@@ -1413,60 +1371,30 @@ export default function App() {
   }, []);
 
   // Remote Device Pairing Handlers
-  const handleApproveDevice = () => {
-    if (!pendingPairRequest) return;
-    const newDev: PairedDevice = {
-      id: pendingPairRequest.client_id,
-      name: deviceNicknameInput.trim() || pendingPairRequest.proposed_name || "Phone",
-      paired_at: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-    };
-    const next = [...pairedDevicesRef.current.filter((d) => d.id !== newDev.id), newDev];
-    pairedDevicesRef.current = next;
-    setPairedDevices(next);
-    localStorage.setItem("sagebot_paired_devices", JSON.stringify(next));
-
-    if (remoteBridgeRef.current) {
-      remoteBridgeRef.current.send({
-        type: "pair_approved",
-        token: secretTokenRef.current,
-        client_id: newDev.id,
-        device_name: newDev.name,
-      });
-      remoteBridgeRef.current.send({
-        type: "sync",
-        status: statusRef.current,
-        bot_running: runningRef.current,
-        roster: rosterRef.current,
-        storefront: storefrontRef.current,
-        pregame: pregameRef.current,
-        logs: logsRef.current.slice(-8),
-      });
-    }
+  const handleApproveDevice = async () => {
+    const req = pendingPairRequest;
+    if (!req) return;
     setPendingPairRequest(null);
     pendingPairRequestRef.current = null;
-    showToast(`Approved device: ${newDev.name}`);
+    const name = deviceNicknameInput.trim() || req.proposed_name || "Phone";
+    const dev = await remoteBridgeRef.current?.approve(req.client_id, name);
+    if (!dev) {
+      showToast(remoteUniqueControlRef.current ? "Unique Control: remove the current device first." : "Pairing request expired.");
+    }
   };
 
   const handleDenyDevice = () => {
-    if (!pendingPairRequest) return;
-    if (remoteBridgeRef.current) {
-      remoteBridgeRef.current.send({
-        type: "pair_denied",
-        client_id: pendingPairRequest.client_id,
-      });
-    }
+    const req = pendingPairRequest;
+    if (!req) return;
+    remoteBridgeRef.current?.deny(req.client_id);
     setPendingPairRequest(null);
     pendingPairRequestRef.current = null;
     showToast("Device pairing denied");
   };
 
-  const handleRemoveDevice = (devId: string) => {
-    if (remoteBridgeRef.current) {
-      remoteBridgeRef.current.send({
-        type: "force_logout",
-        target_id: devId,
-      });
-    }
+  const handleRemoveDevice = async (devId: string) => {
+    // Tell the phone first (while its key still exists), then delete the key: it can never get back in.
+    await remoteBridgeRef.current?.sendTo(devId, { type: "revoked" });
     const next = pairedDevicesRef.current.filter((d) => d.id !== devId);
     pairedDevicesRef.current = next;
     setPairedDevices(next);
@@ -1474,25 +1402,43 @@ export default function App() {
     showToast("Device removed and disconnected.");
   };
 
-  const handleResetRemoteCode = () => {
-    if (remoteBridgeRef.current) {
-      remoteBridgeRef.current.send({
-        type: "force_logout",
-      });
+  const handleToggleUniqueControl = async () => {
+    const next = !remoteUniqueControl;
+    if (next && pairedDevicesRef.current.length > 1) {
+      // Keep only the first paired device and revoke any extra ones
+      const [keep, ...extra] = pairedDevicesRef.current;
+      for (const dev of extra) {
+        await remoteBridgeRef.current?.sendTo(dev.id, { type: "revoked" });
+      }
+      const trimmed = [keep];
+      pairedDevicesRef.current = trimmed;
+      setPairedDevices(trimmed);
+      localStorage.setItem("sagebot_paired_devices", JSON.stringify(trimmed));
     }
-    const newCode = generateRemoteCode();
-    const newToken = generateSecretToken();
-    setRemoteRoomCode(newCode);
-    setSecretToken(newToken);
+    remoteUniqueControlRef.current = next;
+    setRemoteUniqueControl(next);
+    localStorage.setItem("sagebot_remote_unique", String(next));
+    showToast(next ? "Unique Control enabled: one device only." : "Unique Control disabled.");
+  };
+
+  const handleResetRemoteCode = async () => {
+    setShowResetConfirmModal(false);
+    await remoteBridgeRef.current?.send({ type: "force_logout" });
+    const newCode = generatePairCode();
+    const newToken = randomHex(32);
+    const newChannel = randomHex(16);
     secretTokenRef.current = newToken;
     pairedDevicesRef.current = [];
+    pendingPairRequestRef.current = null;
+    setRemoteRoomCode(newCode);
+    setSecretToken(newToken);
+    setRemoteChannelId(newChannel);
     setPairedDevices([]);
     setPendingPairRequest(null);
-    pendingPairRequestRef.current = null;
     localStorage.setItem("sagebot_remote_code", newCode);
     localStorage.setItem("sagebot_remote_secret", newToken);
+    localStorage.setItem("sagebot_remote_channel", newChannel);
     localStorage.setItem("sagebot_paired_devices", JSON.stringify([]));
-    setShowResetConfirmModal(false);
     showToast("Code reset. All devices logged out.");
   };
 
@@ -6027,14 +5973,48 @@ export default function App() {
                       <Shield size={16} style={{ color: "var(--accent)" }} />
                       <span style={{ fontSize: "14px", fontWeight: 700, color: "#ffffff" }}>Connected Devices</span>
                     </div>
-                    <div className="pane-subtitle" style={{ marginBottom: "16px" }}>
+                    <div className="pane-subtitle" style={{ marginBottom: "14px" }}>
                       Manage paired mobile devices authorized to monitor and control SageBot.
+                    </div>
+
+                    {/* Unique Control Toggle */}
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        background: "rgba(0, 0, 0, 0.25)",
+                        border: "1px solid var(--border-card)",
+                        padding: "12px 14px",
+                        borderRadius: "10px",
+                        marginBottom: "12px",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                        <Lock size={16} style={{ color: remoteUniqueControl ? "#10b981" : "var(--text-secondary)" }} />
+                        <div>
+                          <div style={{ fontSize: "13px", fontWeight: 700, color: "#ffffff" }}>
+                            Unique Control
+                          </div>
+                          <div style={{ fontSize: "11px", color: "var(--text-tertiary)", marginTop: "2px" }}>
+                            Allow only one device to pair. Remove the current device or turn this off to pair another.
+                          </div>
+                        </div>
+                      </div>
+                      <label className="switch">
+                        <input
+                          type="checkbox"
+                          checked={remoteUniqueControl}
+                          onChange={handleToggleUniqueControl}
+                        />
+                        <span className="slider" />
+                      </label>
                     </div>
 
                     {pairedDevices.length === 0 ? (
                       <div style={{ background: "rgba(0, 0, 0, 0.2)", border: "1px dashed rgba(255, 255, 255, 0.1)", padding: "20px", borderRadius: "10px", textAlign: "center" }}>
                         <span style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
-                          No devices paired yet. Scan the QR code or enter the 8-character code on your phone to connect.
+                          No devices paired yet.
                         </span>
                       </div>
                     ) : (
@@ -7023,6 +7003,14 @@ export default function App() {
               <p style={{ margin: 0, fontSize: "13px", color: "#cbd5e1" }}>
                 A device is requesting permission to connect to SageBot.
               </p>
+              {pendingPairRequest.fingerprint && (
+                <div style={{ background: "rgba(56, 189, 248, 0.08)", border: "1px solid rgba(56, 189, 248, 0.25)", borderRadius: 8, padding: "8px 12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <span style={{ fontSize: "11px", color: "#94a3b8" }}>Security Verification Key</span>
+                  <span style={{ fontFamily: "monospace", fontSize: "14px", fontWeight: 800, letterSpacing: "2px", color: "#38bdf8" }}>
+                    {pendingPairRequest.fingerprint}
+                  </span>
+                </div>
+              )}
               <div>
                 <label style={{ fontSize: "12px", color: "#94a3b8", display: "block", marginBottom: 6 }}>
                   Give this device a nickname:

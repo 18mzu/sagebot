@@ -1,6 +1,2 @@
-[v4.0]
-- removed Discord Integration
-- added Remote 
-- removed Auto Killjoy Turret
-- removed Auto Reconnect (RiotClientServices reason)
-- updated protected screen (removed*)
+[v4.0.1]
+- fixed critical securities.
