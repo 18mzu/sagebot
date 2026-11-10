@@ -14,12 +14,34 @@ use valorant::{
     decode_presence_data, simulate_anti_afk_action, simulate_vote_key
 };
 use agents_data::{AgentInfo, get_all_agents};
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::State;
 
 pub static IS_BOT_RUNNING: AtomicBool = AtomicBool::new(false);
+pub static HAS_MANUALLY_LOCKED: AtomicBool = AtomicBool::new(false);
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PregameTeammate {
+    pub puuid: String,
+    pub character_id: String,
+    pub character_name: String,
+    pub role: String,
+    pub is_locked: bool,
+    pub is_self: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PregameState {
+    pub match_id: String,
+    pub map_name: String,
+    pub map_id: String,
+    pub gamemode: String,
+    pub teammates: Vec<PregameTeammate>,
+    pub locked_agent_id: Option<String>,
+    pub missing_roles: Vec<String>,
+}
 
 #[derive(Serialize, Default)]
 pub struct StatusResponse {
@@ -416,10 +438,130 @@ async fn lock_agent_now(agent_id: String) -> Result<String, String> {
     let locked = client.lock_agent_glz(match_id, &agent_id, &access_token, &jwt, &glz_host, &client_version).await?;
 
     if locked {
+        HAS_MANUALLY_LOCKED.store(true, Ordering::SeqCst);
         Ok("Agent successfully locked!".to_string())
     } else {
         Err("Failed to lock agent".to_string())
     }
+}
+
+#[tauri::command]
+async fn get_pregame_state() -> Result<Option<PregameState>, String> {
+    if !is_valorant_process_running() {
+        return Ok(None);
+    }
+    let lockfile = match LockfileData::read_from_disk() {
+        Ok(l) => l,
+        Err(_) => return Ok(None),
+    };
+    let client = match ValorantClient::new(lockfile) {
+        Ok(c) => c,
+        Err(_) => return Ok(None),
+    };
+    let session = match client.get_session().await {
+        Ok(s) => s,
+        Err(_) => return Ok(None),
+    };
+    let my_puuid = match session.get("puuid").and_then(|v| v.as_str()) {
+        Some(p) => p.to_string(),
+        None => return Ok(None),
+    };
+    let pregame_player = match client.get_pregame_player(&my_puuid).await {
+        Ok(p) => p,
+        Err(_) => return Ok(None),
+    };
+    let match_id = match pregame_player.get("MatchID").and_then(|v| v.as_str()) {
+        Some(mid) if !mid.is_empty() => mid.to_string(),
+        _ => return Ok(None),
+    };
+    let pmatch = match client.get_pregame_match(&match_id).await {
+        Ok(m) => m,
+        Err(_) => return Ok(None),
+    };
+
+    let raw_map = pmatch.get("MapID").and_then(|v| v.as_str()).unwrap_or("");
+    let map_name = valorant::resolve_map_name(raw_map);
+    let queue = pmatch.get("QueueID").and_then(|v| v.as_str()).unwrap_or("");
+    let gamemode = valorant::resolve_gamemode(queue, "", false);
+
+    let all_agents = agents_data::get_all_agents();
+    let find_role = |char_id: &str| -> String {
+        for a in &all_agents {
+            if a.id.eq_ignore_ascii_case(char_id) {
+                return a.role.clone();
+            }
+        }
+        "".to_string()
+    };
+
+    let mut teammates = Vec::new();
+    let mut locked_agent_id = None;
+    let mut picked_roles = std::collections::HashSet::new();
+
+    let mut players_list = Vec::new();
+    if let Some(teams) = pmatch.get("Teams").and_then(|t| t.as_array()) {
+        for team in teams {
+            if let Some(pls) = team.get("Players").and_then(|p| p.as_array()) {
+                let has_me = pls.iter().any(|pl| pl.get("Subject").and_then(|s| s.as_str()) == Some(&my_puuid));
+                if has_me || teams.len() == 1 {
+                    players_list = pls.clone();
+                    break;
+                }
+            }
+        }
+    } else if let Some(ally) = pmatch.get("AllyTeam").and_then(|a| a.get("Players")).and_then(|p| p.as_array()) {
+        players_list = ally.clone();
+    }
+
+    for pl in players_list {
+        let subj = pl.get("Subject").and_then(|s| s.as_str()).unwrap_or("").to_string();
+        let char_id = pl.get("CharacterID").and_then(|s| s.as_str()).unwrap_or("").to_string();
+        let state = pl.get("CharacterSelectionState").and_then(|s| s.as_str()).unwrap_or("");
+        let is_locked = state.eq_ignore_ascii_case("locked");
+        let is_self = subj == my_puuid;
+        let character_name = if !char_id.is_empty() {
+            let n = valorant::resolve_agent_name_by_id(&char_id);
+            if n != "-" { n } else { String::new() }
+        } else {
+            String::new()
+        };
+        let role = if !char_id.is_empty() { find_role(&char_id) } else { String::new() };
+
+        if !role.is_empty() && (is_locked || !char_id.is_empty()) {
+            picked_roles.insert(role.clone());
+        }
+
+        if is_self && is_locked && !char_id.is_empty() {
+            locked_agent_id = Some(char_id.clone());
+        }
+
+        teammates.push(PregameTeammate {
+            puuid: subj,
+            character_id: char_id,
+            character_name,
+            role,
+            is_locked,
+            is_self,
+        });
+    }
+
+    let standard_roles = ["Duelist", "Initiator", "Controller", "Sentinel"];
+    let mut missing_roles = Vec::new();
+    for r in &standard_roles {
+        if !picked_roles.contains(*r) {
+            missing_roles.push(r.to_string());
+        }
+    }
+
+    Ok(Some(PregameState {
+        match_id,
+        map_name,
+        map_id: raw_map.to_string(),
+        gamemode,
+        teammates,
+        locked_agent_id,
+        missing_roles,
+    }))
 }
 
 static APP_HANDLE: std::sync::OnceLock<tauri::AppHandle> = std::sync::OnceLock::new();
@@ -1350,6 +1492,7 @@ pub fn run() {
             set_bot_running,
             set_ingame_focus_state,
             lock_agent_now,
+            get_pregame_state,
             trigger_anti_afk_action,
             trigger_vote,
             trigger_key_press,

@@ -1,7 +1,9 @@
 [v4.0]
-- removed Discord Integration
-- added Remote with very few functions
-- removed Auto Killjoy Turret
-- removed protected screen (starts directly into dashboard)
-- added launch prompt when VALORANT is not detected on start
-- updated Auto Reconnect & Test button
+- Remote Agent Selection via Mobile Remote with lock verification dialog
+- Real-time pregame teammate pick synchronization
+- Smart Team Composition detector (dynamic missing-role chips)
+- Instant override of background PC locker/randomizer on mobile selection
+- Party indicator capsules and SageBot theme typography on mobile
+- Removed Discord Integration
+- Removed Auto Killjoy Turret
+- Streamlined startup directly to dashboard

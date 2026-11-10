@@ -123,10 +123,12 @@ pub fn start_background_locker(config_state: Arc<Mutex<AppConfig>>) {
             if match_id != last_match_id {
                 last_match_id = match_id.clone();
                 has_locked_in_match = false;
+                crate::HAS_MANUALLY_LOCKED.store(false, std::sync::atomic::Ordering::SeqCst);
                 match_detected_time = Some(std::time::Instant::now());
             }
 
-            if has_locked_in_match {
+            if has_locked_in_match || crate::HAS_MANUALLY_LOCKED.load(std::sync::atomic::Ordering::Relaxed) {
+                has_locked_in_match = true;
                 continue;
             }
 

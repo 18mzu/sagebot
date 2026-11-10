@@ -873,6 +873,7 @@ export default function App() {
   const logsRef = useRef<string[]>([]);
   const rosterRef = useRef<LiveMatchRoster | null>(null);
   const storefrontRef = useRef<StorefrontData | null>(null);
+  const pregameRef = useRef<any>(null);
   const lastScoreRef = useRef<{ ally: number; enemy: number; map: string; gamemode: string }>({
     ally: 0,
     enemy: 0,
@@ -1105,6 +1106,7 @@ export default function App() {
         bot_running: runningRef.current,
         roster: rosterRef.current,
         storefront: storefrontRef.current,
+        pregame: pregameRef.current,
         logs: logsRef.current.slice(-8),
       });
     };
@@ -1283,6 +1285,45 @@ export default function App() {
             }
             break;
           }
+          case "remote_lock_agent": {
+            const { agentId, agentName } = data;
+            try {
+              const resMsg = await invoke<string>("lock_agent_now", { agentId });
+              showToast(`Remote locked: ${agentName || "Agent"}`);
+              bridge.send({
+                type: "lock_result",
+                success: true,
+                agentId,
+                message: resMsg || `Locked ${agentName || "Agent"}`
+              });
+              try {
+                const pg = await invoke<any>("get_pregame_state");
+                if (pg) {
+                  pregameRef.current = pg;
+                  bridge.send({ type: "pregame", payload: pg });
+                }
+              } catch {}
+            } catch (err: any) {
+              showToast(`Remote lock failed: ${err}`);
+              bridge.send({
+                type: "lock_result",
+                success: false,
+                agentId,
+                message: String(err)
+              });
+            }
+            break;
+          }
+          case "request_pregame": {
+            try {
+              const pg = await invoke<any>("get_pregame_state");
+              pregameRef.current = pg;
+              bridge.send({ type: "pregame", payload: pg });
+            } catch {
+              bridge.send({ type: "pregame", payload: null });
+            }
+            break;
+          }
         }
       },
     });
@@ -1360,6 +1401,7 @@ export default function App() {
         bot_running: runningRef.current,
         roster: rosterRef.current,
         storefront: storefrontRef.current,
+        pregame: pregameRef.current,
         logs: logsRef.current.slice(-8),
       });
     }
@@ -1550,6 +1592,34 @@ export default function App() {
           // 2. Screen Loading / In-Game (COREGAME - fetches enemies as soon as loading screen begins)
           const currentMatchId = res.match_id || `${res.map_name}_${res.gamemode}`;
           if (res.match_state === "Agent Select") {
+            // First time entering Agent Select: notify mobile phone!
+            if (prevMatchStateRef.current !== "Agent Select") {
+              const b = remoteBridgeRef.current;
+              if (b) {
+                b.send({
+                  type: "notification",
+                  title: "SageBot",
+                  message: "Match Found! Do you want to choose your agent?",
+                  eventType: "match_found",
+                });
+              }
+            }
+            // Stream pregame roster updates to mobile phone
+            invoke<any>("get_pregame_state")
+              .then((pg) => {
+                if (pg) {
+                  pregameRef.current = pg;
+                  const b = remoteBridgeRef.current;
+                  if (b) {
+                    b.send({
+                      type: "pregame",
+                      payload: pg,
+                    });
+                  }
+                }
+              })
+              .catch(() => {});
+
             if (trackerFetchedStagesRef.current.matchId !== currentMatchId || !trackerFetchedStagesRef.current.pregame) {
               trackerFetchedStagesRef.current = {
                 matchId: currentMatchId,
@@ -1558,21 +1628,34 @@ export default function App() {
               };
               fetchRoster();
             }
-          } else if (res.match_state === "In Game") {
-            // Trigger as soon as loading screen begins (Riot sets sessionLoopState to INGAME during map loading)
-            if (trackerFetchedStagesRef.current.matchId !== currentMatchId || !trackerFetchedStagesRef.current.coregame) {
-              trackerFetchedStagesRef.current.matchId = currentMatchId;
-              trackerFetchedStagesRef.current.coregame = true;
-              fetchRoster();
-
-              // Single safety retry 3 seconds later during screen loading in case enemy roster takes a moment to connect
-              setTimeout(() => {
-                fetchRoster();
-              }, 3000);
+          } else {
+            if (pregameRef.current) {
+              pregameRef.current = null;
+              const b = remoteBridgeRef.current;
+              if (b) {
+                b.send({
+                  type: "pregame",
+                  payload: null,
+                });
+              }
             }
-          } else if (isLobby || res.match_state === "In Lobby" || res.match_state === "In Queue" || res.match_state === "OFFLINE") {
-            trackerFetchedStagesRef.current = { matchId: "", pregame: false, coregame: false };
+            if (res.match_state === "In Game") {
+              // Trigger as soon as loading screen begins (Riot sets sessionLoopState to INGAME during map loading)
+              if (trackerFetchedStagesRef.current.matchId !== currentMatchId || !trackerFetchedStagesRef.current.coregame) {
+                trackerFetchedStagesRef.current.matchId = currentMatchId;
+                trackerFetchedStagesRef.current.coregame = true;
+                fetchRoster();
+
+                // Single safety retry 3 seconds later during screen loading in case enemy roster takes a moment to connect
+                setTimeout(() => {
+                  fetchRoster();
+                }, 3000);
+              }
+            } else if (isLobby || res.match_state === "In Lobby" || res.match_state === "In Queue" || res.match_state === "OFFLINE") {
+              trackerFetchedStagesRef.current = { matchId: "", pregame: false, coregame: false };
+            }
           }
+          prevMatchStateRef.current = res.match_state;
 
           // 1. Match Concluded Detection: Triggers when transitioning from In Game back to Lobby
           if (wasInMatchRef.current && isLobby) {
