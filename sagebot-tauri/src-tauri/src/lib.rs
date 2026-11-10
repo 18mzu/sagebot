@@ -944,6 +944,19 @@ async fn launch_valorant() -> Result<bool, String> {
 }
 
 #[tauri::command]
+async fn launch_riot_client() -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(paths::spawn_riot_client_for_login)
+        .await
+        .map_err(|e| e.to_string())??;
+    Ok(true)
+}
+
+#[tauri::command]
+fn is_riot_signed_in() -> bool {
+    paths::is_riot_stay_signed_in()
+}
+
+#[tauri::command]
 async fn login_riot_account(username: String, password: Option<String>) -> Result<bool, String> {
     // 0. Safeguard: if VALORANT is running, do not attempt account switch
     if valorant::is_valorant_process_running() {
@@ -1352,6 +1365,8 @@ pub fn run() {
             start_dragging_window,
             kill_valorant,
             launch_valorant,
+            launch_riot_client,
+            is_riot_signed_in,
             login_riot_account,
             resize_to_gate,
             resize_to_dashboard,

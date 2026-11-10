@@ -14,10 +14,10 @@
       {
         "label": "main",
         "title": "SageBot",
-        "width": 440,
-        "height": 510,
-        "minWidth": 380,
-        "minHeight": 440,
+        "width": 1020,
+        "height": 700,
+        "minWidth": 920,
+        "minHeight": 620,
         "decorations": false,
         "resizable": true,
         "center": true

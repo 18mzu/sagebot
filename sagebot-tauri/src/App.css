@@ -1462,12 +1462,9 @@ input:checked + .slider:before {
   background: radial-gradient(circle at 10% 0%, rgba(124, 58, 237, 0.06) 0%, transparent 40%),
               radial-gradient(circle at 90% 100%, rgba(16, 185, 129, 0.04) 0%, transparent 40%),
               var(--bg-app);
-  opacity: 0;
-  transform: scale(0.985);
-  pointer-events: none;
-  transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1),
-              transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
-  will-change: opacity, transform;
+  opacity: 1;
+  transform: scale(1);
+  pointer-events: auto;
 }
 
 .main-app-container.visible {

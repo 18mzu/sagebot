@@ -580,3 +580,59 @@ pub fn spawn_valorant_via_riot_client() -> Result<(), String> {
     }
     Ok(())
 }
+
+/// Checks whether the user has "Stay signed in" enabled and active in Riot Client.
+pub fn is_riot_stay_signed_in() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(local_appdata) = std::env::var("LOCALAPPDATA") {
+            let settings_path = PathBuf::from(local_appdata)
+                .join("Riot Games")
+                .join("Riot Client")
+                .join("Data")
+                .join("RiotGamesPrivateSettings.yaml");
+            if let Ok(content) = std::fs::read_to_string(&settings_path) {
+                let has_persist = content.contains("persistent: true");
+                let has_refresh = content.contains("refresh_token:");
+                return has_persist && has_refresh;
+            }
+        }
+    }
+    false
+}
+
+/// Spawns Riot Client without launching product directly so the user can log in.
+pub fn spawn_riot_client_for_login() -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/IM", "Riot Client.exe"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/IM", "RiotClientUx.exe"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/IM", "RiotClientServices.exe"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+
+        std::thread::sleep(std::time::Duration::from_millis(600));
+
+        let rc = find_riot_client_services()
+            .ok_or_else(|| "Could not locate RiotClientServices.exe on this PC".to_string())?;
+
+        let rc_dir = rc.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| PathBuf::from("."));
+
+        let mut cmd = std::process::Command::new(&rc);
+        cmd.current_dir(&rc_dir);
+
+        cmd.spawn()
+            .map_err(|e| format!("Failed to start Riot Client for login ({}): {}", rc.display(), e))?;
+    }
+    Ok(())
+}

@@ -1,3 +1,7 @@
 [v4.0]
 - removed Discord Integration
-- added Remote with very few functions.
+- added Remote with very few functions
+- removed Auto Killjoy Turret
+- removed protected screen (starts directly into dashboard)
+- added launch prompt when VALORANT is not detected on start
+- updated Auto Reconnect & Test button

@@ -11,7 +11,6 @@ import {
   Settings as SettingsIcon,
   RefreshCw,
   XOctagon,
-  CheckCircle2,
   Download,
   Lock,
   RotateCcw,
@@ -198,7 +197,6 @@ interface AppConfig {
   remote_notify_status?: boolean;
   remote_notify_rank_change?: boolean;
   auto_reconnect?: boolean;
-  auto_kj_turret?: boolean;
   low_detail?: boolean;
   agents_enabled: boolean;
   instalock_enabled: boolean;
@@ -525,7 +523,6 @@ export default function App() {
     remote_notify_status: true,
     remote_notify_rank_change: true,
     auto_reconnect: false,
-    auto_kj_turret: false,
     low_detail: false,
     agents_enabled: true,
     instalock_enabled: false,
@@ -816,15 +813,14 @@ export default function App() {
   const [chatIntervalInput, setChatIntervalInput] = useState<string>("180");
   const [commsDelayInput, setCommsDelayInput] = useState<string>("3");
 
-  // Gate Screen State
-  const [gatePassed, setGatePassed] = useState<boolean>(false);
-  const [isCrossfading, setIsCrossfading] = useState<boolean>(false);
-  const [gateGameFound, setGateGameFound] = useState<boolean | null>(null);
-  const isTransitioningRef = useRef<boolean>(false);
+  // Screen State
+  const [gatePassed] = useState<boolean>(true);
   const devBypassRef = useRef<boolean>(false);
   const botStartTimeRef = useRef<number>(0);
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
   const [authInput, setAuthInput] = useState<string>("");
+  const [showLaunchModal, setShowLaunchModal] = useState<boolean>(false);
+  const [isRiotSignedIn, setIsRiotSignedIn] = useState<boolean>(false);
 
   // Pre Fully Auto Play state storage (for reverting when turned off)
   const preAutoDerankStateRef = useRef<{
@@ -842,8 +838,6 @@ export default function App() {
   const suppressDetectionUntilRef = useRef<number>(0);
   const lastScoreSumRef = useRef<number>(-1);
   const roundStartTimestampRef = useRef<number>(0);
-  const kjTurretTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const kjTurretSecondTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastQueueTimeRef = useRef<number>(0);
   const isHoldingKeyRef = useRef<boolean>(false);
   const statusRef = useRef<StatusResponse>(status);
@@ -888,13 +882,11 @@ export default function App() {
   const disconnectCountRef = useRef<number>(0);
   const lobbyCountRef = useRef<number>(0);
   const isReconnectingRef = useRef<boolean>(false);
-  const [isReconnecting, setIsReconnecting] = useState<boolean>(false);
 
   const triggerAutoReconnect = (reason: string, force: boolean = false) => {
     if (!force && !configRef.current.auto_reconnect) return;
     if (isReconnectingRef.current) return;
     isReconnectingRef.current = true;
-    setIsReconnecting(true);
     triggerWebhookEvent("Rejoining...", "disconnect");
     addLog(`[RECONNECT] Auto Reconnect triggered (${reason}). Launching VALORANT via Riot Client...`);
     invoke("launch_valorant")
@@ -907,7 +899,6 @@ export default function App() {
       .finally(() => {
         setTimeout(() => {
           isReconnectingRef.current = false;
-          setIsReconnecting(false);
         }, 15000);
       });
   };
@@ -1443,14 +1434,8 @@ export default function App() {
     if (e) e.preventDefault();
     if (authInput === "mizu") {
       devBypassRef.current = true;
-      setGateGameFound(true);
       wasGameReadyRef.current = true;
-      setIsCrossfading(true);
-      invoke("resize_to_dashboard").catch(() => { });
-      setTimeout(() => {
-        setGatePassed(true);
-        setIsCrossfading(false);
-      }, 250);
+      showToast("Developer mode active");
     }
     setShowAuthModal(false);
     setAuthInput("");
@@ -1461,7 +1446,6 @@ export default function App() {
     const pollStatus = () => {
       if (isPollingRef.current) return;
       if (Date.now() < suppressDetectionUntilRef.current) {
-        setGateGameFound(false);
         return;
       }
       isPollingRef.current = true;
@@ -1774,30 +1758,19 @@ export default function App() {
             // When disconnected, game is no longer in a match lobby - prevent false concluded trigger
             wasInMatchRef.current = false;
             lobbyCountRef.current = 0;
-            if (gatePassed && disconnectCountRef.current < 4) {
+            if (disconnectCountRef.current < 4 && wasGameReadyRef.current) {
               return;
             }
             if (devBypassRef.current) {
-              setGateGameFound(false);
               if (configRef.current.auto_reconnect && !isReconnectingRef.current && runningRef.current) {
                 triggerAutoReconnect("Offline Testing Mode");
               }
               return;
             }
             // VALORANT is not running or lockfiles lost
-            const wasEverReady = wasGameReadyRef.current || gatePassed;
-            if (wasEverReady) {
+            if (wasGameReadyRef.current) {
               wasGameReadyRef.current = false;
               suppressDetectionUntilRef.current = Date.now() + 10000;
-              setGateGameFound(false);
-              if (gatePassed && !isTransitioningRef.current) {
-                isTransitioningRef.current = true;
-                setGatePassed(false);
-                invoke("resize_to_gate").catch(() => { });
-                setTimeout(() => {
-                  isTransitioningRef.current = false;
-                }, 400);
-              }
               if (runningRef.current) {
                 stopSagebot("VALORANT closed.");
               }
@@ -1808,48 +1781,11 @@ export default function App() {
 
               // Auto Reconnect execution
               triggerAutoReconnect("VALORANT Disconnected");
-            } else {
-              setGateGameFound(false);
-              if (configRef.current.auto_reconnect && !isReconnectingRef.current) {
-                triggerAutoReconnect("Waiting for VALORANT");
-              }
             }
           } else {
             disconnectCountRef.current = 0;
             isReconnectingRef.current = false;
-            // VALORANT is connected and process is running!
-            if (!gatePassed) {
-              const isReady =
-                res.is_game_ready ||
-                res.match_state === "In Game" ||
-                res.match_state === "Agent Select" ||
-                res.match_state === "In Queue" ||
-                res.match_state === "In Lobby" ||
-                Boolean(res.player_name) ||
-                (res.game_live && res.is_connected);
-
-              if (isReady) {
-                wasGameReadyRef.current = true;
-                setGateGameFound(true);
-                if (!isTransitioningRef.current) {
-                  isTransitioningRef.current = true;
-                  setTimeout(() => {
-                    setIsCrossfading(true);
-                    invoke("resize_to_dashboard").catch(() => { });
-                    setTimeout(() => {
-                      setGatePassed(true);
-                      setIsCrossfading(false);
-                      isTransitioningRef.current = false;
-                    }, 750);
-                  }, 600);
-                }
-              } else {
-                setGateGameFound(null); // loading screen / waiting for lobby
-              }
-            } else {
-              setGateGameFound(true);
-              wasGameReadyRef.current = true;
-            }
+            wasGameReadyRef.current = true;
 
             // Auto Matchmaking Queue (Active when auto_queue_enabled OR auto_derank_enabled)
             if (
@@ -1909,69 +1845,25 @@ export default function App() {
                     addLog(`[AUTO SURRENDER] Round ${currentRound} detected. Spamming /ff for 10s.`);
                   }
                 }
-
-                // Auto Killjoy Turret: Since detected new round (Round 2, Round 3...), wait 15s then hit E, wait 3s then hit L
-                if (configRef.current.auto_kj_turret && currentRound >= 2) {
-                  if (kjTurretTimerRef.current) {
-                    clearTimeout(kjTurretTimerRef.current);
-                    kjTurretTimerRef.current = null;
-                  }
-                  if (kjTurretSecondTimerRef.current) {
-                    clearTimeout(kjTurretSecondTimerRef.current);
-                    kjTurretSecondTimerRef.current = null;
-                  }
-                  addLog(`[AUTO TURRET] Round ${currentRound} detected. Placing Killjoy Turret in 15s...`);
-                  kjTurretTimerRef.current = setTimeout(() => {
-                    if (!runningRef.current) return;
-                    addLog(`[AUTO TURRET] Round ${currentRound}: Equipping Turret (E)...`);
-                    invoke("trigger_key_press", { key: "E" }).catch(() => { });
-
-                    kjTurretSecondTimerRef.current = setTimeout(() => {
-                      if (!runningRef.current) return;
-                      addLog(`[AUTO TURRET] Round ${currentRound}: Placing Turret (L)...`);
-                      invoke("trigger_key_press", { key: "L" }).catch(() => { });
-                    }, 3000);
-                  }, 15000);
-                }
-
               }
             } else {
               lastScoreSumRef.current = -1;
               roundStartTimestampRef.current = 0;
-              if (kjTurretTimerRef.current) {
-                clearTimeout(kjTurretTimerRef.current);
-                kjTurretTimerRef.current = null;
-              }
-              if (kjTurretSecondTimerRef.current) {
-                clearTimeout(kjTurretSecondTimerRef.current);
-                kjTurretSecondTimerRef.current = null;
-              }
             }
           }
         })
         .catch(() => {
           if (devBypassRef.current) {
-            setGateGameFound(false);
             if (configRef.current.auto_reconnect && !isReconnectingRef.current && runningRef.current) {
               triggerAutoReconnect("Offline Testing Mode");
             }
             return;
           }
-          const wasEverReady = wasGameReadyRef.current || gatePassed;
-          if (wasEverReady) {
+          if (wasGameReadyRef.current) {
             wasInMatchRef.current = false;
             lobbyCountRef.current = 0;
             wasGameReadyRef.current = false;
             suppressDetectionUntilRef.current = Date.now() + 10000;
-            setGateGameFound(false);
-            if (gatePassed && !isTransitioningRef.current) {
-              isTransitioningRef.current = true;
-              setGatePassed(false);
-              invoke("resize_to_gate").catch(() => { });
-              setTimeout(() => {
-                isTransitioningRef.current = false;
-              }, 400);
-            }
             if (runningRef.current) {
               stopSagebot("VALORANT closed.");
             }
@@ -1982,11 +1874,6 @@ export default function App() {
 
             // Auto Reconnect execution
             triggerAutoReconnect("VALORANT Process Lost");
-          } else {
-            setGateGameFound(false);
-            if (configRef.current.auto_reconnect && !isReconnectingRef.current) {
-              triggerAutoReconnect("Waiting for VALORANT");
-            }
           }
         })
         .finally(() => {
@@ -2384,19 +2271,24 @@ export default function App() {
   // Start / Stop SageBot Logic
   const startSagebot = (fromRemote = false) => {
     if (runningRef.current) return;
+
+    // If VALORANT is not detected, popup modal asking if user wants to launch it
+    const isDetected = devBypassRef.current || statusRef.current.game_live || statusRef.current.is_connected;
+    if (!isDetected) {
+      invoke<boolean>("is_riot_signed_in")
+        .then((signedIn) => {
+          setIsRiotSignedIn(Boolean(signedIn));
+          setShowLaunchModal(true);
+        })
+        .catch(() => {
+          setIsRiotSignedIn(false);
+          setShowLaunchModal(true);
+        });
+      return;
+    }
+
     runningRef.current = true;
     botStartTimeRef.current = Date.now();
-    if (!gatePassed) {
-      if (devBypassRef.current || statusRef.current.game_live || statusRef.current.is_connected) {
-        setGatePassed(true);
-        setGateGameFound(true);
-        invoke("resize_to_dashboard").catch(() => { });
-      } else {
-        runningRef.current = false;
-        addLog("[SYSTEM] Cannot start SageBot: Waiting for VALORANT to launch.");
-        return;
-      }
-    }
     setLogs(["Logs cleared.", "SageBot started."]);
     setIsRunning(true);
     invoke("set_bot_running", { running: true }).catch(() => { });
@@ -2453,14 +2345,6 @@ export default function App() {
     roundStartTimestampRef.current = 0;
     lastScoreSumRef.current = -1;
     surrenderSpamUntilRef.current = 0;
-    if (kjTurretTimerRef.current) {
-      clearTimeout(kjTurretTimerRef.current);
-      kjTurretTimerRef.current = null;
-    }
-    if (kjTurretSecondTimerRef.current) {
-      clearTimeout(kjTurretSecondTimerRef.current);
-      kjTurretSecondTimerRef.current = null;
-    }
     isActionBusyRef.current = false;
     addLog(reason ? `[SYSTEM] Stopped: ${reason}` : "Stopped SageBot");
 
@@ -3792,119 +3676,8 @@ export default function App() {
         }}
       />
 
-      {/* Intro Gate Screen (Active when VALORANT is not yet verified or while crossfading out) */}
-      {(!gatePassed || isCrossfading) && (
-        <div className={`gate-overlay ${isCrossfading ? "gate-crossfade-out" : ""}`}>
-          <div
-            className="titlebar gate-titlebar"
-            data-tauri-drag-region
-            onMouseDown={(e) => {
-              if (e.button === 0 && !(e.target as HTMLElement).closest("button")) {
-                invoke("start_dragging_window").catch(() => { });
-              }
-            }}
-          >
-            <div className="titlebar-left">
-              <img src="/sage.ico" className="app-logo-icon" alt="SageBot" />
-              <span className="app-title">SageBot</span>
-              <span
-                className={`version-pill ${updateInfo?.available ? "outdated" : ""}`}
-                data-tooltip={updateInfo?.available ? `Update available: ${updateInfo.latest_version}` : "Latest version"}
-                data-tooltip-pos="bottom"
-              >
-                v{APP_VERSION}
-              </span>
-            </div>
-            <div className="titlebar-right">
-              <button
-                className="win-btn"
-                onClick={() => invoke("minimize_window")}
-                data-tooltip="Minimize"
-                data-tooltip-pos="bottom"
-              >
-                <Minus size={13} />
-              </button>
-              <button
-                className="win-btn close"
-                onClick={() => invoke("close_window")}
-                data-tooltip="Close"
-                data-tooltip-pos="bottom"
-              >
-                <X size={13} />
-              </button>
-            </div>
-          </div>
-
-          <div className="gate-body">
-            <div className="gate-card">
-              <div className="gate-avatar-wrapper">
-                <div className="gate-avatar-glow" />
-                <img src="/sage.ico" className="gate-avatar-img" alt="SageBot" />
-              </div>
-
-              <h1 className="gate-title">SageBot</h1>
-              <p className="gate-subtitle">VALORANT External &amp; Utilities • v{APP_VERSION}</p>
-
-              <div className="gate-status-card">
-                {gateGameFound === null && (
-                  <div className="gate-status-loading">
-                    <RefreshCw size={18} className="spin" color="#f59e0b" />
-                    <span>
-                      {status.game_live
-                        ? "Detected VALORANT. Waiting for lobby..."
-                        : "Checking for VALORANT..."}
-                    </span>
-                  </div>
-                )}
-
-                {gateGameFound === false && (
-                  <div className="gate-status-fail">
-                    <div className="gate-status-badge red">
-                      <AlertTriangle size={16} />
-                      <span>{isReconnecting ? "LAUNCHING VALORANT..." : "VALORANT NOT FOUND"}</span>
-                    </div>
-                    <p className="gate-status-msg">
-                      {isReconnecting
-                        ? "Auto Reconnect is starting VALORANT via Riot Client..."
-                        : "Please start VALORANT before proceeding to the app."}
-                    </p>
-                    <button
-                      className="key-badge-btn"
-                      style={{
-                        marginTop: "12px",
-                        height: "32px",
-                        padding: "0 16px",
-                        fontSize: "12px",
-                        fontWeight: 700,
-                        color: "#38bdf8",
-                        borderColor: "rgba(56, 189, 248, 0.4)",
-                        cursor: isReconnecting ? "not-allowed" : "pointer",
-                        opacity: isReconnecting ? 0.6 : 1,
-                      }}
-                      disabled={isReconnecting}
-                      onClick={() => {
-                        triggerAutoReconnect("Gate Screen Manual Launch", true);
-                      }}
-                    >
-                      {isReconnecting ? "Launching..." : "Launch VALORANT"}
-                    </button>
-                  </div>
-                )}
-
-                {gateGameFound === true && (
-                  <div className="gate-status-ready">
-                    <CheckCircle2 size={18} color="#ffffff" />
-                    <span>VALORANT is Ready</span>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Main Dashboard App Container */}
-      <div className={`main-app-container ${gatePassed || isCrossfading ? "visible" : ""}`}>
+      <div className="main-app-container visible">
         {/* Titlebar Window Frame */}
         <div
           className="titlebar"
@@ -4815,8 +4588,19 @@ export default function App() {
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                       <button
-                        className="key-badge-btn"
-                        style={{ height: "30px", padding: "0 10px", fontSize: "11px", fontWeight: 700, color: "#38bdf8", borderColor: "rgba(56, 189, 248, 0.4)" }}
+                        className="btn-secondary"
+                        style={{
+                          height: "28px",
+                          padding: "0 12px",
+                          fontSize: "12px",
+                          fontWeight: 600,
+                          borderRadius: "6px",
+                          color: "#cbd5e1",
+                          background: "#1e293b",
+                          border: "1px solid rgba(148, 163, 184, 0.2)",
+                          cursor: "pointer",
+                          transition: "all 0.15s ease",
+                        }}
                         onClick={() => {
                           addLog("[RECONNECT] Manual test: Launching VALORANT via Riot Client...");
                           invoke("launch_valorant")
@@ -4824,7 +4608,7 @@ export default function App() {
                             .catch((err) => addLog(`[RECONNECT] Failed: ${err}`));
                         }}
                       >
-                        Test Reconnect
+                        Test
                       </button>
                       <label className="switch">
                         <input
@@ -4839,38 +4623,6 @@ export default function App() {
                         <span className="slider round"></span>
                       </label>
                     </div>
-                  </div>
-                </div>
-
-                {/* Auto Killjoy Turret */}
-                <div className="card">
-                  <div className="between-row">
-                    <div>
-                      <div className="pane-title" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                        Auto Killjoy Turret
-                        <span style={{ fontSize: "10px", color: "#f87171", background: "rgba(239, 68, 68, 0.15)", border: "1px solid rgba(239, 68, 68, 0.3)", padding: "1px 7px", borderRadius: "10px", fontWeight: 700 }}>
-                          BETA
-                        </span>
-                      </div>
-                      <div className="pane-subtitle">
-                        Auto place Killjoy Turret.
-                      </div>
-                    </div>
-                    <label className="switch">
-                      <input
-                        type="checkbox"
-                        checked={config.auto_kj_turret ?? false}
-                        onChange={(e) => {
-                          const val = e.target.checked;
-                          updateAndSaveConfig({ auto_kj_turret: val });
-                          if (val) {
-                            showToast("You must be playing Killjoy for this to work.");
-                          }
-                          addLog(val ? "[CONFIG] Auto Killjoy Turret enabled." : "[CONFIG] Auto Killjoy Turret disabled.");
-                        }}
-                      />
-                      <span className="slider round"></span>
-                    </label>
                   </div>
                 </div>
 
@@ -6518,19 +6270,81 @@ export default function App() {
                 className="modal-btn danger"
                 onClick={() => {
                   suppressDetectionUntilRef.current = Date.now() + 10000;
-                  setGatePassed(false);
-                  setGateGameFound(false);
-                  setIsCrossfading(false);
-                  isTransitioningRef.current = false;
                   if (runningRef.current) {
                     stopSagebot("VALORANT terminated.");
                   }
-                  invoke("resize_to_gate").catch(() => { });
                   setShowKillModal(false);
                   invoke("kill_valorant").catch(() => { });
                 }}
               >
                 Kill VALORANT
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* VALORANT Not Detected Launch Modal */}
+      {showLaunchModal && (
+        <div className="modal-backdrop" onClick={() => setShowLaunchModal(false)} style={{ zIndex: 9999 }}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 440 }}>
+            <div className="modal-header" style={{ color: "#38bdf8" }}>
+              <AlertTriangle size={20} color="#38bdf8" />
+              <span style={{ fontSize: "15px", fontWeight: 700, color: "#38bdf8" }}>VALORANT is not detected</span>
+            </div>
+            <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <p style={{ margin: 0, fontSize: "13px", color: "#cbd5e1", lineHeight: "1.5" }}>
+                SageBot requires VALORANT to be running. Would you like SageBot to launch it for you?
+              </p>
+              <div
+                style={{
+                  padding: "10px 14px",
+                  background: "rgba(15, 23, 42, 0.6)",
+                  border: "1px solid rgba(56, 189, 248, 0.2)",
+                  borderRadius: "8px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "10px",
+                }}
+              >
+                <div style={{ width: 8, height: 8, borderRadius: "50%", background: isRiotSignedIn ? "#10b981" : "#f59e0b" }} />
+                <span style={{ fontSize: "12px", color: "#94a3b8" }}>
+                  {isRiotSignedIn
+                    ? "Stay signed in is active. SageBot will launch directly into VALORANT."
+                    : "Not signed in. Riot Client will open for authentication."}
+                </span>
+              </div>
+            </div>
+            <div className="modal-actions" style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 18 }}>
+              <button
+                type="button"
+                className="modal-btn secondary"
+                onClick={() => setShowLaunchModal(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="modal-btn primary"
+                style={{ background: "#0284c7", borderColor: "#38bdf8", color: "#ffffff", fontWeight: 700 }}
+                onClick={() => {
+                  setShowLaunchModal(false);
+                  if (isRiotSignedIn) {
+                    addLog("[LAUNCH] Starting VALORANT via Riot Client...");
+                    showToast("Launching VALORANT...");
+                    invoke("launch_valorant")
+                      .then(() => addLog("[LAUNCH] VALORANT launch command sent successfully."))
+                      .catch((err) => addLog(`[LAUNCH] Failed: ${err}`));
+                  } else {
+                    addLog("[LAUNCH] Opening Riot Client for login...");
+                    showToast("Opening Riot Client for login...");
+                    invoke("launch_riot_client")
+                      .then(() => addLog("[LAUNCH] Riot Client started for login."))
+                      .catch((err) => addLog(`[LAUNCH] Failed: ${err}`));
+                  }
+                }}
+              >
+                {isRiotSignedIn ? "Launch VALORANT" : "Open Riot Client"}
               </button>
             </div>
           </div>
