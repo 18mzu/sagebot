@@ -226,6 +226,8 @@ pub struct TrackedPlayer {
     pub is_incognito: bool,         // True if player was hiding name in-game
     pub is_self: bool,              // True if this is the local user
     pub party_tag: String,          // e.g. "Party 1" if in a duo/party, else ""
+    #[serde(default)]
+    pub encounter: Option<crate::encounter_memory::PlayerEncounter>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1878,6 +1880,11 @@ async fn parse_coregame_roster(
                 is_incognito: incognito,
                 is_self,
                 party_tag,
+                encounter: if !is_self && !puuid.is_empty() {
+                    crate::encounter_memory::get_encounter(&puuid)
+                } else {
+                    None
+                },
             };
 
             (tracked, pdata.match_ids)
@@ -2183,6 +2190,11 @@ async fn parse_pregame_roster(
                 is_incognito: incognito,
                 is_self,
                 party_tag,
+                encounter: if !is_self && !puuid.is_empty() {
+                    crate::encounter_memory::get_encounter(&puuid)
+                } else {
+                    None
+                },
             };
 
             (tracked, pdata.match_ids)

@@ -7,6 +7,7 @@ mod tracker;
 mod storefront;
 mod paths;
 mod career;
+pub mod encounter_memory;
 
 use config::AppConfig;
 use valorant::{
@@ -1441,8 +1442,22 @@ fn delete_career_match(match_id: String) -> Result<Vec<career::CareerMatch>, Str
     Ok(career::load_career_matches())
 }
 
+#[tauri::command]
+fn get_encounter_memory() -> Result<Vec<encounter_memory::PlayerEncounter>, String> {
+    let map = encounter_memory::load_encounters();
+    let mut list: Vec<_> = map.into_values().collect();
+    list.sort_by(|a, b| b.last_seen_timestamp.cmp(&a.last_seen_timestamp));
+    Ok(list)
+}
+
+#[tauri::command]
+fn get_player_encounter(puuid: String) -> Option<encounter_memory::PlayerEncounter> {
+    encounter_memory::get_encounter(&puuid)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    encounter_memory::rebuild_from_career();
     #[cfg(target_os = "windows")]
     unsafe {
         extern "system" {
@@ -1568,7 +1583,9 @@ pub fn run() {
             storefront::get_storefront,
             capture_screen_base64,
             get_career_matches,
-            delete_career_match
+            delete_career_match,
+            get_encounter_memory,
+            get_player_encounter
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

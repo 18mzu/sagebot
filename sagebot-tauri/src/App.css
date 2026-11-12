@@ -4349,6 +4349,7 @@ input[type="number"] {
   border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 12px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  margin-bottom: 16px;
 }
 
 .career-title-area {
@@ -4661,14 +4662,16 @@ input[type="number"] {
 .career-card-map-art {
   position: relative;
   height: 100%;
-  min-width: 220px;
+  min-width: 280px;
+  max-width: 440px;
+  flex: 1;
   margin-left: auto;
   background-size: cover;
-  background-position: center;
+  background-position: right center;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 16px;
+  padding: 0 18px;
 }
 
 .career-card-map-info {
@@ -4691,6 +4694,41 @@ input[type="number"] {
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
 }
 
+.career-card-mvp-action {
+  z-index: 1;
+  display: flex;
+  align-items: center;
+}
+
+.career-mvp-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.career-mvp-badge.match-mvp {
+  color: #fef08a;
+  background: rgba(234, 179, 8, 0.18);
+  border: 1px solid rgba(234, 179, 8, 0.7);
+  box-shadow: 0 0 10px rgba(234, 179, 8, 0.25);
+}
+
+.career-mvp-badge.team-mvp {
+  color: #cbd5e1;
+  background: rgba(148, 163, 184, 0.15);
+  border: 1px solid rgba(148, 163, 184, 0.5);
+}
+
+.career-match-card:hover .career-mvp-badge {
+  transform: translateX(3px);
+}
+
 .career-card-inspect-arrow {
   font-size: 11px;
   font-weight: 700;
@@ -4702,6 +4740,32 @@ input[type="number"] {
 .career-match-card:hover .career-card-inspect-arrow {
   transform: translateX(3px);
   color: #c084fc;
+}
+
+.career-encounter-mini-pill {
+  font-size: 9px;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  line-height: 1.3;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  cursor: default;
+}
+
+.career-encounter-mini-pill.enc-ally {
+  background: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+}
+
+.career-encounter-mini-pill.enc-enemy {
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.35);
 }
 
 /* ==========================================================================
@@ -4846,25 +4910,34 @@ input[type="number"] {
 
 .career-subtabs-bar {
   display: flex;
-  gap: 12px;
+  gap: 8px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  padding-bottom: 6px;
+  padding-bottom: 8px;
 }
 
 .career-subtab {
+  background: transparent;
+  border: 1px solid transparent;
+  color: #94a3b8;
   font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.06em;
-  color: #64748b;
-  padding: 4px 12px;
+  padding: 6px 16px;
   border-radius: 6px;
   cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.career-subtab:hover {
+  color: #f1f5f9;
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .career-subtab.active {
   color: #2dd4bf;
-  background: rgba(45, 212, 191, 0.1);
-  border: 1px solid rgba(45, 212, 191, 0.25);
+  background: rgba(45, 212, 191, 0.12);
+  border: 1px solid rgba(45, 212, 191, 0.35);
+  box-shadow: 0 0 10px rgba(45, 212, 191, 0.2);
 }
 
 .career-scoreboard-table-wrap {
@@ -4969,24 +5042,9 @@ input[type="number"] {
   color: #f8fafc;
 }
 
-.career-kda-block {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-}
-
-.career-kda-str {
+.career-kd-val {
   font-size: 12px;
   font-weight: 800;
-  color: #f1f5f9;
-  letter-spacing: 0.02em;
-}
-
-.career-kd-ratio {
-  font-size: 10px;
-  font-weight: 700;
-  color: #94a3b8;
 }
 
 .career-hs-val {
@@ -4994,26 +5052,537 @@ input[type="number"] {
   font-weight: 800;
 }
 
-.career-rank-cell {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  white-space: nowrap;
-}
-
-.career-rank-name {
-  font-size: 11px;
-  font-weight: 800;
-}
-
-.career-rank-rr {
-  font-size: 10px;
-  font-weight: 700;
-  color: #94a3b8;
-}
-
 .career-stat-num {
   font-size: 12px;
   font-weight: 700;
   color: #cbd5e1;
+}
+
+/* ==========================================================================
+   HEAD TO HEAD SUB-TAB STYLES
+   ========================================================================== */
+.career-h2h-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.career-h2h-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 22px;
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.career-h2h-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+.career-h2h-card.h2h-win {
+  border-color: rgba(45, 212, 191, 0.35);
+  background: linear-gradient(90deg, rgba(45, 212, 191, 0.06) 0%, rgba(15, 23, 42, 0.8) 50%, rgba(15, 23, 42, 0.8) 100%);
+}
+
+.career-h2h-card.h2h-loss {
+  border-color: rgba(251, 113, 133, 0.35);
+  background: linear-gradient(90deg, rgba(15, 23, 42, 0.8) 0%, rgba(15, 23, 42, 0.8) 50%, rgba(251, 113, 133, 0.06) 100%);
+}
+
+.career-h2h-card.h2h-draw {
+  border-color: rgba(148, 163, 184, 0.2);
+}
+
+.career-h2h-side {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 200px;
+}
+
+.career-h2h-side.align-right {
+  justify-content: flex-end;
+}
+
+.career-h2h-agent-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  flex-shrink: 0;
+}
+
+.career-h2h-agent-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.career-h2h-agent-avatar.enemy-avatar {
+  border-color: rgba(251, 113, 133, 0.3);
+}
+
+.career-h2h-player-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.career-h2h-player-info.align-right {
+  align-items: flex-end;
+}
+
+.career-h2h-enemy-title-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.career-h2h-tag {
+  font-size: 11px;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.career-h2h-player-name {
+  font-size: 13px;
+  font-weight: 800;
+  color: #f8fafc;
+}
+
+.career-h2h-agent-name {
+  font-size: 11px;
+  font-weight: 700;
+  color: #2dd4bf;
+}
+
+.career-h2h-enemy-sub {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.h2h-rr {
+  color: #94a3b8;
+  font-size: 10px;
+}
+
+.career-h2h-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.career-h2h-score-wrap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 28px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.career-h2h-score.you-score {
+  color: #e2e8f0;
+}
+
+.career-h2h-score.you-score.score-highlight {
+  color: #2dd4bf;
+  text-shadow: 0 0 12px rgba(45, 212, 191, 0.5);
+}
+
+.career-h2h-score.enemy-score {
+  color: #e2e8f0;
+}
+
+.career-h2h-score.enemy-score.score-highlight-loss {
+  color: #fb7185;
+  text-shadow: 0 0 12px rgba(251, 113, 133, 0.5);
+}
+
+.career-h2h-score-divider {
+  color: #64748b;
+  font-size: 20px;
+}
+
+.career-h2h-stats-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.career-h2h-stat-pill {
+  font-size: 10px;
+  font-weight: 700;
+  color: #94a3b8;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 3px 8px;
+  border-radius: 6px;
+  letter-spacing: 0.02em;
+}
+
+/* ==========================================================================
+   TIMELINE SUB-TAB STYLES (Matches media_1794524212051_26262ba7.jpg)
+   ========================================================================== */
+.career-timeline-container {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.career-timeline-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.career-rounds-bar {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  overflow-x: auto;
+  padding: 10px 14px;
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  scrollbar-width: thin;
+}
+
+.career-round-side-switch {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 56px;
+  font-size: 14px;
+  color: #94a3b8;
+  flex-shrink: 0;
+}
+
+.career-round-pill {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  width: 36px;
+  height: 58px;
+  padding: 4px 2px;
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.career-round-pill:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.career-round-pill.round-active {
+  border: 2px solid #2dd4bf;
+  box-shadow: 0 0 12px rgba(45, 212, 191, 0.5);
+  transform: translateY(-2px);
+  background: rgba(45, 212, 191, 0.08);
+}
+
+.career-round-num {
+  font-size: 10px;
+  font-weight: 800;
+  color: #cbd5e1;
+}
+
+.career-round-bar-indicator {
+  width: 8px;
+  height: 24px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 2px;
+  overflow: hidden;
+  display: flex;
+  align-items: flex-end;
+}
+
+.career-round-fill {
+  width: 100%;
+  height: 100%;
+  border-radius: 2px;
+}
+
+.career-round-fill.fill-ally {
+  background: #2dd4bf;
+  box-shadow: 0 0 6px rgba(45, 212, 191, 0.6);
+}
+
+.career-round-fill.fill-enemy {
+  background: #fb7185;
+  box-shadow: 0 0 6px rgba(251, 113, 133, 0.6);
+}
+
+.career-round-icon {
+  font-size: 11px;
+  line-height: 1;
+}
+
+.career-round-details-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.25fr;
+  gap: 14px;
+}
+
+.career-timeline-column {
+  display: flex;
+  flex-direction: column;
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.career-timeline-col-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: rgba(15, 23, 42, 0.9);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.career-timeline-col-header h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: #f8fafc;
+}
+
+.career-col-subtitle {
+  font-size: 11px;
+  color: #94a3b8;
+  font-weight: 600;
+}
+
+.career-event-log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  max-height: 480px;
+  overflow-y: auto;
+}
+
+.career-event-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.career-event-item.event-ally {
+  border-left: 3px solid #2dd4bf;
+}
+
+.career-event-item.event-enemy {
+  border-left: 3px solid #fb7185;
+}
+
+.career-event-item.event-plant {
+  border-left: 3px solid #eab308;
+}
+
+.career-event-item.event-defuse {
+  border-left: 3px solid #06b6d4;
+}
+
+.career-event-time {
+  font-size: 11px;
+  font-weight: 700;
+  color: #94a3b8;
+  min-width: 32px;
+}
+
+.career-actor-agent-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.career-event-actor,
+.career-event-victim {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 85px;
+}
+
+.career-actor-name {
+  font-size: 11px;
+  font-weight: 700;
+  color: #f1f5f9;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 90px;
+}
+
+.career-event-action {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.career-event-weapon-tag {
+  font-size: 11px;
+  font-weight: 700;
+  color: #cbd5e1;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.hs-marker {
+  font-size: 11px;
+}
+
+.career-event-plant-badge {
+  font-size: 10px;
+  font-weight: 800;
+  color: #facc15;
+  background: rgba(234, 179, 8, 0.15);
+  border: 1px solid rgba(234, 179, 8, 0.35);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.career-event-defuse-badge {
+  font-size: 10px;
+  font-weight: 800;
+  color: #22d3ee;
+  background: rgba(6, 182, 212, 0.15);
+  border: 1px solid rgba(6, 182, 212, 0.35);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.career-econ-table-wrap {
+  overflow-x: auto;
+  max-height: 440px;
+}
+
+.career-econ-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.career-econ-table th {
+  padding: 8px 10px;
+  font-size: 10px;
+  font-weight: 800;
+  color: #94a3b8;
+  background: rgba(15, 23, 42, 0.85);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.career-econ-table td {
+  padding: 6px 10px;
+  vertical-align: middle;
+}
+
+.career-econ-row.econ-ally {
+  background: rgba(45, 212, 191, 0.04);
+}
+
+.career-econ-row.econ-enemy {
+  background: rgba(251, 113, 133, 0.04);
+}
+
+.career-econ-player-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  color: #f1f5f9;
+}
+
+.career-econ-player-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 110px;
+}
+
+.career-econ-val {
+  font-weight: 800;
+  color: #f1f5f9;
+}
+
+.career-econ-vals {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.econ-loadout {
+  color: #f8fafc;
+}
+
+.econ-bank {
+  color: #94a3b8;
+  font-size: 10px;
+}
+
+.career-equip-vals {
+  display: flex;
+  flex-direction: column;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.career-wep-text {
+  color: #f1f5f9;
+}
+
+.career-arm-text {
+  color: #94a3b8;
+  font-size: 10px;
+}
+
+.career-econ-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background: rgba(15, 23, 42, 0.95);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 11px;
+  font-weight: 700;
+  color: #cbd5e1;
+}
+
+.career-empty-subtab,
+.career-empty-events {
+  padding: 32px 16px;
+  text-align: center;
+  color: #94a3b8;
+  font-size: 12px;
 }
