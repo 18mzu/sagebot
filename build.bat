@@ -30,6 +30,9 @@ if defined SRC_EXE (
         move /y "..\sagebot.exe" "..\sagebot.old.exe" >nul 2>&1
         copy /y "!SRC_EXE!" "..\sagebot.exe" >nul 2>&1
     )
+    if exist "src-tauri\target\release\WebView2Loader.dll" (
+        copy /y "src-tauri\target\release\WebView2Loader.dll" "..\WebView2Loader.dll" >nul 2>&1
+    )
 )
 
 if not exist "..\sagebot.exe" (
