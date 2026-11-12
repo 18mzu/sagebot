@@ -42,6 +42,12 @@ fn get_wallet_cache() -> &'static Arc<RwLock<Option<(std::time::Instant, WalletB
     WALLET_CACHE.get_or_init(|| Arc::new(RwLock::new(None)))
 }
 
+static LAST_ACTIVE_ROSTER: std::sync::OnceLock<Arc<RwLock<Option<LiveMatchRoster>>>> = std::sync::OnceLock::new();
+
+pub fn get_last_active_roster_holder() -> &'static Arc<RwLock<Option<LiveMatchRoster>>> {
+    LAST_ACTIVE_ROSTER.get_or_init(|| Arc::new(RwLock::new(None)))
+}
+
 pub async fn get_cached_or_fetch_wallet(puuid: &str) -> Option<WalletBalances> {
     {
         let r = get_wallet_cache().read().await;
@@ -432,6 +438,10 @@ fn parse_iso_ts(s: &str) -> u64 {
 
 // Extract skins from player loadout item map for all 21 weapons in VALORANT
 pub async fn extract_player_skins(loadout_items: &serde_json::Value) -> (String, HashMap<String, String>, Vec<String>) {
+    if loadout_items.is_null() || loadout_items.as_object().map(|o| o.is_empty()).unwrap_or(true) {
+        return ("TBD".to_string(), HashMap::new(), Vec::new());
+    }
+
     let mut weapon_skins: HashMap<String, String> = HashMap::new();
     let mut all_skins: Vec<String> = Vec::new();
 
@@ -1010,6 +1020,13 @@ async fn fetch_player_full_stats(
         0.0
     };
 
+    // Ensure all recent matches are tracked for party detection
+    for m in &recent_matches {
+        if !m.match_id.is_empty() && !match_ids.contains(&m.match_id) {
+            match_ids.push(m.match_id.clone());
+        }
+    }
+
     let data = CachedPlayerData {
         level: eff_level,
         match_ids,
@@ -1151,6 +1168,41 @@ fn find_root(parent: &mut [usize], mut i: usize) -> usize {
     i
 }
 
+// Detect if two players share 2+ games in a row with the SAME TIME (timestamp) and same map
+fn has_consecutive_same_time_and_map_matches(p1: &TrackedPlayer, p2: &TrackedPlayer) -> bool {
+    let m1 = &p1.recent_matches;
+    let m2 = &p2.recent_matches;
+    if m1.len() < 2 || m2.len() < 2 {
+        return false;
+    }
+
+    let mut consecutive = 0;
+    for match1 in m1 {
+        if match1.timestamp == 0 || match1.map_name.is_empty() {
+            consecutive = 0;
+            continue;
+        }
+
+        let match_found = m2.iter().any(|match2| {
+            if match2.timestamp == 0 || match2.map_name.is_empty() {
+                return false;
+            }
+            let time_diff = (match1.timestamp as i64 - match2.timestamp as i64).abs();
+            time_diff <= 5000 && match1.map_name.eq_ignore_ascii_case(&match2.map_name)
+        });
+
+        if match_found {
+            consecutive += 1;
+            if consecutive >= 2 {
+                return true;
+            }
+        } else {
+            consecutive = 0;
+        }
+    }
+    false
+}
+
 // Detect parties by cross-referencing recent match history (duos/trios/stacks)
 fn detect_parties_from_histories(
     team: &mut [TrackedPlayer],
@@ -1223,6 +1275,8 @@ fn detect_parties_from_histories(
                 !m1.is_empty() && *m1 != current_match_id && matches_j.iter().any(|m2| *m1 == m2)
             }).count();
 
+            let consecutive_time_map = has_consecutive_same_time_and_map_matches(&team[i], &team[j]);
+
             let root_i = find_root(&mut parent, i);
             let root_j = find_root(&mut parent, j);
             let already_grouped = root_i != i || root_j != j || !team[i].party_tag.is_empty() || !team[j].party_tag.is_empty();
@@ -1230,7 +1284,8 @@ fn detect_parties_from_histories(
             // Link if:
             // - Shared >= 2 matches in common
             // - OR Shared >= 1 match and at least one is already part of a detected party (extending duo to trio)
-            if shared_count >= 2 || (shared_count >= 1 && already_grouped) {
+            // - OR 2+ games in a row with SAME TIME and same map
+            if shared_count >= 2 || (shared_count >= 1 && already_grouped) || consecutive_time_map {
                 if root_i != root_j {
                     parent[root_i] = root_j;
                 }
@@ -1899,7 +1954,7 @@ async fn parse_coregame_roster(
         }
     }
 
-    Ok(LiveMatchRoster {
+    let roster = LiveMatchRoster {
         state: "COREGAME".to_string(),
         match_id: match_id.to_string(),
         map_name,
@@ -1909,7 +1964,12 @@ async fn parse_coregame_roster(
         enemy_team,
         updated_at: chrono_like_now(),
         rate_limit_seconds: get_current_rate_limit_secs().await,
-    })
+    };
+    {
+        let mut lock = get_last_active_roster_holder().write().await;
+        *lock = Some(roster.clone());
+    }
+    Ok(roster)
 }
 
 // Parse Pre-Game (Agent Select) Match
@@ -2072,7 +2132,7 @@ async fn parse_pregame_roster(
             party_map.get(&puuid).cloned().unwrap_or_default()
         };
 
-        let loadout_items = loadouts_by_sub.get(&puuid)
+        let _loadout_items = loadouts_by_sub.get(&puuid)
             .or_else(|| loadouts_by_char.get(&char_id))
             .cloned()
             .unwrap_or(serde_json::Value::Null);
@@ -2085,7 +2145,8 @@ async fn parse_pregame_roster(
         let act_season = active_season_id.clone();
 
         futures.push(async move {
-            let (primary_skin, weapon_skins, all_skins) = extract_player_skins(&loadout_items).await;
+            // Weapon skins cannot be fetched during Agent Select (Pregame) -> display "TBD"
+            let (primary_skin, weapon_skins, all_skins) = ("TBD".to_string(), HashMap::new(), Vec::new());
             let pdata = fetch_player_full_stats(&c, &pd, &puuid, &tok, &j, &ver, &act_season, level).await;
 
             let tracked = TrackedPlayer {
@@ -2191,7 +2252,7 @@ async fn parse_pregame_roster(
         }
     }
 
-    Ok(LiveMatchRoster {
+    let roster = LiveMatchRoster {
         state: "PREGAME".to_string(),
         match_id: match_id.to_string(),
         map_name,
@@ -2201,7 +2262,12 @@ async fn parse_pregame_roster(
         enemy_team,
         updated_at: chrono_like_now(),
         rate_limit_seconds: get_current_rate_limit_secs().await,
-    })
+    };
+    {
+        let mut lock = get_last_active_roster_holder().write().await;
+        *lock = Some(roster.clone());
+    }
+    Ok(roster)
 }
 
 fn chrono_like_now() -> String {
@@ -2312,6 +2378,15 @@ pub async fn fetch_latest_completed_match_internal(
         }
     }
 
+    // Auto-record completed match to local Career history
+    let last_roster = {
+        let lock = get_last_active_roster_holder().read().await;
+        lock.clone()
+    };
+    if let Some(cm) = crate::career::parse_match_details(&m_json, my_puuid, last_roster.as_ref()) {
+        let _ = crate::career::save_career_match(cm);
+    }
+
     Ok(LatestMatchResult {
         map_name,
         gamemode,
@@ -2319,5 +2394,65 @@ pub async fn fetch_latest_completed_match_internal(
         score_enemy,
         won,
     })
+}
+
+pub async fn sync_recent_matches_internal(
+    client: &reqwest::Client,
+    access_token: &str,
+    jwt: &str,
+    my_puuid: &str,
+    glz_host: &str,
+    client_version: &str,
+) -> Result<Vec<crate::career::CareerMatch>, String> {
+    let parts: Vec<&str> = glz_host.split('.').collect();
+    let shard = if parts.len() >= 2 { parts[1] } else { "ap" };
+    let pd_host = format!("pd.{}.a.pvp.net", shard);
+
+    let hist_url = format!("https://{}/match-history/v1/history/{}?startIndex=0&endIndex=15", pd_host, my_puuid);
+    let hist_resp = client.get(&hist_url)
+        .header("Authorization", format!("Bearer {}", access_token))
+        .header("X-Riot-Entitlements-JWT", jwt)
+        .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+        .header("X-Riot-ClientVersion", client_version)
+        .send().await
+        .map_err(|e| format!("Failed to fetch match history: {}", e))?;
+
+    let hist_json = hist_resp.json::<serde_json::Value>().await
+        .map_err(|e| format!("Failed to parse match history json: {}", e))?;
+
+    let history_arr = hist_json.get("History")
+        .and_then(|h| h.as_array())
+        .ok_or_else(|| "No matches found in history".to_string())?;
+
+    let last_roster = {
+        let lock = get_last_active_roster_holder().read().await;
+        lock.clone()
+    };
+
+    let mut parsed_matches = Vec::new();
+    for entry in history_arr {
+        let m_id = match entry.get("MatchID").and_then(|m| m.as_str()) {
+            Some(id) => id,
+            None => continue,
+        };
+
+        let match_url = format!("https://{}/match-details/v1/matches/{}", pd_host, m_id);
+        if let Ok(resp) = client.get(&match_url)
+            .header("Authorization", format!("Bearer {}", access_token))
+            .header("X-Riot-Entitlements-JWT", jwt)
+            .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+            .header("X-Riot-ClientVersion", client_version)
+            .send().await {
+            if let Ok(m_json) = resp.json::<serde_json::Value>().await {
+                if let Some(cm) = crate::career::parse_match_details(&m_json, my_puuid, last_roster.as_ref()) {
+                    parsed_matches.push(cm);
+                }
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+
+    crate::career::save_career_matches(&parsed_matches)?;
+    Ok(crate::career::load_career_matches())
 }
 

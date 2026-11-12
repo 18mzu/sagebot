@@ -6,6 +6,7 @@ mod locker;
 mod tracker;
 mod storefront;
 mod paths;
+mod career;
 
 use config::AppConfig;
 use valorant::{
@@ -917,6 +918,7 @@ async fn apply_update(app: tauri::AppHandle, download_url: String) -> Result<(),
     let temp_clean = normalize_windows_path(&temp_exe);
 
     // Write a standalone updater batch file in TEMP directory
+    let cur_dir = current_exe.parent().map(|p| normalize_windows_path(p)).unwrap_or_default();
     let bat_file = std::env::temp_dir().join(format!("sagebot_updater_{}.bat", std::process::id()));
     let bat_clean = normalize_windows_path(&bat_file);
 
@@ -936,10 +938,12 @@ async fn apply_update(app: tauri::AppHandle, download_url: String) -> Result<(),
         :fail\r\n\
         del /f /q \"{tmp}\" > nul 2>&1\r\n\
         :launch\r\n\
-        start \"\" \"{cur}\"\r\n\
+        cd /d \"{cur_dir}\"\r\n\
+        start \"\" /D \"{cur_dir}\" \"{cur}\"\r\n\
         del \"%~f0\"\r\n",
         tmp = temp_clean,
-        cur = current_clean
+        cur = current_clean,
+        cur_dir = cur_dir
     );
 
     let _ = std::fs::write(&bat_clean, bat_script);
@@ -1424,6 +1428,47 @@ async fn fetch_player_match_kdas(matches: Vec<tracker::RecentMatchDetail>, puuid
     ).await
 }
 
+#[tauri::command]
+fn get_career_matches() -> Result<Vec<career::CareerMatch>, String> {
+    Ok(career::load_career_matches())
+}
+
+#[tauri::command]
+async fn sync_career_matches() -> Result<Vec<career::CareerMatch>, String> {
+    let lockfile = LockfileData::read_from_disk()?;
+    let client = ValorantClient::new(lockfile)?;
+    let (access_token, jwt) = client.get_riot_tokens().await?;
+    let ent = client.get_entitlements().await?;
+    let puuid = ent.get("subject")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "Failed to obtain PUUID from entitlements".to_string())?;
+
+    let glz_host = valorant::discover_glz_host();
+    let client_version = valorant::discover_client_version();
+
+    let http_client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    tracker::sync_recent_matches_internal(
+        &http_client,
+        &access_token,
+        &jwt,
+        puuid,
+        &glz_host,
+        &client_version,
+    ).await
+}
+
+#[tauri::command]
+fn delete_career_match(match_id: String) -> Result<Vec<career::CareerMatch>, String> {
+    let mut matches = career::load_career_matches();
+    matches.retain(|m| m.match_id != match_id);
+    career::save_career_matches(&matches)?;
+    Ok(career::load_career_matches())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(target_os = "windows")]
@@ -1549,7 +1594,10 @@ pub fn run() {
             get_latest_completed_match_score,
             fetch_player_match_kdas,
             storefront::get_storefront,
-            capture_screen_base64
+            capture_screen_base64,
+            get_career_matches,
+            sync_career_matches,
+            delete_career_match
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

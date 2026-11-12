@@ -384,6 +384,7 @@ export interface StorefrontData {
 type TabType =
   | "main"
   | "tracker"
+  | "career"
   | "shop"
   | "config"
   | "agents"
@@ -396,6 +397,73 @@ type TabType =
   | "changelog"
   | "settings"
   | "info";
+
+export interface CareerPlayer {
+  puuid: string;
+  name: string;
+  tag: string;
+  team: string; // "Ally" | "Enemy"
+  is_self: boolean;
+  agent_id: string;
+  agent_name: string;
+  rank_tier: number;
+  rank_name: string;
+  rr: number;
+  party_tag: string;
+  score: number;
+  kills: number;
+  deaths: number;
+  assists: number;
+  kd_ratio: number;
+  headshot_percent: number;
+  first_bloods: number;
+  plants: number;
+  defuses: number;
+  trades: number;
+}
+
+export interface CareerMatch {
+  match_id: string;
+  timestamp: number;
+  date_str: string;
+  time_str: string;
+  duration_seconds: number;
+  gamemode: string;
+  map_name: string;
+  result: "VICTORY" | "DEFEAT" | "DRAW" | string;
+  score_ally: number;
+  score_enemy: number;
+  my_agent_id: string;
+  my_agent_name: string;
+  my_rank_tier: number;
+  my_rank_name: string;
+  my_rr_change: number;
+  my_kills: number;
+  my_deaths: number;
+  my_assists: number;
+  my_score: number;
+  my_hs_percent: number;
+  players: CareerPlayer[];
+}
+
+const MAP_SPLASHES: Record<string, string> = {
+  ascent: "https://media.valorant-api.com/maps/7eaecc1b-4337-bbf6-6ab9-04b8f06b3319/splash.png",
+  bind: "https://media.valorant-api.com/maps/2c9d57ec-4431-9c5e-2939-8f9ef6dd5cba/splash.png",
+  breeze: "https://media.valorant-api.com/maps/2fb9a4fd-47b8-4e7d-a969-74b4046ebd53/splash.png",
+  fracture: "https://media.valorant-api.com/maps/b5297eab-42c7-b11a-1a00-2f9720f299b4/splash.png",
+  haven: "https://media.valorant-api.com/maps/2bee0dc9-4080-8a12-7c72-3cef07042c4e/splash.png",
+  icebox: "https://media.valorant-api.com/maps/e2ad5c54-4114-a870-9641-8ea21279579a/splash.png",
+  lotus: "https://media.valorant-api.com/maps/2fe9fb3d-49c7-8f7c-3f0e-3c599c5192e2/splash.png",
+  pearl: "https://media.valorant-api.com/maps/fd266143-491a-8374-c5d7-99ac8251936f/splash.png",
+  split: "https://media.valorant-api.com/maps/d960549e-485c-68e3-61ac-50809fa04e14/splash.png",
+  sunset: "https://media.valorant-api.com/maps/92584fbe-486a-b1b2-9faa-39b0f486b498/splash.png",
+  abyss: "https://media.valorant-api.com/maps/224b0a95-48b9-f703-1bd8-67aca101a61f/splash.png",
+  corrode: "https://media.valorant-api.com/maps/12452a9d-48c3-0b02-e7eb-0381c3520404/splash.png",
+  district: "https://media.valorant-api.com/maps/690b3ed2-4d81-0422-0c5b-aca57e467414/splash.png",
+  kasbah: "https://media.valorant-api.com/maps/12452a9d-48c3-0b02-e7eb-0381c3520404/splash.png",
+  drift: "https://media.valorant-api.com/maps/2c9d57ec-4431-9c5e-2939-8f9ef6dd5cba/splash.png",
+  piazza: "https://media.valorant-api.com/maps/2bee0dc9-4080-8a12-7c72-3cef07042c4e/splash.png",
+};
 
 interface ToastMsg {
   id: number;
@@ -479,6 +547,54 @@ export default function App() {
   const [storefront, setStorefront] = useState<StorefrontData | null>(null);
   const [isStoreLoading, setIsStoreLoading] = useState<boolean>(false);
   const [selectedBundleIdx, setSelectedBundleIdx] = useState<number>(0);
+
+  // Career tab state
+  const [careerMatches, setCareerMatches] = useState<CareerMatch[]>([]);
+  const [selectedCareerMatch, setSelectedCareerMatch] = useState<CareerMatch | null>(null);
+  const [careerFilter, setCareerFilter] = useState<string>("ALL");
+  const [isSyncingCareer, setIsSyncingCareer] = useState<boolean>(false);
+
+  const loadCareerMatches = async () => {
+    try {
+      const matches = await invoke<CareerMatch[]>("get_career_matches");
+      if (matches) {
+        setCareerMatches(matches);
+      }
+    } catch (e) {
+      console.error("Failed to load career matches:", e);
+    }
+  };
+
+  const syncCareerMatches = async () => {
+    if (isSyncingCareer) return;
+    setIsSyncingCareer(true);
+    try {
+      const updated = await invoke<CareerMatch[]>("sync_career_matches");
+      if (updated) {
+        setCareerMatches(updated);
+        showToast("Career matches synced from VALORANT!");
+      }
+    } catch (e: any) {
+      showToast(`Sync failed: ${e?.toString() || e}`);
+    } finally {
+      setIsSyncingCareer(false);
+    }
+  };
+
+  const deleteCareerMatch = async (matchId: string) => {
+    try {
+      const updated = await invoke<CareerMatch[]>("delete_career_match", { matchId });
+      if (updated) {
+        setCareerMatches(updated);
+        if (selectedCareerMatch?.match_id === matchId) {
+          setSelectedCareerMatch(null);
+        }
+        showToast("Match removed from Career.");
+      }
+    } catch (e) {
+      console.error("Failed to delete match:", e);
+    }
+  };
 
   const [status, setStatus] = useState<StatusResponse>({
     is_connected: false,
@@ -1765,9 +1881,11 @@ export default function App() {
                   } else {
                     dispatchConclude(allyFinal, enemyFinal, finalMap, rawMode);
                   }
+                  loadCareerMatches();
                 })
                 .catch(() => {
                   dispatchConclude(allyFinal, enemyFinal, finalMap, rawMode);
+                  loadCareerMatches();
                 });
 
               // STOP SageBot when game concludes UNLESS Fully Auto Play is on
@@ -2010,12 +2128,19 @@ export default function App() {
     };
   }, [isRebindingMain, isRebindingAfk]);
 
-  // Live Match Tracker initial fetch if empty when switching to tracker tab
+  // Live Match Tracker & Career initial fetch when switching tabs
   useEffect(() => {
     if (activeTab === "tracker" && !roster) {
       fetchRoster();
     }
+    if (activeTab === "career") {
+      loadCareerMatches();
+    }
   }, [activeTab]);
+
+  useEffect(() => {
+    loadCareerMatches();
+  }, []);
 
   // Live Storefront countdown ticker (disabled in Low Detail mode or when not viewing shop)
   useEffect(() => {
@@ -3389,6 +3514,7 @@ export default function App() {
   // Strip weapon suffixes from skin display names (e.g. "Evori Dreamwings Vandal" -> "Evori Dreamwings", "Standard Vandal" -> "Standard")
   const cleanSkinName = (skin: string): string => {
     if (!skin) return "-";
+    if (skin === "TBD") return "TBD";
     if (skin.toLowerCase().startsWith("standard")) return "Standard";
     const weaponSuffixes = [
       "Vandal", "Phantom", "Operator", "Sheriff", "Ghost", "Classic", "Spectre",
@@ -3442,6 +3568,9 @@ export default function App() {
     const tagLine = hasTag ? parts[1] : "";
 
     const getDisplayedSkin = (p: TrackedPlayer) => {
+      if (roster?.state === "PREGAME" || p.primary_skin === "TBD") {
+        return "TBD";
+      }
       if (p.weapon_skins && p.weapon_skins[selectedWeaponSkin]) {
         return p.weapon_skins[selectedWeaponSkin];
       }
@@ -3903,6 +4032,19 @@ export default function App() {
               })()}
             </button>
             <button
+              className={`nav-btn ${activeTab === "career" ? "active" : ""}`}
+              onClick={() => {
+                setActiveTab("career");
+                loadCareerMatches();
+              }}
+            >
+              <History size={14} />
+              <span>Career</span>
+              {careerMatches.length > 0 && (
+                <span className="career-count-badge">{careerMatches.length}</span>
+              )}
+            </button>
+            <button
               className={`nav-btn ${activeTab === "shop" ? "active" : ""}`}
               onClick={() => {
                 setActiveTab("shop");
@@ -4224,6 +4366,409 @@ export default function App() {
                         </tbody>
                       </table>
                     </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* TAB: CAREER (MATCH HISTORY & DETAILED SCOREBOARDS) */}
+            {activeTab === "career" && (
+              <div className="tab-pane career-tab-pane">
+                {selectedCareerMatch ? (
+                  /* ==========================================================================
+                     DETAILED MATCH SCOREBOARD VIEW (Matches media_1794514120166_896257e9.jpg)
+                     ========================================================================== */
+                  <div className="career-detail-container">
+                    <div className="career-detail-nav">
+                      <button
+                        type="button"
+                        className="career-back-btn"
+                        onClick={() => setSelectedCareerMatch(null)}
+                      >
+                        ← Back to Match History
+                      </button>
+                      <button
+                        type="button"
+                        className="career-delete-match-btn"
+                        title="Delete this match record"
+                        onClick={() => {
+                          if (confirm("Remove this match from local Career history?")) {
+                            deleteCareerMatch(selectedCareerMatch.match_id);
+                          }
+                        }}
+                      >
+                        <Trash2 size={13} />
+                        <span>Delete Record</span>
+                      </button>
+                    </div>
+
+                    {/* BIG HEADER BANNER: 11 DEFEAT 13 */}
+                    <div className="career-detail-hero">
+                      <div className="career-hero-score-block">
+                        <span className="career-score-ally">{selectedCareerMatch.score_ally}</span>
+                        <span
+                          className={`career-result-pill ${
+                            selectedCareerMatch.result === "VICTORY"
+                              ? "res-win"
+                              : selectedCareerMatch.result === "DEFEAT"
+                              ? "res-loss"
+                              : "res-draw"
+                          }`}
+                        >
+                          {selectedCareerMatch.result}
+                        </span>
+                        <span className="career-score-enemy">{selectedCareerMatch.score_enemy}</span>
+                      </div>
+                      <div className="career-hero-meta-block">
+                        <span className="career-meta-date">{selectedCareerMatch.date_str}</span>
+                        <span className="career-meta-dot">•</span>
+                        <span className="career-meta-mode">{selectedCareerMatch.gamemode.toUpperCase()}</span>
+                        <span className="career-meta-dot">•</span>
+                        <span className="career-meta-map">MAP - {selectedCareerMatch.map_name.toUpperCase()}</span>
+                        {selectedCareerMatch.duration_seconds > 0 && (
+                          <>
+                            <span className="career-meta-dot">•</span>
+                            <span className="career-meta-duration">
+                              {Math.floor(selectedCareerMatch.duration_seconds / 60)}:
+                              {(selectedCareerMatch.duration_seconds % 60).toString().padStart(2, "0")}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* SUB-TABS (SCOREBOARD) */}
+                    <div className="career-subtabs-bar">
+                      <span className="career-subtab active">SCOREBOARD</span>
+                    </div>
+
+                    {/* DETAILED SCOREBOARD TABLE */}
+                    <div className="career-scoreboard-table-wrap">
+                      <table className="career-table">
+                        <thead>
+                          <tr>
+                            <th style={{ width: "240px", textAlign: "left" }}>PLAYER</th>
+                            <th style={{ textAlign: "center", width: "130px" }}>PERFORMANCE SCORE</th>
+                            <th style={{ textAlign: "center", width: "110px" }}>KDA</th>
+                            <th style={{ textAlign: "center", width: "80px" }}>HS%</th>
+                            <th style={{ textAlign: "left", width: "140px" }}>RANK &amp; RR</th>
+                            <th style={{ textAlign: "center", width: "90px" }}>FIRST BLOODS</th>
+                            <th style={{ textAlign: "center", width: "70px" }}>PLANTS</th>
+                            <th style={{ textAlign: "center", width: "70px" }}>DEFUSES</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {selectedCareerMatch.players.map((p, idx) => {
+                            const isAlly = p.team === "Ally";
+                            const partyClass = p.party_tag
+                              ? `party-${p.party_tag.toLowerCase().replace(/[^a-z0-9]/g, "")}`
+                              : "";
+
+                            return (
+                              <tr
+                                key={p.puuid || idx}
+                                className={`career-row ${isAlly ? "career-ally-row" : "career-enemy-row"} ${
+                                  p.is_self ? "career-self-row" : ""
+                                }`}
+                              >
+                                {/* PLAYER */}
+                                <td>
+                                  <div className="career-player-cell">
+                                    {p.party_tag ? (
+                                      <div
+                                        className={`party-indicator-capsule ${partyClass}`}
+                                        data-tooltip={p.party_tag}
+                                      />
+                                    ) : (
+                                      <div className="party-indicator-capsule-spacer" />
+                                    )}
+                                    <div
+                                      className="tracker-agent-avatar-wrap"
+                                      data-tooltip={p.agent_name || "Agent"}
+                                    >
+                                      {p.agent_id ? (
+                                        <img
+                                          className="tracker-agent-img"
+                                          src={`https://media.valorant-api.com/agents/${p.agent_id}/displayicon.png`}
+                                          alt=""
+                                          onError={(e) => {
+                                            (e.currentTarget as HTMLImageElement).style.display = "none";
+                                          }}
+                                        />
+                                      ) : (
+                                        <div className="tracker-agent-placeholder">?</div>
+                                      )}
+                                    </div>
+                                    <div className="career-player-meta">
+                                      <div className="career-player-name-line">
+                                        <span className="career-gamename">{p.name || "Player"}</span>
+                                        {p.tag && <span className="career-tagline">#{p.tag}</span>}
+                                        {p.party_tag && (
+                                          <span className={`career-party-mini-pill ${partyClass}`}>
+                                            {p.party_tag}
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </td>
+
+                                {/* PERFORMANCE SCORE (ACS) */}
+                                <td style={{ textAlign: "center" }}>
+                                  <span className="career-score-val">{p.score}</span>
+                                </td>
+
+                                {/* KDA */}
+                                <td style={{ textAlign: "center" }}>
+                                  <div className="career-kda-block">
+                                    <span className="career-kda-str">
+                                      {p.kills} / {p.deaths} / {p.assists}
+                                    </span>
+                                    <span className="career-kd-ratio">KD {p.kd_ratio.toFixed(2)}</span>
+                                  </div>
+                                </td>
+
+                                {/* HS% */}
+                                <td style={{ textAlign: "center" }}>
+                                  <span
+                                    className="career-hs-val"
+                                    style={{
+                                      color:
+                                        p.headshot_percent >= 30
+                                          ? "#10b981"
+                                          : p.headshot_percent >= 20
+                                          ? "#e2e8f0"
+                                          : "#94a3b8",
+                                    }}
+                                  >
+                                    {p.headshot_percent > 0 ? `${p.headshot_percent}%` : "—"}
+                                  </span>
+                                </td>
+
+                                {/* RANK & RR */}
+                                <td>
+                                  <div className="career-rank-cell">
+                                    {p.rank_tier > 0 && (
+                                      <img
+                                        src={getRankIconUrl(p.rank_tier)}
+                                        className="tracker-rank-img-mini"
+                                        alt=""
+                                      />
+                                    )}
+                                    <span
+                                      className="career-rank-name"
+                                      style={{ color: getRankColor(p.rank_name) }}
+                                    >
+                                      {p.rank_name || "Unranked"}
+                                    </span>
+                                    {p.rr > 0 && (
+                                      <span className="career-rank-rr">• {p.rr} RR</span>
+                                    )}
+                                  </div>
+                                </td>
+
+                                {/* FIRST BLOODS */}
+                                <td style={{ textAlign: "center" }}>
+                                  <span className="career-stat-num">{p.first_bloods || 0}</span>
+                                </td>
+
+                                {/* PLANTS */}
+                                <td style={{ textAlign: "center" }}>
+                                  <span className="career-stat-num">{p.plants || 0}</span>
+                                </td>
+
+                                {/* DEFUSES */}
+                                <td style={{ textAlign: "center" }}>
+                                  <span className="career-stat-num">{p.defuses || 0}</span>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ) : (
+                  /* ==========================================================================
+                     MATCH HISTORY LIST VIEW (Matches media_1794514158138_3f498d88.jpg)
+                     ========================================================================== */
+                  <div className="career-list-container">
+                    <div className="career-top-header">
+                      <div className="career-title-area">
+                        <History size={18} className="career-header-icon" />
+                        <div>
+                          <h2 className="career-title">MATCH HISTORY</h2>
+                          <span className="career-subtitle">
+                            Every match played with SageBot is saved locally. Click any game to inspect scoreboard.
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="career-actions-area">
+                        {/* MODE FILTER */}
+                        <div className="career-filter-wrapper">
+                          <select
+                            className="career-mode-select"
+                            value={careerFilter}
+                            onChange={(e) => setCareerFilter(e.target.value)}
+                          >
+                            <option value="ALL">ALL MODES</option>
+                            <option value="competitive">Competitive</option>
+                            <option value="unrated">Unrated</option>
+                            <option value="swiftplay">Swiftplay</option>
+                            <option value="deathmatch">Deathmatch / TDM</option>
+                            <option value="spikerush">Spike Rush</option>
+                            <option value="custom">Custom Games</option>
+                          </select>
+                        </div>
+
+                        {/* SYNC RECENT FROM VALORANT */}
+                        <button
+                          type="button"
+                          className="career-sync-btn"
+                          disabled={isSyncingCareer || !status.is_connected}
+                          onClick={() => syncCareerMatches()}
+                          data-tooltip={
+                            status.is_connected
+                              ? "Sync up to 15 recent matches from VALORANT"
+                              : "Start VALORANT to sync past matches"
+                          }
+                        >
+                          <RefreshCw size={13} className={isSyncingCareer ? "spin" : ""} />
+                          <span>{isSyncingCareer ? "Syncing..." : "Sync VALORANT Matches"}</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* MATCHES LIST */}
+                    {(() => {
+                      const filtered = careerMatches.filter((m) => {
+                        if (careerFilter === "ALL") return true;
+                        const modeLow = (m.gamemode || "").toLowerCase();
+                        if (careerFilter === "deathmatch") {
+                          return modeLow.includes("deathmatch") || modeLow.includes("hurm") || modeLow.includes("tdm");
+                        }
+                        return modeLow.includes(careerFilter.toLowerCase());
+                      });
+
+                      if (filtered.length === 0) {
+                        return (
+                          <div className="career-empty-card">
+                            <History size={32} style={{ color: "rgba(168, 85, 247, 0.4)", marginBottom: "8px" }} />
+                            <h3>No Matches Recorded Yet</h3>
+                            <p>
+                              Matches played while SageBot is running are recorded automatically.
+                              {status.is_connected ? " You can also click 'Sync VALORANT Matches' above to load your recent match history." : " Launch VALORANT to sync past games."}
+                            </p>
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div className="career-matches-grid">
+                          {filtered.map((m) => {
+                            const isWin = m.result === "VICTORY";
+                            const isLoss = m.result === "DEFEAT";
+                            const splashUrl = MAP_SPLASHES[m.map_name.toLowerCase()] || "";
+
+                            return (
+                              <div
+                                key={m.match_id}
+                                className={`career-match-card ${
+                                  isWin ? "card-win" : isLoss ? "card-loss" : "card-draw"
+                                }`}
+                                onClick={() => setSelectedCareerMatch(m)}
+                              >
+                                {/* Left Result Vertical Stripe */}
+                                <div className="career-card-stripe" />
+
+                                {/* Agent Icon */}
+                                <div className="career-card-agent-box">
+                                  {m.my_agent_id ? (
+                                    <img
+                                      className="career-card-agent-img"
+                                      src={`https://media.valorant-api.com/agents/${m.my_agent_id}/displayicon.png`}
+                                      alt={m.my_agent_name}
+                                    />
+                                  ) : (
+                                    <div className="tracker-agent-placeholder">?</div>
+                                  )}
+                                </div>
+
+                                {/* Rank & RR Change */}
+                                <div className="career-card-rank-box">
+                                  {m.my_rank_tier > 0 && (
+                                    <img
+                                      className="career-card-rank-icon"
+                                      src={getRankIconUrl(m.my_rank_tier)}
+                                      alt=""
+                                    />
+                                  )}
+                                  {m.my_rr_change !== 0 ? (
+                                    <span
+                                      className={`career-card-rr-change ${
+                                        m.my_rr_change > 0 ? "rr-up" : "rr-down"
+                                      }`}
+                                    >
+                                      {m.my_rr_change > 0 ? `+${m.my_rr_change}` : m.my_rr_change}
+                                    </span>
+                                  ) : (
+                                    <span className="career-card-rank-text">
+                                      {m.my_rank_name || "Unranked"}
+                                    </span>
+                                  )}
+                                </div>
+
+                                {/* KDA & Score */}
+                                <div className="career-card-kda-box">
+                                  <div className="career-card-kda-line">
+                                    <span className="career-card-kda-label">KDA</span>
+                                    <span className="career-card-kda-vals">
+                                      {m.my_kills} / {m.my_deaths} / {m.my_assists}
+                                    </span>
+                                  </div>
+                                  <div className="career-card-score-line">
+                                    SCORE <span className="career-card-score-num">{m.my_score}</span>
+                                  </div>
+                                </div>
+
+                                {/* Result & Rounds Banner */}
+                                <div className="career-card-result-center">
+                                  <span
+                                    className={`career-card-result-tag ${
+                                      isWin ? "tag-win" : isLoss ? "tag-loss" : "tag-draw"
+                                    }`}
+                                  >
+                                    {m.result}
+                                  </span>
+                                  <span className="career-card-rounds-score">
+                                    {m.score_ally} - {m.score_enemy}
+                                  </span>
+                                </div>
+
+                                {/* Map Splash Background and Info */}
+                                <div
+                                  className="career-card-map-art"
+                                  style={{
+                                    backgroundImage: splashUrl
+                                      ? `linear-gradient(to right, rgba(15, 23, 42, 0.95) 0%, rgba(15, 23, 42, 0.4) 60%, rgba(15, 23, 42, 0.7) 100%), url(${splashUrl})`
+                                      : undefined,
+                                  }}
+                                >
+                                  <div className="career-card-map-info">
+                                    <span className="career-card-map-name">{m.map_name}</span>
+                                    <span className="career-card-date-time">
+                                      {m.date_str} {m.time_str && `• ${m.time_str}`}
+                                    </span>
+                                  </div>
+                                  <span className="career-card-inspect-arrow">View Scoreboard →</span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
               </div>

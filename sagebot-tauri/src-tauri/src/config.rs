@@ -203,8 +203,39 @@ impl AppConfig {
         dir.join("config.json")
     }
 
+    pub fn data_dir() -> PathBuf {
+        let base = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+        let data = base.join("data");
+        let _ = std::fs::create_dir_all(&data);
+        data
+    }
+
     pub fn ini_path() -> PathBuf {
-        PathBuf::from("config.ini")
+        let data_path = Self::data_dir().join("config.ini");
+        if !data_path.exists() {
+            // Auto-migration: if config.ini exists in root or exe dir, move it to data/config.ini
+            let candidates = [
+                std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.join("config.ini"))),
+                std::env::current_dir().ok().map(|p| p.join("config.ini")),
+                Some(PathBuf::from("config.ini")),
+            ];
+            for candidate in candidates.into_iter().flatten() {
+                if candidate.exists() && candidate != data_path {
+                    if let Ok(_) = std::fs::copy(&candidate, &data_path) {
+                        let _ = std::fs::remove_file(&candidate);
+                        break;
+                    }
+                }
+            }
+        }
+        data_path
+    }
+
+    pub fn career_json_path() -> PathBuf {
+        Self::data_dir().join("career.json")
     }
 
     pub fn load() -> Self {
@@ -218,9 +249,11 @@ impl AppConfig {
             }
         }
 
-        // 2. Secondary: If config.ini exists, overlay C legacy values
+        // 2. Secondary: If config.ini exists, overlay C legacy values. If neither exists, create default.
         let ini_p = Self::ini_path();
-        if ini_p.exists() {
+        if !ini_p.exists() {
+            let _ = cfg.save();
+        } else {
             if let Ok(content) = std::fs::read_to_string(&ini_p) {
                 let mut current_section = String::new();
                 for line in content.lines() {
