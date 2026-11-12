@@ -1434,34 +1434,6 @@ fn get_career_matches() -> Result<Vec<career::CareerMatch>, String> {
 }
 
 #[tauri::command]
-async fn sync_career_matches() -> Result<Vec<career::CareerMatch>, String> {
-    let lockfile = LockfileData::read_from_disk()?;
-    let client = ValorantClient::new(lockfile)?;
-    let (access_token, jwt) = client.get_riot_tokens().await?;
-    let ent = client.get_entitlements().await?;
-    let puuid = ent.get("subject")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| "Failed to obtain PUUID from entitlements".to_string())?;
-
-    let glz_host = valorant::discover_glz_host();
-    let client_version = valorant::discover_client_version();
-
-    let http_client = reqwest::Client::builder()
-        .danger_accept_invalid_certs(true)
-        .build()
-        .map_err(|e| e.to_string())?;
-
-    tracker::sync_recent_matches_internal(
-        &http_client,
-        &access_token,
-        &jwt,
-        puuid,
-        &glz_host,
-        &client_version,
-    ).await
-}
-
-#[tauri::command]
 fn delete_career_match(match_id: String) -> Result<Vec<career::CareerMatch>, String> {
     let mut matches = career::load_career_matches();
     matches.retain(|m| m.match_id != match_id);
@@ -1596,7 +1568,6 @@ pub fn run() {
             storefront::get_storefront,
             capture_screen_base64,
             get_career_matches,
-            sync_career_matches,
             delete_career_match
         ])
         .run(tauri::generate_context!())

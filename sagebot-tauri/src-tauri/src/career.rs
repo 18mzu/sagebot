@@ -236,9 +236,15 @@ pub fn parse_match_details(
 
     // Map live roster players for party tags and exact ranks/RR
     let mut live_player_map: HashMap<String, &crate::tracker::TrackedPlayer> = HashMap::new();
+    let mut live_agent_map: HashMap<String, &crate::tracker::TrackedPlayer> = HashMap::new();
     if let Some(roster) = live_roster {
         for p in roster.ally_team.iter().chain(roster.enemy_team.iter()) {
-            live_player_map.insert(p.puuid.clone(), p);
+            if !p.puuid.is_empty() {
+                live_player_map.insert(p.puuid.to_lowercase(), p);
+            }
+            if !p.agent_id.is_empty() {
+                live_agent_map.insert(p.agent_id.to_lowercase(), p);
+            }
         }
     }
 
@@ -255,7 +261,7 @@ pub fn parse_match_details(
     let mut my_hs_percent = 0.0;
 
     if let Some(players) = m_json.get("players").and_then(|p| p.as_array()) {
-        for p in players {
+        for (player_idx, p) in players.iter().enumerate() {
             let puuid = p.get("subject").and_then(|s| s.as_str()).unwrap_or("").to_string();
             let game_name = p.get("gameName").and_then(|s| s.as_str()).unwrap_or("").to_string();
             let tag_line = p.get("tagLine").and_then(|s| s.as_str()).unwrap_or("").to_string();
@@ -296,12 +302,21 @@ pub fn parse_match_details(
             let df = defuses.get(&puuid).copied().unwrap_or(0);
 
             // Inherit party tag, name, rank details from live roster hint if available
-            let (final_name, final_tag, final_rank_tier, final_rank_name, final_rr, party_tag) = if let Some(live) = live_player_map.get(&puuid) {
+            let live_opt = live_player_map.get(&puuid.to_lowercase()).copied()
+                .or_else(|| live_agent_map.get(&character_id.to_lowercase()).copied());
+
+            let (final_name, final_tag, final_rank_tier, final_rank_name, final_rr, party_tag) = if let Some(live) = live_opt {
                 let name_clean = if !live.name.is_empty() {
-                    let parts: Vec<&str> = live.name.split('#').collect();
-                    (parts[0].to_string(), parts.get(1).unwrap_or(&"").to_string())
-                } else {
+                    if live.name.contains('#') {
+                        let parts: Vec<&str> = live.name.split('#').collect();
+                        (parts[0].to_string(), parts.get(1).unwrap_or(&"").to_string())
+                    } else {
+                        (live.name.clone(), tag_line.clone())
+                    }
+                } else if !game_name.is_empty() {
                     (game_name.clone(), tag_line.clone())
+                } else {
+                    (format!("Player {}", player_idx + 1), String::new())
                 };
                 let rank_t = if live.current_tier > 0 { live.current_tier } else { comp_tier };
                 let rank_n = if !live.current_rank_name.is_empty() { live.current_rank_name.clone() } else { crate::tracker::get_rank_name(rank_t).to_string() };
@@ -309,7 +324,8 @@ pub fn parse_match_details(
             } else {
                 let rank_t = comp_tier;
                 let rank_n = crate::tracker::get_rank_name(rank_t).to_string();
-                (game_name.clone(), tag_line.clone(), rank_t, rank_n, 0i64, String::new())
+                let n = if !game_name.is_empty() { game_name.clone() } else { format!("Player {}", player_idx + 1) };
+                (n, tag_line.clone(), rank_t, rank_n, 0i64, String::new())
             };
 
             let agent_name = resolve_agent_name(&character_id);

@@ -1,7 +1,9 @@
 # Temporary, local build, and runtime files
 config.ini
+data/
 log/
 sagebot_gui.exe
 sagebot.exe
 *.exe
+*.dll
 scratch/

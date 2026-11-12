@@ -4572,6 +4572,19 @@ input[type="number"] {
   color: #cbd5e1;
 }
 
+.career-card-rank-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+}
+
+.career-card-rr-text {
+  font-size: 10px;
+  font-weight: 600;
+  color: #94a3b8;
+}
+
 .career-card-kda-box {
   display: flex;
   flex-direction: column;

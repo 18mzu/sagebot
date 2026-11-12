@@ -1969,6 +1969,10 @@ async fn parse_coregame_roster(
         let mut lock = get_last_active_roster_holder().write().await;
         *lock = Some(roster.clone());
     }
+    if let Ok(json_str) = serde_json::to_string(&roster) {
+        let p = crate::config::data_dir().join("last_roster.json");
+        let _ = std::fs::write(p, json_str);
+    }
     Ok(roster)
 }
 
@@ -2267,6 +2271,10 @@ async fn parse_pregame_roster(
         let mut lock = get_last_active_roster_holder().write().await;
         *lock = Some(roster.clone());
     }
+    if let Ok(json_str) = serde_json::to_string(&roster) {
+        let p = crate::config::data_dir().join("last_roster.json");
+        let _ = std::fs::write(p, json_str);
+    }
     Ok(roster)
 }
 
@@ -2381,7 +2389,16 @@ pub async fn fetch_latest_completed_match_internal(
     // Auto-record completed match to local Career history
     let last_roster = {
         let lock = get_last_active_roster_holder().read().await;
-        lock.clone()
+        if lock.is_some() {
+            lock.clone()
+        } else {
+            let p = crate::config::data_dir().join("last_roster.json");
+            if let Ok(data) = std::fs::read_to_string(p) {
+                serde_json::from_str::<LiveMatchRoster>(&data).ok()
+            } else {
+                None
+            }
+        }
     };
     if let Some(cm) = crate::career::parse_match_details(&m_json, my_puuid, last_roster.as_ref()) {
         let _ = crate::career::save_career_match(cm);
@@ -2394,65 +2411,5 @@ pub async fn fetch_latest_completed_match_internal(
         score_enemy,
         won,
     })
-}
-
-pub async fn sync_recent_matches_internal(
-    client: &reqwest::Client,
-    access_token: &str,
-    jwt: &str,
-    my_puuid: &str,
-    glz_host: &str,
-    client_version: &str,
-) -> Result<Vec<crate::career::CareerMatch>, String> {
-    let parts: Vec<&str> = glz_host.split('.').collect();
-    let shard = if parts.len() >= 2 { parts[1] } else { "ap" };
-    let pd_host = format!("pd.{}.a.pvp.net", shard);
-
-    let hist_url = format!("https://{}/match-history/v1/history/{}?startIndex=0&endIndex=15", pd_host, my_puuid);
-    let hist_resp = client.get(&hist_url)
-        .header("Authorization", format!("Bearer {}", access_token))
-        .header("X-Riot-Entitlements-JWT", jwt)
-        .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
-        .header("X-Riot-ClientVersion", client_version)
-        .send().await
-        .map_err(|e| format!("Failed to fetch match history: {}", e))?;
-
-    let hist_json = hist_resp.json::<serde_json::Value>().await
-        .map_err(|e| format!("Failed to parse match history json: {}", e))?;
-
-    let history_arr = hist_json.get("History")
-        .and_then(|h| h.as_array())
-        .ok_or_else(|| "No matches found in history".to_string())?;
-
-    let last_roster = {
-        let lock = get_last_active_roster_holder().read().await;
-        lock.clone()
-    };
-
-    let mut parsed_matches = Vec::new();
-    for entry in history_arr {
-        let m_id = match entry.get("MatchID").and_then(|m| m.as_str()) {
-            Some(id) => id,
-            None => continue,
-        };
-
-        let match_url = format!("https://{}/match-details/v1/matches/{}", pd_host, m_id);
-        if let Ok(resp) = client.get(&match_url)
-            .header("Authorization", format!("Bearer {}", access_token))
-            .header("X-Riot-Entitlements-JWT", jwt)
-            .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
-            .header("X-Riot-ClientVersion", client_version)
-            .send().await {
-            if let Ok(m_json) = resp.json::<serde_json::Value>().await {
-                if let Some(cm) = crate::career::parse_match_details(&m_json, my_puuid, last_roster.as_ref()) {
-                    parsed_matches.push(cm);
-                }
-            }
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    }
-
-    crate::career::save_career_matches(&parsed_matches)?;
-    Ok(crate::career::load_career_matches())
 }
 

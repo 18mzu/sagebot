@@ -427,3 +427,11 @@ impl AppConfig {
         Ok(())
     }
 }
+
+pub fn data_dir() -> PathBuf {
+    AppConfig::data_dir()
+}
+
+pub fn career_json_path() -> PathBuf {
+    AppConfig::career_json_path()
+}

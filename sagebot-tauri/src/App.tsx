@@ -551,8 +551,6 @@ export default function App() {
   // Career tab state
   const [careerMatches, setCareerMatches] = useState<CareerMatch[]>([]);
   const [selectedCareerMatch, setSelectedCareerMatch] = useState<CareerMatch | null>(null);
-  const [careerFilter, setCareerFilter] = useState<string>("ALL");
-  const [isSyncingCareer, setIsSyncingCareer] = useState<boolean>(false);
 
   const loadCareerMatches = async () => {
     try {
@@ -562,22 +560,6 @@ export default function App() {
       }
     } catch (e) {
       console.error("Failed to load career matches:", e);
-    }
-  };
-
-  const syncCareerMatches = async () => {
-    if (isSyncingCareer) return;
-    setIsSyncingCareer(true);
-    try {
-      const updated = await invoke<CareerMatch[]>("sync_career_matches");
-      if (updated) {
-        setCareerMatches(updated);
-        showToast("Career matches synced from VALORANT!");
-      }
-    } catch (e: any) {
-      showToast(`Sync failed: ${e?.toString() || e}`);
-    } finally {
-      setIsSyncingCareer(false);
     }
   };
 
@@ -3602,6 +3584,7 @@ export default function App() {
             <div
               className="tracker-agent-avatar-wrap"
               data-tooltip={player.agent_name || "Agent"}
+              data-tooltip-pos="bottom"
             >
               {player.agent_id ? (
                 <img
@@ -3621,7 +3604,10 @@ export default function App() {
             </div>
             <div className="tracker-player-details">
               <div className="tracker-player-top-line">
-                <span className="tracker-player-name" data-tooltip={cleanRawName}>
+                <span
+                  className="tracker-player-name"
+                  {...(cleanRawName.length > 18 ? { "data-tooltip": cleanRawName, "data-tooltip-pos": "bottom" } : {})}
+                >
                   <span className="tracker-gamename">{gameName}</span>
                   {tagLine && <span className="tracker-tagline">#{tagLine}</span>}
                 </span>
@@ -4485,6 +4471,7 @@ export default function App() {
                                     <div
                                       className="tracker-agent-avatar-wrap"
                                       data-tooltip={p.agent_name || "Agent"}
+                                      data-tooltip-pos="bottom"
                                     >
                                       {p.agent_id ? (
                                         <img
@@ -4507,6 +4494,32 @@ export default function App() {
                                           <span className={`career-party-mini-pill ${partyClass}`}>
                                             {p.party_tag}
                                           </span>
+                                        )}
+                                      </div>
+                                      <div
+                                        className="tracker-player-rank-subline"
+                                        data-tooltip={
+                                          p.rank_tier > 0
+                                            ? `${p.rank_name} • ${p.rr} RR`
+                                            : "Unranked"
+                                        }
+                                      >
+                                        <img
+                                          className="tracker-rank-img-mini"
+                                          src={getRankIconUrl(p.rank_tier)}
+                                          alt=""
+                                        />
+                                        <span
+                                          className="tracker-rank-text-mini"
+                                          style={{ color: getRankColor(p.rank_name) }}
+                                        >
+                                          {p.rank_name || "Unranked"}
+                                        </span>
+                                        {p.rank_tier > 0 && (
+                                          <>
+                                            <span className="tracker-rank-dot-mini">•</span>
+                                            <span className="tracker-rank-rr-mini">{p.rr} RR</span>
+                                          </>
                                         )}
                                       </div>
                                     </div>
@@ -4604,61 +4617,17 @@ export default function App() {
                         </div>
                       </div>
 
-                      <div className="career-actions-area">
-                        {/* MODE FILTER */}
-                        <div className="career-filter-wrapper">
-                          <select
-                            className="career-mode-select"
-                            value={careerFilter}
-                            onChange={(e) => setCareerFilter(e.target.value)}
-                          >
-                            <option value="ALL">ALL MODES</option>
-                            <option value="competitive">Competitive</option>
-                            <option value="unrated">Unrated</option>
-                            <option value="swiftplay">Swiftplay</option>
-                            <option value="deathmatch">Deathmatch / TDM</option>
-                            <option value="spikerush">Spike Rush</option>
-                            <option value="custom">Custom Games</option>
-                          </select>
-                        </div>
-
-                        {/* SYNC RECENT FROM VALORANT */}
-                        <button
-                          type="button"
-                          className="career-sync-btn"
-                          disabled={isSyncingCareer || !status.is_connected}
-                          onClick={() => syncCareerMatches()}
-                          data-tooltip={
-                            status.is_connected
-                              ? "Sync up to 15 recent matches from VALORANT"
-                              : "Start VALORANT to sync past matches"
-                          }
-                        >
-                          <RefreshCw size={13} className={isSyncingCareer ? "spin" : ""} />
-                          <span>{isSyncingCareer ? "Syncing..." : "Sync VALORANT Matches"}</span>
-                        </button>
-                      </div>
                     </div>
 
                     {/* MATCHES LIST */}
                     {(() => {
-                      const filtered = careerMatches.filter((m) => {
-                        if (careerFilter === "ALL") return true;
-                        const modeLow = (m.gamemode || "").toLowerCase();
-                        if (careerFilter === "deathmatch") {
-                          return modeLow.includes("deathmatch") || modeLow.includes("hurm") || modeLow.includes("tdm");
-                        }
-                        return modeLow.includes(careerFilter.toLowerCase());
-                      });
-
-                      if (filtered.length === 0) {
+                      if (careerMatches.length === 0) {
                         return (
                           <div className="career-empty-card">
                             <History size={32} style={{ color: "rgba(168, 85, 247, 0.4)", marginBottom: "8px" }} />
                             <h3>No Matches Recorded Yet</h3>
                             <p>
-                              Matches played while SageBot is running are recorded automatically.
-                              {status.is_connected ? " You can also click 'Sync VALORANT Matches' above to load your recent match history." : " Launch VALORANT to sync past games."}
+                              Matches played while SageBot is active are tracked and saved locally with full player names, ranks, and combat scores.
                             </p>
                           </div>
                         );
@@ -4666,7 +4635,7 @@ export default function App() {
 
                       return (
                         <div className="career-matches-grid">
-                          {filtered.map((m) => {
+                          {careerMatches.map((m) => {
                             const isWin = m.result === "VICTORY";
                             const isLoss = m.result === "DEFEAT";
                             const splashUrl = MAP_SPLASHES[m.map_name.toLowerCase()] || "";
@@ -4704,17 +4673,32 @@ export default function App() {
                                       alt=""
                                     />
                                   )}
-                                  {m.my_rr_change !== 0 ? (
+                                  <div className="career-card-rank-col">
+                                    <span
+                                      className="career-card-rank-text"
+                                      style={{ color: getRankColor(m.my_rank_name) }}
+                                    >
+                                      {m.my_rank_name || "Unranked"}
+                                    </span>
+                                    {m.my_rank_tier > 0 && (() => {
+                                      const selfPlayer = m.players.find((p) => p.is_self);
+                                      if (selfPlayer && selfPlayer.rr > 0) {
+                                        return (
+                                          <span className="career-card-rr-text">
+                                            {selfPlayer.rr} RR
+                                          </span>
+                                        );
+                                      }
+                                      return null;
+                                    })()}
+                                  </div>
+                                  {m.my_rr_change !== 0 && (
                                     <span
                                       className={`career-card-rr-change ${
                                         m.my_rr_change > 0 ? "rr-up" : "rr-down"
                                       }`}
                                     >
                                       {m.my_rr_change > 0 ? `+${m.my_rr_change}` : m.my_rr_change}
-                                    </span>
-                                  ) : (
-                                    <span className="career-card-rank-text">
-                                      {m.my_rank_name || "Unranked"}
                                     </span>
                                   )}
                                 </div>
