@@ -588,6 +588,60 @@ const MAP_SPLASHES: Record<string, string> = {
   gauntlet: "https://media.valorant-api.com/maps/dd3a1cd9-41b1-50ea-3bd6-a7bb3c5978bd/splash.png",
 };
 
+const VALORANT_AGENT_MAP: Record<string, string> = {
+  "41fb69c1-4189-7b37-f117-bcaf1e96f1bf": "Astra",
+  "b9f36430-4074-b290-eb81-0440ac023b4f": "Astra",
+  "95b78d77-474e-9714-2971-15c32582b04a": "Astra",
+  "5f8d3a7f-467b-97f3-062c-13acf203c006": "Breach",
+  "9f0d8ba9-4140-b941-57d3-a7ad57c6b417": "Brimstone",
+  "22697a3d-45bf-8dd7-4fec-84a9e28c69d7": "Chamber",
+  "1dbf2edd-4729-0984-3115-daa5eed44993": "Clove",
+  "1dbf2edd-4729-0984-3115-ffb5dde52523": "Clove",
+  "117ed9e3-49f3-6512-3ccf-0cada7e3823b": "Cypher",
+  "a3bfb854-4376-2d48-8377-93a26e38fb6f": "Cypher",
+  "cc8b64c8-4b25-4ff9-6e7f-37b4da43d235": "Deadlock",
+  "dade69b4-4f5a-8528-247b-219e5a1facd6": "Fade",
+  "e370fa57-4757-3604-3648-499e1f642d3f": "Gekko",
+  "95b78ed7-4637-86d9-7e41-71ba8c293152": "Harbor",
+  "ddd5a15c-4fbe-42fa-3789-11a55ca5ee04": "Hush",
+  "0e38b510-41a8-5780-5e8f-568b2a4f2d6c": "Iso",
+  "add6443a-41bd-e414-f6ad-e58d267f4e95": "Jett",
+  "601dbbe7-43ce-be57-2a40-4abd24953621": "KAY/O",
+  "1e58de9c-4950-5125-93e9-a0aee9f98746": "Killjoy",
+  "7c8a4701-4de6-9355-b254-e09bc2a34b72": "Miks",
+  "bb2a4828-46eb-8cd1-e765-15848195d751": "Neon",
+  "bb2a483e-4654-9406-1218-a616235b0d62": "Neon",
+  "8e253930-4c05-31dd-1b6c-968525494517": "Omen",
+  "8e253930-4c05-31dd-16ee-adacb8744f8b": "Omen",
+  "eb93336a-449b-9c1b-0a54-a891f7921d69": "Phoenix",
+  "eb9333ab-4054-7ac4-14d0-76ac36ab0ce6": "Phoenix",
+  "f94c3b30-42be-e959-889c-5aa313dba261": "Raze",
+  "a3bfb853-43b2-7238-a4f1-ad90e9e46bcc": "Reyna",
+  "569fdd95-4d10-43ab-ca70-79becc718b46": "Sage",
+  "6f2a04ca-43e0-be17-7f36-b3908627744d": "Skye",
+  "320b2a48-4d9b-a075-30f1-1f93a9b638fa": "Sova",
+  "ded3520f-4264-bfed-162d-b080e2abccf9": "Sova",
+  "b444168c-4e35-8076-db47-ef9bf368f384": "Tejo",
+  "b57f0980-4963-c36b-d8b4-028d7121287e": "Tejo",
+  "92eeef5d-43b5-1d4a-8d03-b3927a09034b": "Veto",
+  "707eab51-4836-f488-046a-cda6bf494859": "Viper",
+  "efba5359-4016-a1e5-7626-b1ae76895940": "Vyse",
+  "df222b40-4f51-4043-9831-27909339e6a0": "Vyse",
+  "df1cb487-4902-002e-5c17-d28e83e78588": "Waylay",
+  "7f94d92c-4234-0a36-9646-3a87eb8b5c89": "Yoru",
+};
+
+export function resolveAgentName(agentId?: string, fallback?: string): string {
+  if (fallback && fallback !== "Agent" && fallback.trim().length > 0) {
+    return fallback;
+  }
+  if (agentId) {
+    const mapped = VALORANT_AGENT_MAP[agentId.toLowerCase()];
+    if (mapped) return mapped;
+  }
+  return fallback || "Agent";
+}
+
 interface ToastMsg {
   id: number;
   text: string;
@@ -754,6 +808,90 @@ export default function App() {
       hour12: true,
     });
     return { dateStr, timeStr };
+  };
+
+  const openPlayerProfileFromCareer = (p: {
+    puuid?: string;
+    name?: string;
+    tag?: string;
+    team?: string;
+    agent_id?: string;
+    agent_name?: string;
+    rank_tier?: number;
+    rank_name?: string;
+    rr?: number;
+    kills?: number;
+    deaths?: number;
+    assists?: number;
+    score?: number;
+  }) => {
+    const matchPuuid = p.puuid?.toLowerCase();
+    const matchName = (p.name || "").toLowerCase();
+    let found = encounteredPlayers.find(
+      (ep) =>
+        (matchPuuid && ep.puuid && ep.puuid.toLowerCase() === matchPuuid) ||
+        (matchName && ep.name && ep.name.toLowerCase() === matchName)
+    );
+    if (!found) {
+      const isAlly = p.team === "Ally";
+      const isWin = selectedCareerMatch?.result === "VICTORY";
+      const isLoss = selectedCareerMatch?.result === "DEFEAT";
+      const resolvedAgent = resolveAgentName(p.agent_id, p.agent_name);
+      found = {
+        puuid: p.puuid || "",
+        name: p.name || "Player",
+        tag: p.tag || "",
+        is_hidden: false,
+        encounters_count: 1,
+        matches_as_ally: isAlly ? 1 : 0,
+        wins_as_ally: isAlly && isWin ? 1 : 0,
+        losses_as_ally: isAlly && isLoss ? 1 : 0,
+        matches_as_enemy: !isAlly ? 1 : 0,
+        wins_against: !isAlly && isWin ? 1 : 0,
+        losses_against: !isAlly && isLoss ? 1 : 0,
+        last_seen_timestamp: selectedCareerMatch?.timestamp || Date.now(),
+        last_seen_date_str: selectedCareerMatch?.date_str || "",
+        last_seen_time_str: selectedCareerMatch?.time_str || "",
+        last_seen_map: selectedCareerMatch?.map_name || "",
+        last_seen_agent_id: p.agent_id || "",
+        last_seen_agent_name: resolvedAgent,
+        last_rank_tier: p.rank_tier || 0,
+        last_rank_name: p.rank_name || "Unranked",
+        last_rr: p.rr || 0,
+        last_score_ally: selectedCareerMatch?.score_ally || 0,
+        last_score_enemy: selectedCareerMatch?.score_enemy || 0,
+        last_result: selectedCareerMatch?.result || "",
+        last_relationship: isAlly ? "PLAYED WITH" : "PLAYED AGAINST",
+        history: selectedCareerMatch
+          ? [
+              {
+                match_id: selectedCareerMatch.match_id,
+                map_name: selectedCareerMatch.map_name,
+                timestamp: selectedCareerMatch.timestamp,
+                date_str: selectedCareerMatch.date_str,
+                time_str: selectedCareerMatch.time_str,
+                gamemode: selectedCareerMatch.gamemode,
+                relationship: isAlly ? "PLAYED WITH" : "PLAYED AGAINST",
+                result: selectedCareerMatch.result,
+                score_ally: selectedCareerMatch.score_ally,
+                score_enemy: selectedCareerMatch.score_enemy,
+                agent_id: p.agent_id || "",
+                agent_name: resolvedAgent,
+                rank_tier: p.rank_tier || 0,
+                rank_name: p.rank_name || "Unranked",
+                rr: p.rr || 0,
+                kills: p.kills || 0,
+                deaths: p.deaths || 0,
+                assists: p.assists || 0,
+                score: p.score || 0,
+                is_win: isWin,
+              },
+            ]
+          : [],
+      };
+    }
+    setSelectedPlayerEncounter(found);
+    setActiveTab("players");
   };
 
   const [status, setStatus] = useState<StatusResponse>({
@@ -4224,6 +4362,33 @@ export default function App() {
             >
               <Users size={14} />
               <span>Players</span>
+              {(() => {
+                const isMatchConcluded =
+                  !roster ||
+                  roster.state === "CONCLUDED" ||
+                  roster.state === "NO_MATCH" ||
+                  status.match_state === "In Lobby" ||
+                  status.match_state.toUpperCase().includes("LOBBY") ||
+                  status.match_state.toUpperCase().includes("MENU") ||
+                  status.match_state === "In Queue";
+                const isLive = !isMatchConcluded && Boolean(
+                  roster &&
+                  (roster.state === "COREGAME" || roster.state === "PREGAME" || roster.state === "INGAME") &&
+                  (roster.ally_team.length > 0 || roster.enemy_team.length > 0)
+                );
+                if (!isLive || !roster) return null;
+                const hasEncountered = [...roster.ally_team, ...roster.enemy_team].some(
+                  (p) => !p.is_self && p.puuid && encounteredPlayers.some(
+                    (ep) => ep.puuid && ep.puuid.toLowerCase() === p.puuid.toLowerCase()
+                  )
+                );
+                return (
+                  <span
+                    className={`nav-live-dot ${hasEncountered ? "dot-bot-running" : "dot-bot-stopped"}`}
+                    data-tooltip={hasEncountered ? "Encountered Players Detected" : "No Encountered Players Detected"}
+                  />
+                );
+              })()}
             </button>
             <button
               className={`nav-btn ${activeTab === "shop" ? "active" : ""}`}
@@ -4702,7 +4867,14 @@ export default function App() {
                                       )}
                                     </div>
                                     <div className="career-player-meta">
-                                      <div className="career-player-name-line">
+                                      <div
+                                        className="career-player-name-line clickable-career-player"
+                                        title="Click to view profile in Players Directory"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          openPlayerProfileFromCareer(p);
+                                        }}
+                                      >
                                         <span className="career-gamename">{p.name || "Player"}</span>
                                         {p.tag && <span className="career-tagline">#{p.tag}</span>}
                                         {p.party_tag && (
@@ -5025,7 +5197,7 @@ export default function App() {
                                 <img
                                   className="player-hero-agent-img"
                                   src={`https://media.valorant-api.com/agents/${selectedPlayerEncounter.last_seen_agent_id}/displayicon.png`}
-                                  alt={selectedPlayerEncounter.last_seen_agent_name}
+                                  alt={resolveAgentName(selectedPlayerEncounter.last_seen_agent_id, selectedPlayerEncounter.last_seen_agent_name)}
                                 />
                               ) : (
                                 <div className="tracker-agent-placeholder">?</div>
@@ -5064,7 +5236,7 @@ export default function App() {
                               <div className="player-hero-last-seen-wrap">
                                 <div className="player-hero-last-seen-line">
                                   Last seen on <b>{selectedPlayerEncounter.last_seen_map}</b> as{" "}
-                                  <b>{selectedPlayerEncounter.last_seen_agent_name || "Agent"}</b>
+                                  <b>{resolveAgentName(selectedPlayerEncounter.last_seen_agent_id, selectedPlayerEncounter.last_seen_agent_name)}</b>
                                 </div>
                                 <div className="player-hero-last-time-line">
                                   {seenDate} {seenTime && `• ${seenTime}`}
@@ -5163,7 +5335,7 @@ export default function App() {
                                       <img
                                         className="player-hist-agent-avatar"
                                         src={`https://media.valorant-api.com/agents/${h.agent_id}/displayicon.png`}
-                                        alt={h.agent_name}
+                                        alt={resolveAgentName(h.agent_id, h.agent_name)}
                                       />
                                     ) : (
                                       <div className="tracker-agent-placeholder">?</div>
@@ -5179,7 +5351,7 @@ export default function App() {
                                     </div>
                                     <div className="player-hist-agent-name-row">
                                       <span className="player-hist-agent-name">
-                                        {h.agent_name || "Agent"}
+                                        {resolveAgentName(h.agent_id, h.agent_name)}
                                       </span>
                                       <span className="player-hist-meta-sep">•</span>
                                       <span className="player-hist-rank-text">
@@ -5317,8 +5489,18 @@ export default function App() {
                         );
                       }
 
+                      // Check if match is concluded or in lobby/menu/queue
+                      const isMatchConcluded =
+                        !roster ||
+                        roster.state === "CONCLUDED" ||
+                        roster.state === "NO_MATCH" ||
+                        status.match_state === "In Lobby" ||
+                        status.match_state.toUpperCase().includes("LOBBY") ||
+                        status.match_state.toUpperCase().includes("MENU") ||
+                        status.match_state === "In Queue";
+
                       // Check if a player is in the current live Tracker match
-                      const isMatchActive = Boolean(
+                      const isMatchActive = !isMatchConcluded && Boolean(
                         roster &&
                         (roster.state === "COREGAME" || roster.state === "PREGAME" || roster.state === "INGAME") &&
                         (roster.ally_team.length > 0 || roster.enemy_team.length > 0)
@@ -5385,7 +5567,7 @@ export default function App() {
                                       <img
                                         className="career-card-agent-img"
                                         src={`https://media.valorant-api.com/agents/${p.last_seen_agent_id}/displayicon.png`}
-                                        alt={p.last_seen_agent_name}
+                                        alt={resolveAgentName(p.last_seen_agent_id, p.last_seen_agent_name)}
                                       />
                                     ) : (
                                       <div className="tracker-agent-placeholder">?</div>

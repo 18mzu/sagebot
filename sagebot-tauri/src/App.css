@@ -5045,6 +5045,21 @@ input[type="number"] {
   white-space: nowrap;
 }
 
+.career-player-name-line.clickable-career-player {
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.15s ease;
+}
+
+.career-player-name-line.clickable-career-player:hover .career-gamename {
+  color: #38bdf8;
+  text-decoration: underline;
+}
+
+.career-player-name-line.clickable-career-player:hover .career-tagline {
+  color: #94a3b8;
+}
+
 .career-gamename {
   font-weight: 800;
   color: #f1f5f9;

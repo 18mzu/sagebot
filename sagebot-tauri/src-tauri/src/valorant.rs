@@ -958,7 +958,39 @@ pub fn resolve_agent_name_by_id(id: &str) -> String {
             return a.name;
         }
     }
-    id.to_string()
+    let lower = id.to_lowercase();
+    match lower.as_str() {
+        "ded3520f-4264-bfed-162d-b080e2abccf9" => "Sova",
+        "add6443a-41bd-e414-f6ad-e58d267f4e95" => "Jett",
+        "a3bfb854-4376-2d48-8377-93a26e38fb6f" => "Cypher",
+        "a3bfb853-43b2-7238-a4f1-ad90e9e46bcc" => "Reyna",
+        "569fdd95-4d10-43ab-ca70-79becc718b46" => "Sage",
+        "eb9333ab-4054-7ac4-14d0-76ac36ab0ce6" | "eb93336a-449b-9c1b-0a54-a891f7921d69" => "Phoenix",
+        "f94c3b30-42be-e959-889c-5aa313dba261" => "Raze",
+        "22697a3d-45bf-8dd7-4fec-84a9e28c69d7" => "Chamber",
+        "601dbbe7-43ce-be57-2a40-4abd24953621" => "KAY/O",
+        "6f2a04ca-43e0-be17-7f36-b3908627744d" => "Skye",
+        "117ed9e3-49f3-6512-3ccf-0cada7e3823b" => "Cypher",
+        "320b2a48-4d9b-a075-30f1-1f93a9b638fa" => "Sova",
+        "1e58de9c-4950-5125-93e9-a0aee9f98746" => "Killjoy",
+        "707eab51-4836-f488-046a-cda6bf494859" => "Viper",
+        "8e253930-4c05-31dd-16ee-adacb8744f8b" | "8e253930-4c05-31dd-1b6c-968525494517" => "Omen",
+        "b9f36430-4074-b290-eb81-0440ac023b4f" | "41fb69c1-4189-7b37-f117-bcaf1e96f1bf" | "95b78d77-474e-9714-2971-15c32582b04a" => "Astra",
+        "bb2a483e-4654-9406-1218-a616235b0d62" | "bb2a4828-46eb-8cd1-e765-15848195d751" => "Neon",
+        "7f94d92c-4234-0a36-9646-3a87eb8b5c89" => "Yoru",
+        "5f8d3a7f-467b-97f3-062c-13acf203c006" => "Breach",
+        "e370fa57-4757-3604-3648-499e1f642d3f" => "Gekko",
+        "cc8b64d8-4b25-4ff9-6e7f-37b4da43c235" => "Deadlock",
+        "0e38b510-41a8-5780-5e8f-568b2a4f2d6c" => "Iso",
+        "1dbf2edd-4729-0984-3115-ffb5dde52523" | "1dbf2edd-4729-0984-3115-daa5eed44993" => "Clove",
+        "df222b40-4f51-4043-9831-27909339e6a0" | "efba5359-4016-a1e5-7626-b1ae76895940" => "Vyse",
+        "b57f0980-4963-c36b-d8b4-028d7121287e" | "b444168c-4e35-8076-db47-ef9bf368f384" => "Tejo",
+        "ddd5a15c-4fbe-42fa-3789-11a55ca5ee04" => "Hush",
+        "df1cb487-4902-002e-5c17-d28e83e78588" => "Waylay",
+        "92eeef5d-43b5-1d4a-8d03-b3927a09034b" => "Veto",
+        "7c8a4701-4de6-9355-b254-e09bc2a34b72" => "Miks",
+        _ => "Agent",
+    }.to_string()
 }
 
 pub fn resolve_map_name(raw: &str) -> String {

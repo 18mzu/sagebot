@@ -67,7 +67,29 @@ pub fn load_encounters() -> HashMap<String, PlayerEncounter> {
         return HashMap::new();
     }
     if let Ok(content) = std::fs::read_to_string(&path) {
-        if let Ok(map) = serde_json::from_str::<HashMap<String, PlayerEncounter>>(&content) {
+        if let Ok(mut map) = serde_json::from_str::<HashMap<String, PlayerEncounter>>(&content) {
+            let mut modified = false;
+            for enc in map.values_mut() {
+                if enc.last_seen_agent_name.is_empty() || enc.last_seen_agent_name == "Agent" {
+                    let r = crate::valorant::resolve_agent_name_by_id(&enc.last_seen_agent_id);
+                    if !r.is_empty() && r != "Agent" && !r.eq_ignore_ascii_case(&enc.last_seen_agent_id) {
+                        enc.last_seen_agent_name = r;
+                        modified = true;
+                    }
+                }
+                for h in &mut enc.history {
+                    if h.agent_name.is_empty() || h.agent_name == "Agent" {
+                        let r = crate::valorant::resolve_agent_name_by_id(&h.agent_id);
+                        if !r.is_empty() && r != "Agent" && !r.eq_ignore_ascii_case(&h.agent_id) {
+                            h.agent_name = r;
+                            modified = true;
+                        }
+                    }
+                }
+            }
+            if modified {
+                let _ = save_encounters(&map);
+            }
             return map;
         }
     }
@@ -117,6 +139,14 @@ pub fn rebuild_from_career() {
                 "PLAYED AGAINST".to_string()
             };
 
+            let mut resolved_agent = p.agent_name.clone();
+            if resolved_agent.is_empty() || resolved_agent == "Agent" {
+                let r = crate::valorant::resolve_agent_name_by_id(&p.agent_id);
+                if !r.is_empty() && r != "Agent" && !r.eq_ignore_ascii_case(&p.agent_id) {
+                    resolved_agent = r;
+                }
+            }
+
             let hist_entry = EncounterMatchHistory {
                 match_id: cm.match_id.clone(),
                 timestamp: cm.timestamp,
@@ -129,7 +159,7 @@ pub fn rebuild_from_career() {
                 score_ally: cm.score_ally,
                 score_enemy: cm.score_enemy,
                 agent_id: p.agent_id.clone(),
-                agent_name: p.agent_name.clone(),
+                agent_name: resolved_agent.clone(),
                 rank_tier: p.rank_tier,
                 rank_name: p.rank_name.clone(),
                 rr: p.rr,
@@ -157,7 +187,7 @@ pub fn rebuild_from_career() {
                 last_seen_time_str: cm.time_str.clone(),
                 last_seen_map: cm.map_name.clone(),
                 last_seen_agent_id: p.agent_id.clone(),
-                last_seen_agent_name: p.agent_name.clone(),
+                last_seen_agent_name: resolved_agent.clone(),
                 last_rank_tier: p.rank_tier,
                 last_rank_name: p.rank_name.clone(),
                 last_rr: p.rr,
@@ -180,7 +210,7 @@ pub fn rebuild_from_career() {
                 enc.last_seen_time_str = cm.time_str.clone();
                 enc.last_seen_map = cm.map_name.clone();
                 enc.last_seen_agent_id = p.agent_id.clone();
-                enc.last_seen_agent_name = p.agent_name.clone();
+                enc.last_seen_agent_name = resolved_agent.clone();
                 enc.last_rank_tier = p.rank_tier;
                 enc.last_rank_name = p.rank_name.clone();
                 enc.last_rr = p.rr;
