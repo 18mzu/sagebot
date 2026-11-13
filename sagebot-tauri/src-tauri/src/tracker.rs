@@ -1783,7 +1783,11 @@ async fn parse_coregame_roster(
         if let Ok(ljson) = lresp.json::<serde_json::Value>().await {
             if let Some(loadouts) = ljson.get("Loadouts").and_then(|l| l.as_array()) {
                 for item in loadouts {
-                    if let Some(items) = item.get("Loadout").and_then(|l| l.get("Items")) {
+                    let items_opt = item.get("Loadout")
+                        .and_then(|l| l.get("Items"))
+                        .or_else(|| item.get("Items"))
+                        .or_else(|| item.get("Loadout"));
+                    if let Some(items) = items_opt {
                         if let Some(sub) = item.get("Subject").and_then(|s| s.as_str()) {
                             loadouts_by_sub.insert(sub.to_string(), items.clone());
                         }
@@ -1873,6 +1877,12 @@ async fn parse_coregame_roster(
             party_map.get(&puuid).cloned().unwrap_or_default()
         };
 
+        // Skins items for this player
+        let loadout_items = loadouts_by_sub.get(&puuid)
+            .or_else(|| loadouts_by_char.get(&char_id))
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+
         // If player stats were already fetched and cached for this exact match, reuse them
         let cached_entry = cached_players.get(&puuid.to_lowercase()).cloned();
         let has_cached_stats = cached_entry.as_ref().map(|cp| {
@@ -1891,16 +1901,23 @@ async fn parse_coregame_roster(
             if !player_name.starts_with("Player#") && !player_name.starts_with("Player ") {
                 cp.name = player_name.clone();
             }
+
+            // In COREGAME, always resolve live skins if cached was TBD or weapon_skins is empty
+            if cp.primary_skin == "TBD" || cp.weapon_skins.is_empty() {
+                let (skin_name, w_skins, a_skins) = extract_player_skins(&loadout_items).await;
+                if skin_name != "TBD" {
+                    cp.primary_skin = skin_name;
+                    cp.weapon_skins = w_skins;
+                    cp.all_skins = a_skins;
+                } else {
+                    cp.primary_skin = "Standard".to_string();
+                }
+            }
+
             let c_mids: Vec<String> = cp.recent_matches.iter().map(|m| m.match_id.clone()).collect();
             pre_resolved.push((cp, c_mids));
             continue;
         }
-
-        // Skins
-        let loadout_items = loadouts_by_sub.get(&puuid)
-            .or_else(|| loadouts_by_char.get(&char_id))
-            .cloned()
-            .unwrap_or(serde_json::Value::Null);
 
         let c = client.clone();
         let pd = pd_host.to_string();
@@ -1910,7 +1927,10 @@ async fn parse_coregame_roster(
         let act_season = active_season_id.clone();
 
         futures.push(async move {
-            let (primary_skin, weapon_skins, all_skins) = extract_player_skins(&loadout_items).await;
+            let (mut primary_skin, weapon_skins, all_skins) = extract_player_skins(&loadout_items).await;
+            if primary_skin == "TBD" {
+                primary_skin = "Standard".to_string();
+            }
             let pdata = fetch_player_full_stats(&c, &pd, &puuid, &tok, &j, &ver, &act_season, level).await;
 
             let tracked = TrackedPlayer {
@@ -2112,7 +2132,11 @@ async fn parse_pregame_roster(
         if let Ok(ljson) = lresp.json::<serde_json::Value>().await {
             if let Some(loadouts) = ljson.get("Loadouts").and_then(|l| l.as_array()) {
                 for item in loadouts {
-                    if let Some(items) = item.get("Loadout").and_then(|l| l.get("Items")) {
+                    let items_opt = item.get("Loadout")
+                        .and_then(|l| l.get("Items"))
+                        .or_else(|| item.get("Items"))
+                        .or_else(|| item.get("Loadout"));
+                    if let Some(items) = items_opt {
                         if let Some(sub) = item.get("Subject").and_then(|s| s.as_str()) {
                             loadouts_by_sub.insert(sub.to_string(), items.clone());
                         }

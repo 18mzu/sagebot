@@ -3733,11 +3733,15 @@ export default function App() {
     const tagLine = hasTag ? parts[1] : "";
 
     const getDisplayedSkin = (p: TrackedPlayer) => {
-      if (roster?.state === "PREGAME" || p.primary_skin === "TBD") {
+      // TBD is strictly for Agent Select (PREGAME)
+      if (roster?.state === "PREGAME") {
         return "TBD";
       }
       if (p.weapon_skins && p.weapon_skins[selectedWeaponSkin]) {
         return p.weapon_skins[selectedWeaponSkin];
+      }
+      if (p.primary_skin && p.primary_skin !== "TBD") {
+        return p.primary_skin;
       }
       const cap = selectedWeaponSkin.charAt(0).toUpperCase() + selectedWeaponSkin.slice(1);
       return `Standard ${cap}`;
@@ -5389,10 +5393,12 @@ export default function App() {
                                   </div>
                                   <div className="player-card-identity-col">
                                     <div className="player-card-name-row" title={`${p.name}${p.tag ? ` #${p.tag}` : ""}`}>
-                                      <span className="player-card-gamename">{p.name}</span>
-                                      {p.tag && (
-                                        <span className="player-card-tagline">#{p.tag}</span>
-                                      )}
+                                      <div className="player-card-name-scroll">
+                                        <span className="player-card-gamename">{p.name}</span>
+                                        {p.tag && (
+                                          <span className="player-card-tagline">#{p.tag}</span>
+                                        )}
+                                      </div>
                                     </div>
                                     <div className="player-card-rank-subline">
                                       {p.last_rank_tier > 0 && (

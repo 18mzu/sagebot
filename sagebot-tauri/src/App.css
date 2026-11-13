@@ -5278,7 +5278,10 @@ input[type="number"] {
   align-items: center;
   gap: 12px;
   padding-left: 14px;
-  min-width: 220px;
+  width: 250px;
+  min-width: 250px;
+  max-width: 250px;
+  flex: 0 0 250px;
   z-index: 1;
 }
 
@@ -5286,25 +5289,33 @@ input[type="number"] {
   display: flex;
   flex-direction: column;
   gap: 3px;
+  width: calc(100% - 54px);
   min-width: 0;
+  overflow: hidden;
 }
 
 .player-card-name-row {
   display: flex;
   align-items: baseline;
   gap: 4px;
-  white-space: nowrap;
+  width: 100%;
   overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 240px;
+  white-space: nowrap;
+  position: relative;
+}
+
+.player-card-name-scroll {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  white-space: nowrap;
+  will-change: transform;
 }
 
 .player-card-gamename {
   font-size: 13px;
   font-weight: 800;
   color: #f8fafc;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -5313,6 +5324,20 @@ input[type="number"] {
   font-weight: 700;
   color: #64748b;
   flex-shrink: 0;
+}
+
+/* Smooth marquee roll on hover when username + tag overflows 160px */
+.player-encounter-card:hover .player-card-name-scroll {
+  animation: player-name-roll 4s ease-in-out infinite alternate;
+}
+
+@keyframes player-name-roll {
+  0%, 20% {
+    transform: translateX(0);
+  }
+  80%, 100% {
+    transform: translateX(min(0px, calc(160px - 100% - 6px)));
+  }
 }
 
 .player-card-rank-subline {
@@ -5613,8 +5638,11 @@ input[type="number"] {
   align-items: center;
   gap: 12px;
   padding-left: 14px;
+  width: 250px;
+  min-width: 250px;
+  max-width: 250px;
+  flex: 0 0 250px;
   z-index: 1;
-  min-width: 220px;
 }
 
 .player-hist-agent-avatar-wrap {
