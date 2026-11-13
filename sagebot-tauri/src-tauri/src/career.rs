@@ -261,10 +261,24 @@ pub fn load_career_matches() -> Vec<CareerMatch> {
     Vec::new()
 }
 
-pub fn save_career_match(m: CareerMatch) -> Result<(), String> {
-    // Record into encounter memory
-    crate::encounter_memory::record_match(&m);
+pub fn delete_match_by_id(match_id: &str) -> Result<Vec<CareerMatch>, String> {
+    let mut matches = load_career_matches();
+    matches.retain(|m| m.match_id != match_id);
+    let json = serde_json::to_string_pretty(&matches)
+        .map_err(|e| format!("Failed to serialize career matches: {}", e))?;
+    let path = career_file_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    std::fs::write(&path, json)
+        .map_err(|e| format!("Failed to write career.json: {}", e))?;
 
+    // Rebuild encounter memory from remaining matches
+    crate::encounter_memory::rebuild_from_career();
+    Ok(load_career_matches())
+}
+
+pub fn save_career_match(m: CareerMatch) -> Result<(), String> {
     let mut matches = load_career_matches();
     matches.retain(|existing| existing.match_id != m.match_id);
     matches.insert(0, m);
@@ -281,13 +295,15 @@ pub fn save_career_match(m: CareerMatch) -> Result<(), String> {
     }
     std::fs::write(&path, json)
         .map_err(|e| format!("Failed to write career.json: {}", e))?;
+
+    // Rebuild encounter memory from career matches
+    crate::encounter_memory::rebuild_from_career();
     Ok(())
 }
 
 pub fn save_career_matches(batch: &[CareerMatch]) -> Result<(), String> {
     let mut matches = load_career_matches();
     for m in batch {
-        crate::encounter_memory::record_match(m);
         matches.retain(|existing| existing.match_id != m.match_id);
         matches.push(m.clone());
     }
@@ -303,6 +319,8 @@ pub fn save_career_matches(batch: &[CareerMatch]) -> Result<(), String> {
     }
     std::fs::write(&path, json)
         .map_err(|e| format!("Failed to write career.json: {}", e))?;
+
+    crate::encounter_memory::rebuild_from_career();
     Ok(())
 }
 

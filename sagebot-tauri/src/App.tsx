@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useRef, Fragment } from "react";
+import { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -386,6 +386,7 @@ type TabType =
   | "main"
   | "tracker"
   | "career"
+  | "players"
   | "shop"
   | "config"
   | "agents"
@@ -399,10 +400,34 @@ type TabType =
   | "settings"
   | "info";
 
+export interface EncounterMatchHistory {
+  match_id: string;
+  timestamp: number;
+  date_str: string;
+  time_str: string;
+  map_name: string;
+  gamemode: string;
+  relationship: string; // "PLAYED WITH" or "PLAYED AGAINST"
+  result: string;       // "VICTORY", "DEFEAT", "DRAW"
+  score_ally: number;
+  score_enemy: number;
+  agent_id: string;
+  agent_name: string;
+  rank_tier: number;
+  rank_name: string;
+  rr: number;
+  kills: number;
+  deaths: number;
+  assists: number;
+  score: number;
+  is_win: boolean;
+}
+
 export interface PlayerEncounter {
   puuid: string;
   name: string;
   tag: string;
+  is_hidden: boolean;
   encounters_count: number;
   matches_as_ally: number;
   wins_as_ally: number;
@@ -411,9 +436,19 @@ export interface PlayerEncounter {
   wins_against: number;
   losses_against: number;
   last_seen_timestamp: number;
+  last_seen_date_str: string;
+  last_seen_time_str: string;
   last_seen_map: string;
-  last_seen_agent: string;
-  notes: string;
+  last_seen_agent_id: string;
+  last_seen_agent_name: string;
+  last_rank_tier: number;
+  last_rank_name: string;
+  last_rr: number;
+  last_score_ally: number;
+  last_score_enemy: number;
+  last_result: string;
+  last_relationship: string;
+  history?: EncounterMatchHistory[];
 }
 
 export interface CareerHeadToHead {
@@ -552,28 +587,6 @@ const MAP_SPLASHES: Record<string, string> = {
   gauntlet: "https://media.valorant-api.com/maps/dd3a1cd9-41b1-50ea-3bd6-a7bb3c5978bd/splash.png",
 };
 
-const MAP_DISPLAY_ICONS: Record<string, string> = {
-  ascent: "https://media.valorant-api.com/maps/7eaecc1b-4337-bbf6-6ab9-04b8f06b3319/displayicon.png",
-  bind: "https://media.valorant-api.com/maps/2c9d57ec-4431-9c5e-2939-8f9ef6dd5cba/displayicon.png",
-  breeze: "https://media.valorant-api.com/maps/2fb9a4fd-47b8-4e7d-a969-74b4046ebd53/displayicon.png",
-  fracture: "https://media.valorant-api.com/maps/b529448b-4d60-346e-e89e-00a4c527a405/displayicon.png",
-  haven: "https://media.valorant-api.com/maps/2bee0dc9-4ffe-519b-1cbd-7fbe763a6047/displayicon.png",
-  icebox: "https://media.valorant-api.com/maps/e2ad5c54-4114-a870-9641-8ea21279579a/displayicon.png",
-  lotus: "https://media.valorant-api.com/maps/2fe4ed3a-450a-948b-6d6b-e89a78e680a9/displayicon.png",
-  pearl: "https://media.valorant-api.com/maps/fd267378-4d1d-484f-ff52-77821ed10dc2/displayicon.png",
-  split: "https://media.valorant-api.com/maps/d960549e-485c-e861-8d71-aa9d1aed12a2/displayicon.png",
-  sunset: "https://media.valorant-api.com/maps/92584fbe-486a-b1b2-9faa-39b0f486b498/displayicon.png",
-  abyss: "https://media.valorant-api.com/maps/224b0a95-48b9-f703-1bd8-67aca101a61f/displayicon.png",
-  summit: "https://media.valorant-api.com/maps/756da597-416b-c0f2-f47b-afbdf28670bc/displayicon.png",
-  corrode: "https://media.valorant-api.com/maps/1c18ab1f-420d-0d8b-71d0-77ad3c439115/displayicon.png",
-  district: "https://media.valorant-api.com/maps/690b3ed2-4dff-945b-8223-6da834e30d24/displayicon.png",
-  kasbah: "https://media.valorant-api.com/maps/12452a9d-48c3-0b02-e7eb-0381c3520404/displayicon.png",
-  drift: "https://media.valorant-api.com/maps/2c09d728-42d5-30d8-43dc-96a05cc7ee9d/displayicon.png",
-  glitch: "https://media.valorant-api.com/maps/d6336a5a-428f-c591-98db-c8a291159134/displayicon.png",
-  piazza: "https://media.valorant-api.com/maps/de28aa9b-4cbe-1003-320e-6cb3ec309557/displayicon.png",
-  gauntlet: "https://media.valorant-api.com/maps/dd3a1cd9-41b1-50ea-3bd6-a7bb3c5978bd/displayicon.png",
-};
-
 interface ToastMsg {
   id: number;
   text: string;
@@ -660,8 +673,12 @@ export default function App() {
   // Career tab state
   const [careerMatches, setCareerMatches] = useState<CareerMatch[]>([]);
   const [selectedCareerMatch, setSelectedCareerMatch] = useState<CareerMatch | null>(null);
-  const [careerSubtab, setCareerSubtab] = useState<"scoreboard" | "headtohead" | "timeline">("scoreboard");
-  const [selectedRoundIndex, setSelectedRoundIndex] = useState<number>(0);
+
+  // Players directory tab state
+  const [encounteredPlayers, setEncounteredPlayers] = useState<PlayerEncounter[]>([]);
+  const [selectedPlayerEncounter, setSelectedPlayerEncounter] = useState<PlayerEncounter | null>(null);
+  const [playerSearchQuery, setPlayerSearchQuery] = useState<string>("");
+  const [isLoadingPlayers, setIsLoadingPlayers] = useState<boolean>(false);
 
   const loadCareerMatches = async () => {
     try {
@@ -674,14 +691,33 @@ export default function App() {
     }
   };
 
+  const loadEncounterMemory = async () => {
+    setIsLoadingPlayers(true);
+    try {
+      const list = await invoke<PlayerEncounter[]>("get_encounter_memory");
+      if (list) {
+        setEncounteredPlayers(list);
+        setSelectedPlayerEncounter((prev) => {
+          if (!prev) return null;
+          return list.find((p) => p.puuid.toLowerCase() === prev.puuid.toLowerCase()) || null;
+        });
+      }
+    } catch (e) {
+      console.error("Failed to load encounter memory:", e);
+    } finally {
+      setIsLoadingPlayers(false);
+    }
+  };
+
   const deleteCareerMatch = async (matchId: string) => {
     try {
-      const updated = await invoke<CareerMatch[]>("delete_career_match", { matchId });
+      const updated = await invoke<CareerMatch[]>("delete_career_match", { match_id: matchId, matchId });
       if (updated) {
         setCareerMatches(updated);
         if (selectedCareerMatch?.match_id === matchId) {
           setSelectedCareerMatch(null);
         }
+        await loadEncounterMemory();
         showToast("Match removed from Career.");
       }
     } catch (e) {
@@ -2221,18 +2257,23 @@ export default function App() {
     };
   }, [isRebindingMain, isRebindingAfk]);
 
-  // Live Match Tracker & Career initial fetch when switching tabs
+  // Live Match Tracker, Career & Players initial fetch when switching tabs
   useEffect(() => {
     if (activeTab === "tracker" && !roster) {
       fetchRoster();
     }
     if (activeTab === "career") {
       loadCareerMatches();
+      loadEncounterMemory();
+    }
+    if (activeTab === "players") {
+      loadEncounterMemory();
     }
   }, [activeTab]);
 
   useEffect(() => {
     loadCareerMatches();
+    loadEncounterMemory();
   }, []);
 
   // Live Storefront countdown ticker (disabled in Low Detail mode or when not viewing shop)
@@ -3723,20 +3764,6 @@ export default function App() {
                   {tagLine && <span className="tracker-tagline">#{tagLine}</span>}
                 </span>
                 <div className="tracker-player-badges">
-                  {player.encounter && (
-                    <span
-                      className={`career-encounter-mini-pill ${
-                        player.encounter.matches_as_ally >= player.encounter.matches_as_enemy
-                          ? "enc-ally"
-                          : "enc-enemy"
-                      }`}
-                      data-tooltip={`Met ${player.encounter.encounters_count}x (${player.encounter.wins_as_ally}W-${player.encounter.losses_as_ally}L as Ally, ${player.encounter.wins_against}W-${player.encounter.losses_against}L as Enemy) • Last seen on ${player.encounter.last_seen_map} as ${player.encounter.last_seen_agent}`}
-                      data-tooltip-pos="bottom"
-                    >
-                      {player.encounter.matches_as_ally >= player.encounter.matches_as_enemy ? "🤝 Met " : "⚔️ Met "}
-                      {player.encounter.encounters_count}x
-                    </span>
-                  )}
                   {player.is_incognito && (cleanRawName.startsWith("Player ") || cleanRawName === "Player" || !hasTag) && (
                     <span
                       className="tracker-badge-incognito"
@@ -4156,6 +4183,20 @@ export default function App() {
               )}
             </button>
             <button
+              className={`nav-btn ${activeTab === "players" ? "active" : ""}`}
+              onClick={() => {
+                setActiveTab("players");
+                setSelectedPlayerEncounter(null);
+                loadEncounterMemory();
+              }}
+            >
+              <Users size={14} />
+              <span>Players</span>
+              {encounteredPlayers.length > 0 && (
+                <span className="career-count-badge">{encounteredPlayers.length}</span>
+              )}
+            </button>
+            <button
               className={`nav-btn ${activeTab === "shop" ? "active" : ""}`}
               onClick={() => {
                 setActiveTab("shop");
@@ -4523,149 +4564,121 @@ export default function App() {
                     </div>
 
                     {/* BIG HEADER BANNER: 11 DEFEAT 13 */}
-                    <div className="career-detail-hero">
-                      <div className="career-hero-score-block">
-                        <span className="career-score-ally">{selectedCareerMatch.score_ally}</span>
-                        <span
-                          className={`career-result-pill ${
-                            selectedCareerMatch.result === "VICTORY"
-                              ? "res-win"
-                              : selectedCareerMatch.result === "DEFEAT"
-                              ? "res-loss"
-                              : "res-draw"
-                          }`}
+                    {(() => {
+                      const heroSplashUrl = MAP_SPLASHES[selectedCareerMatch.map_name.toLowerCase()] || "";
+                      return (
+                        <div
+                          className="career-detail-hero"
+                          style={{
+                            backgroundImage: heroSplashUrl
+                              ? `linear-gradient(to right, rgba(15, 23, 42, 0.95) 0%, rgba(15, 23, 42, 0.70) 50%, rgba(15, 23, 42, 0.85) 100%), url(${heroSplashUrl})`
+                              : undefined,
+                            backgroundSize: "cover",
+                            backgroundPosition: "center right",
+                          }}
                         >
-                          {selectedCareerMatch.result}
-                        </span>
-                        <span className="career-score-enemy">{selectedCareerMatch.score_enemy}</span>
-                      </div>
-                      <div className="career-hero-meta-block">
-                        <span className="career-meta-date">{selectedCareerMatch.date_str}</span>
-                        <span className="career-meta-dot">•</span>
-                        <span className="career-meta-mode">{selectedCareerMatch.gamemode.toUpperCase()}</span>
-                        <span className="career-meta-dot">•</span>
-                        <span className="career-meta-map">MAP - {selectedCareerMatch.map_name.toUpperCase()}</span>
-                        {selectedCareerMatch.duration_seconds > 0 && (
-                          <>
-                            <span className="career-meta-dot">•</span>
-                            <span className="career-meta-duration">
-                              {Math.floor(selectedCareerMatch.duration_seconds / 60)}:
-                              {(selectedCareerMatch.duration_seconds % 60).toString().padStart(2, "0")}
+                          <div className="career-hero-score-block">
+                            <span className="career-score-ally">{selectedCareerMatch.score_ally}</span>
+                            <span
+                              className={`career-result-pill ${selectedCareerMatch.result === "VICTORY"
+                                ? "res-win"
+                                : selectedCareerMatch.result === "DEFEAT"
+                                  ? "res-loss"
+                                  : "res-draw"
+                                }`}
+                            >
+                              {selectedCareerMatch.result}
                             </span>
-                          </>
-                        )}
-                      </div>
-                    </div>
+                            <span className="career-score-enemy">{selectedCareerMatch.score_enemy}</span>
+                          </div>
+                          <div className="career-hero-meta-block">
+                            <span className="career-meta-date">{selectedCareerMatch.date_str}</span>
+                            <span className="career-meta-dot">•</span>
+                            <span className="career-meta-mode">{selectedCareerMatch.gamemode.toUpperCase()}</span>
+                            <span className="career-meta-dot">•</span>
+                            <span className="career-meta-map">MAP - {selectedCareerMatch.map_name.toUpperCase()}</span>
+                            {selectedCareerMatch.duration_seconds > 0 && (
+                              <>
+                                <span className="career-meta-dot">•</span>
+                                <span className="career-meta-duration">
+                                  {Math.floor(selectedCareerMatch.duration_seconds / 60)}:
+                                  {(selectedCareerMatch.duration_seconds % 60).toString().padStart(2, "0")}
+                                </span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })()}
 
-                    {/* SUB-TABS (SCOREBOARD | HEAD TO HEAD | TIMELINE) */}
-                    <div className="career-subtabs-bar">
-                      <button
-                        type="button"
-                        className={`career-subtab ${careerSubtab === "scoreboard" ? "active" : ""}`}
-                        onClick={() => setCareerSubtab("scoreboard")}
-                      >
-                        SCOREBOARD
-                      </button>
-                      <button
-                        type="button"
-                        className={`career-subtab ${careerSubtab === "headtohead" ? "active" : ""}`}
-                        onClick={() => setCareerSubtab("headtohead")}
-                      >
-                        HEAD TO HEAD
-                      </button>
-                      <button
-                        type="button"
-                        className={`career-subtab ${careerSubtab === "timeline" ? "active" : ""}`}
-                        onClick={() => setCareerSubtab("timeline")}
-                      >
-                        TIMELINE
-                      </button>
-                    </div>
+                    {/* SCOREBOARD */}
+                    <div className="career-scoreboard-table-wrap">
+                      <table className="career-table">
+                        <thead>
+                          <tr>
+                            <th style={{ width: "210px", textAlign: "left" }}>PLAYER &amp; MATCH RANK</th>
+                            <th style={{ textAlign: "center", width: "125px" }}>PERFORMANCE SCORE</th>
+                            <th style={{ textAlign: "center", width: "45px" }}>K</th>
+                            <th style={{ textAlign: "center", width: "45px" }}>D</th>
+                            <th style={{ textAlign: "center", width: "45px" }}>A</th>
+                            <th style={{ textAlign: "center", width: "65px" }}>K/D</th>
+                            <th style={{ textAlign: "center", width: "70px" }}>HS%</th>
+                            <th style={{ textAlign: "center", width: "85px" }}>FIRST BLOODS</th>
+                            <th style={{ textAlign: "center", width: "85px" }}>MULTI KILLS</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {selectedCareerMatch.players.map((p, idx) => {
+                            const isAlly = p.team === "Ally";
+                            const partyClass = p.party_tag
+                              ? `party-${p.party_tag.toLowerCase().replace(/[^a-z0-9]/g, "")}`
+                              : "";
 
-                    {/* TAB CONTENT: 1. SCOREBOARD */}
-                    {careerSubtab === "scoreboard" && (
-                      <div className="career-scoreboard-table-wrap">
-                        <table className="career-table">
-                          <thead>
-                            <tr>
-                              <th style={{ width: "210px", textAlign: "left" }}>PLAYER &amp; MATCH RANK</th>
-                              <th style={{ textAlign: "center", width: "125px" }}>PERFORMANCE SCORE</th>
-                              <th style={{ textAlign: "center", width: "45px" }}>K</th>
-                              <th style={{ textAlign: "center", width: "45px" }}>D</th>
-                              <th style={{ textAlign: "center", width: "45px" }}>A</th>
-                              <th style={{ textAlign: "center", width: "65px" }}>K/D</th>
-                              <th style={{ textAlign: "center", width: "70px" }}>HS%</th>
-                              <th style={{ textAlign: "center", width: "85px" }}>FIRST BLOODS</th>
-                              <th style={{ textAlign: "center", width: "85px" }}>MULTI KILLS</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {selectedCareerMatch.players.map((p, idx) => {
-                              const isAlly = p.team === "Ally";
-                              const partyClass = p.party_tag
-                                ? `party-${p.party_tag.toLowerCase().replace(/[^a-z0-9]/g, "")}`
-                                : "";
-
-                              return (
-                                <tr
-                                  key={p.puuid || idx}
-                                  className={`career-row ${isAlly ? "career-ally-row" : "career-enemy-row"} ${
-                                    p.is_self ? "career-self-row" : ""
+                            return (
+                              <tr
+                                key={p.puuid || idx}
+                                className={`career-row ${isAlly ? "career-ally-row" : "career-enemy-row"} ${p.is_self ? "career-self-row" : ""
                                   }`}
-                                >
-                                  {/* PLAYER & MATCH RANK */}
-                                  <td>
-                                    <div className="career-player-cell">
-                                      {p.party_tag ? (
-                                        <div
-                                          className={`party-indicator-capsule ${partyClass}`}
-                                          data-tooltip={p.party_tag}
+                              >
+                                {/* PLAYER & MATCH RANK */}
+                                <td>
+                                  <div className="career-player-cell">
+                                    {p.party_tag ? (
+                                      <div
+                                        className={`party-indicator-capsule ${partyClass}`}
+                                        data-tooltip={p.party_tag}
+                                      />
+                                    ) : (
+                                      <div className="party-indicator-capsule-spacer" />
+                                    )}
+                                    <div
+                                      className="tracker-agent-avatar-wrap"
+                                      data-tooltip={p.agent_name || "Agent"}
+                                      data-tooltip-pos="right"
+                                    >
+                                      {p.agent_id ? (
+                                        <img
+                                          className="tracker-agent-img"
+                                          src={`https://media.valorant-api.com/agents/${p.agent_id}/displayicon.png`}
+                                          alt=""
+                                          onError={(e) => {
+                                            (e.currentTarget as HTMLImageElement).style.display = "none";
+                                          }}
                                         />
                                       ) : (
-                                        <div className="party-indicator-capsule-spacer" />
+                                        <div className="tracker-agent-placeholder">?</div>
                                       )}
-                                      <div
-                                        className="tracker-agent-avatar-wrap"
-                                        data-tooltip={p.agent_name || "Agent"}
-                                        data-tooltip-pos="right"
-                                      >
-                                        {p.agent_id ? (
-                                          <img
-                                            className="tracker-agent-img"
-                                            src={`https://media.valorant-api.com/agents/${p.agent_id}/displayicon.png`}
-                                            alt=""
-                                            onError={(e) => {
-                                              (e.currentTarget as HTMLImageElement).style.display = "none";
-                                            }}
-                                          />
-                                        ) : (
-                                          <div className="tracker-agent-placeholder">?</div>
+                                    </div>
+                                    <div className="career-player-meta">
+                                      <div className="career-player-name-line">
+                                        <span className="career-gamename">{p.name || "Player"}</span>
+                                        {p.tag && <span className="career-tagline">#{p.tag}</span>}
+                                        {p.party_tag && (
+                                          <span className={`career-party-mini-pill ${partyClass}`}>
+                                            {p.party_tag}
+                                          </span>
                                         )}
                                       </div>
-                                      <div className="career-player-meta">
-                                        <div className="career-player-name-line">
-                                          <span className="career-gamename">{p.name || "Player"}</span>
-                                          {p.tag && <span className="career-tagline">#{p.tag}</span>}
-                                          {p.party_tag && (
-                                            <span className={`career-party-mini-pill ${partyClass}`}>
-                                              {p.party_tag}
-                                            </span>
-                                          )}
-                                          {p.encounter && (
-                                            <span
-                                              className={`career-encounter-mini-pill ${
-                                                p.encounter.matches_as_ally >= p.encounter.matches_as_enemy
-                                                  ? "enc-ally"
-                                                  : "enc-enemy"
-                                              }`}
-                                              data-tooltip={`Met ${p.encounter.encounters_count}x (${p.encounter.wins_as_ally}W-${p.encounter.losses_as_ally}L as Ally, ${p.encounter.wins_against}W-${p.encounter.losses_against}L as Enemy) • Last seen on ${p.encounter.last_seen_map} as ${p.encounter.last_seen_agent}`}
-                                              data-tooltip-pos="bottom"
-                                            >
-                                              {p.encounter.matches_as_ally >= p.encounter.matches_as_enemy ? "🤝 Met " : "⚔️ Met "}
-                                              {p.encounter.encounters_count}x
-                                            </span>
-                                          )}
-                                        </div>
                                         <div
                                           className="tracker-player-rank-subline"
                                           data-tooltip={
@@ -4732,8 +4745,8 @@ export default function App() {
                                           p.headshot_percent >= 30
                                             ? "#10b981"
                                             : p.headshot_percent >= 20
-                                            ? "#e2e8f0"
-                                            : "#94a3b8",
+                                              ? "#e2e8f0"
+                                              : "#94a3b8",
                                       }}
                                     >
                                       {p.headshot_percent > 0 ? `${p.headshot_percent}%` : "—"}
@@ -4757,425 +4770,7 @@ export default function App() {
                           </tbody>
                         </table>
                       </div>
-                    )}
 
-                    {/* TAB CONTENT: 2. HEAD TO HEAD */}
-                    {careerSubtab === "headtohead" && (
-                      <div className="career-h2h-container">
-                        {selectedCareerMatch.head_to_head && selectedCareerMatch.head_to_head.length > 0 ? (
-                          selectedCareerMatch.head_to_head.map((duel) => {
-                            const isDuelWin = duel.kills_on_enemy > duel.deaths_to_enemy;
-                            const isDuelLoss = duel.deaths_to_enemy > duel.kills_on_enemy;
-                            const netDmg = duel.damage_dealt - duel.damage_taken;
-
-                            return (
-                              <div
-                                key={duel.enemy_puuid}
-                                className={`career-h2h-card ${
-                                  isDuelWin ? "h2h-win" : isDuelLoss ? "h2h-loss" : "h2h-draw"
-                                }`}
-                              >
-                                {/* Left: You */}
-                                <div className="career-h2h-side career-h2h-you">
-                                  <div className="career-h2h-agent-avatar">
-                                    <img
-                                      src={`https://media.valorant-api.com/agents/${selectedCareerMatch.my_agent_id}/displayicon.png`}
-                                      alt=""
-                                      onError={(e) => {
-                                        (e.currentTarget as HTMLImageElement).style.display = "none";
-                                      }}
-                                    />
-                                  </div>
-                                  <div className="career-h2h-player-info">
-                                    <span className="career-h2h-player-name">YOU</span>
-                                    <span className="career-h2h-agent-name">{selectedCareerMatch.my_agent_name}</span>
-                                  </div>
-                                </div>
-
-                                {/* Center: Duel Score & Metrics */}
-                                <div className="career-h2h-center">
-                                  <div className="career-h2h-score-wrap">
-                                    <span className={`career-h2h-score you-score ${isDuelWin ? "score-highlight" : ""}`}>
-                                      {duel.kills_on_enemy}
-                                    </span>
-                                    <span className="career-h2h-score-divider">-</span>
-                                    <span className={`career-h2h-score enemy-score ${isDuelLoss ? "score-highlight-loss" : ""}`}>
-                                      {duel.deaths_to_enemy}
-                                    </span>
-                                  </div>
-                                  <div className="career-h2h-stats-row">
-                                    <span className="career-h2h-stat-pill" title="Damage Dealt vs Taken">
-                                      DMG: <b style={{ color: netDmg >= 0 ? "#10b981" : "#f87171" }}>{duel.damage_dealt}</b> / {duel.damage_taken}
-                                    </span>
-                                    <span className="career-h2h-stat-pill" title="Headshots on Enemy">
-                                      HS: <b>{duel.headshots_on_enemy}</b>
-                                    </span>
-                                    <span className="career-h2h-stat-pill" title="Opening Duels Won vs Lost">
-                                      FIRST DUELS: <b>{duel.first_kill_duels_won} - {duel.first_kill_duels_lost}</b>
-                                    </span>
-                                  </div>
-                                </div>
-
-                                {/* Right: Enemy */}
-                                <div className="career-h2h-side career-h2h-enemy">
-                                  <div className="career-h2h-player-info align-right">
-                                    <div className="career-h2h-enemy-title-row">
-                                      <span className="career-h2h-player-name">{duel.enemy_name || "Enemy"}</span>
-                                      {duel.enemy_tag && <span className="career-h2h-tag">#{duel.enemy_tag}</span>}
-                                    </div>
-                                    <div className="career-h2h-enemy-sub">
-                                      <img
-                                        className="tracker-rank-img-mini"
-                                        src={getRankIconUrl(duel.enemy_rank_tier)}
-                                        alt=""
-                                      />
-                                      <span style={{ color: getRankColor(duel.enemy_rank_name) }}>
-                                        {duel.enemy_rank_name}
-                                      </span>
-                                      {duel.enemy_rr > 0 && <span className="h2h-rr">• {duel.enemy_rr} RR</span>}
-                                    </div>
-                                  </div>
-                                  <div className="career-h2h-agent-avatar enemy-avatar">
-                                    {duel.enemy_agent_id ? (
-                                      <img
-                                        src={`https://media.valorant-api.com/agents/${duel.enemy_agent_id}/displayicon.png`}
-                                        alt=""
-                                        onError={(e) => {
-                                          (e.currentTarget as HTMLImageElement).style.display = "none";
-                                        }}
-                                      />
-                                    ) : (
-                                      <div className="tracker-agent-placeholder">?</div>
-                                    )}
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          })
-                        ) : (
-                          <div className="career-empty-subtab">
-                            <p>No head to head duel stats recorded for this match.</p>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* TAB CONTENT: 3. TIMELINE */}
-                    {careerSubtab === "timeline" && (
-                      <div className="career-timeline-container">
-                        {selectedCareerMatch.round_results && selectedCareerMatch.round_results.length > 0 ? (() => {
-                          const rounds = selectedCareerMatch.round_results;
-                          const activeIdx = Math.min(selectedRoundIndex, rounds.length - 1);
-                          const activeRound = rounds[activeIdx];
-
-                          return (
-                            <div className="career-timeline-inner">
-                              {/* TOP ROUNDS NAVIGATION BAR */}
-                              <div className="career-rounds-bar">
-                                {rounds.map((r, idx) => {
-                                  const isAllyWon = r.winning_team === "Ally";
-                                  const isSelected = idx === activeIdx;
-
-                                  return (
-                                    <Fragment key={r.round_num}>
-                                      {r.round_num === 13 && (
-                                        <div className="career-round-side-switch" title="Side Switch (Round 12)">
-                                          <span>🔁</span>
-                                        </div>
-                                      )}
-                                      <button
-                                        type="button"
-                                        className={`career-round-pill ${isAllyWon ? "round-ally" : "round-enemy"} ${
-                                          isSelected ? "round-active" : ""
-                                        }`}
-                                        onClick={() => setSelectedRoundIndex(idx)}
-                                        title={`Round ${r.round_num}: ${r.winning_team} won by ${r.round_result_type}`}
-                                      >
-                                        <span className="career-round-num">{r.round_num}</span>
-                                        <div className="career-round-bar-indicator">
-                                          <div className={`career-round-fill ${isAllyWon ? "fill-ally" : "fill-enemy"}`} />
-                                        </div>
-                                        <span className="career-round-icon">
-                                          {r.win_icon === "defuse"
-                                            ? "🔧"
-                                            : r.win_icon === "detonate"
-                                            ? "💥"
-                                            : r.win_icon === "time"
-                                            ? "⏱️"
-                                            : "⚔️"}
-                                        </span>
-                                      </button>
-                                    </Fragment>
-                                  );
-                                })}
-                              </div>
-
-                              {/* ACTIVE ROUND DETAILS: 3 COLUMNS (EVENT LOG | MINIMAP BLUEPRINT | ECONOMY & EQUIPMENT) */}
-                              <div className="career-round-details-grid">
-                                {/* LEFT COLUMN: EVENT LOG */}
-                                <div className="career-timeline-column">
-                                  <div className="career-timeline-col-header">
-                                    <h3>EVENT LOG</h3>
-                                    <span className="career-col-subtitle">
-                                      Round {activeRound.round_num} Events
-                                    </span>
-                                  </div>
-                                  <div className="career-event-log-list">
-                                    {activeRound.events && activeRound.events.length > 0 ? (
-                                      activeRound.events.map((ev, eIdx) => {
-                                        const isPlant = ev.event_type === "plant";
-                                        const isDefuse = ev.event_type === "defuse";
-
-                                        return (
-                                          <div
-                                            key={eIdx}
-                                            className={`career-event-item ${
-                                              ev.killer_is_ally ? "event-ally" : "event-enemy"
-                                            } ${isPlant ? "event-plant" : isDefuse ? "event-defuse" : ""}`}
-                                          >
-                                            <span className="career-event-time">{ev.time_str}</span>
-                                            <div className="career-event-actor" title={ev.killer_name}>
-                                              {ev.killer_agent_id ? (
-                                                <img
-                                                  src={`https://media.valorant-api.com/agents/${ev.killer_agent_id}/displayicon.png`}
-                                                  alt=""
-                                                  className={`career-actor-agent-icon ${ev.killer_is_ally ? "border-ally" : "border-enemy"}`}
-                                                />
-                                              ) : (
-                                                <div className="tracker-agent-placeholder">?</div>
-                                              )}
-                                              <span className="career-actor-name">{ev.killer_name}</span>
-                                            </div>
-
-                                            <div className="career-event-action">
-                                              {isPlant ? (
-                                                <span className="career-event-plant-badge">⚡ Planted</span>
-                                              ) : isDefuse ? (
-                                                <span className="career-event-defuse-badge">🔧 Defused</span>
-                                              ) : (
-                                                <div className="career-event-weapon-tag">
-                                                  <span>
-                                                    {ev.weapon_name || "Kill"}
-                                                    {ev.is_headshot && <span className="hs-marker"> 🎯</span>}
-                                                  </span>
-                                                  {typeof ev.kill_distance_meters === "number" && ev.kill_distance_meters > 0 && (
-                                                    <span className="career-kill-distance">{ev.kill_distance_meters}m</span>
-                                                  )}
-                                                </div>
-                                              )}
-                                            </div>
-
-                                            {!isPlant && !isDefuse && ev.victim_name && (
-                                              <div className="career-event-victim" title={ev.victim_name}>
-                                                <span className="career-actor-name">{ev.victim_name}</span>
-                                                {ev.victim_agent_id && (
-                                                  <img
-                                                    src={`https://media.valorant-api.com/agents/${ev.victim_agent_id}/displayicon.png`}
-                                                    alt=""
-                                                    className={`career-actor-agent-icon ${!ev.killer_is_ally ? "border-ally" : "border-enemy"}`}
-                                                  />
-                                                )}
-                                              </div>
-                                            )}
-                                          </div>
-                                        );
-                                      })
-                                    ) : (
-                                      <div className="career-empty-events">
-                                        <p>No kill events logged for this round.</p>
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-
-                                {/* CENTER COLUMN: OVERHEAD MINIMAP BLUEPRINT */}
-                                <div className="career-timeline-column career-minimap-column">
-                                  <div className="career-timeline-col-header">
-                                    <h3>MINIMAP BLUEPRINT</h3>
-                                    <span className="career-col-subtitle">
-                                      {selectedCareerMatch.map_name.toUpperCase()}
-                                    </span>
-                                  </div>
-                                  <div className="career-minimap-wrapper">
-                                    <div className="career-minimap-frame">
-                                      {MAP_DISPLAY_ICONS[selectedCareerMatch.map_name.toLowerCase()] ? (
-                                        <img
-                                          src={MAP_DISPLAY_ICONS[selectedCareerMatch.map_name.toLowerCase()]}
-                                          alt={selectedCareerMatch.map_name}
-                                          className="career-minimap-img"
-                                        />
-                                      ) : (
-                                        <div className="career-minimap-placeholder">
-                                          <span>No overhead blueprint available</span>
-                                        </div>
-                                      )}
-
-                                      {activeRound.events && activeRound.events.some((ev) => ev.event_type === "plant") && (
-                                        <div className="career-minimap-spike-indicator">
-                                          <span className="career-spike-pulse" />
-                                          <span>⚡ SPIKE PLANTED</span>
-                                        </div>
-                                      )}
-                                    </div>
-
-                                    <div className={`career-minimap-outcome ${activeRound.winning_team === "Ally" ? "outcome-ally" : "outcome-enemy"}`}>
-                                      <span>ROUND {activeRound.round_num}</span>
-                                      <span>•</span>
-                                      <span>
-                                        {activeRound.winning_team === "Ally" ? "ALLY ROUND WIN" : "ENEMY ROUND WIN"} ({(activeRound.round_result_type || "").toUpperCase()})
-                                      </span>
-                                    </div>
-                                  </div>
-                                </div>
-
-                                {/* RIGHT COLUMN: ROUND ECONOMY & STATS */}
-                                <div className="career-timeline-column">
-                                  <div className="career-timeline-col-header">
-                                    <h3>
-                                      ROUND {activeRound.round_num} |{" "}
-                                      <span style={{ color: activeRound.winning_team === "Ally" ? "#2dd4bf" : "#fb7185" }}>
-                                        {activeRound.win_icon === "defuse"
-                                          ? "🔧"
-                                          : activeRound.win_icon === "detonate"
-                                          ? "💥"
-                                          : activeRound.win_icon === "time"
-                                          ? "⏱️"
-                                          : "⚔️"}{" "}
-                                        ({activeRound.round_result_type.toUpperCase()})
-                                      </span>
-                                    </h3>
-                                  </div>
-
-                                  <div className="career-econ-table-wrap">
-                                    <table className="career-econ-table">
-                                      <thead>
-                                        <tr>
-                                          <th style={{ width: "150px", textAlign: "left" }}>PLAYER</th>
-                                          <th style={{ textAlign: "center", width: "35px" }}>K</th>
-                                          <th style={{ textAlign: "center", width: "35px" }}>A</th>
-                                          <th style={{ textAlign: "right", width: "105px" }}>ECON (LOAD / BANK)</th>
-                                          <th style={{ textAlign: "left", width: "115px" }}>EQUIPMENT</th>
-                                        </tr>
-                                      </thead>
-                                      <tbody>
-                                        {/* ALLIES SECTION */}
-                                        <tr className="career-econ-section-header header-ally">
-                                          <td colSpan={5}>ALLIES</td>
-                                        </tr>
-                                        {activeRound.player_economies
-                                          .filter((pe) => pe.is_ally)
-                                          .map((pe, peIdx) => (
-                                            <tr
-                                              key={pe.puuid || `ally-${peIdx}`}
-                                              className="career-econ-row econ-ally"
-                                            >
-                                              <td>
-                                                <div className="career-econ-player-cell">
-                                                  {pe.agent_id ? (
-                                                    <img
-                                                      src={`https://media.valorant-api.com/agents/${pe.agent_id}/displayicon.png`}
-                                                      alt=""
-                                                      className="career-actor-agent-icon border-ally"
-                                                    />
-                                                  ) : null}
-                                                  <span className="career-econ-player-name">{pe.name}</span>
-                                                </div>
-                                              </td>
-                                              <td style={{ textAlign: "center" }}>
-                                                <span className="career-econ-val">{pe.kills}</span>
-                                              </td>
-                                              <td style={{ textAlign: "center" }}>
-                                                <span className="career-econ-val">{pe.assists}</span>
-                                              </td>
-                                              <td style={{ textAlign: "right" }}>
-                                                <div className="career-econ-vals">
-                                                  <span className="econ-loadout">{pe.loadout_value.toLocaleString()}</span>
-                                                  <span className="econ-bank">{pe.remaining_bank.toLocaleString()}</span>
-                                                </div>
-                                              </td>
-                                              <td>
-                                                <div className="career-equip-vals">
-                                                  <span className="career-wep-text">{pe.weapon_name || "—"}</span>
-                                                  {pe.armor_name && (
-                                                    <span className="career-arm-text">{pe.armor_name}</span>
-                                                  )}
-                                                </div>
-                                              </td>
-                                            </tr>
-                                          ))}
-
-                                        {/* ENEMIES SECTION */}
-                                        <tr className="career-econ-section-header header-enemy">
-                                          <td colSpan={5}>ENEMIES</td>
-                                        </tr>
-                                        {activeRound.player_economies
-                                          .filter((pe) => !pe.is_ally)
-                                          .map((pe, peIdx) => (
-                                            <tr
-                                              key={pe.puuid || `enemy-${peIdx}`}
-                                              className="career-econ-row econ-enemy"
-                                            >
-                                              <td>
-                                                <div className="career-econ-player-cell">
-                                                  {pe.agent_id ? (
-                                                    <img
-                                                      src={`https://media.valorant-api.com/agents/${pe.agent_id}/displayicon.png`}
-                                                      alt=""
-                                                      className="career-actor-agent-icon border-enemy"
-                                                    />
-                                                  ) : null}
-                                                  <span className="career-econ-player-name">{pe.name}</span>
-                                                </div>
-                                              </td>
-                                              <td style={{ textAlign: "center" }}>
-                                                <span className="career-econ-val">{pe.kills}</span>
-                                              </td>
-                                              <td style={{ textAlign: "center" }}>
-                                                <span className="career-econ-val">{pe.assists}</span>
-                                              </td>
-                                              <td style={{ textAlign: "right" }}>
-                                                <div className="career-econ-vals">
-                                                  <span className="econ-loadout">{pe.loadout_value.toLocaleString()}</span>
-                                                  <span className="econ-bank">{pe.remaining_bank.toLocaleString()}</span>
-                                                </div>
-                                              </td>
-                                              <td>
-                                                <div className="career-equip-vals">
-                                                  <span className="career-wep-text">{pe.weapon_name || "—"}</span>
-                                                  {pe.armor_name && (
-                                                    <span className="career-arm-text">{pe.armor_name}</span>
-                                                  )}
-                                                </div>
-                                              </td>
-                                            </tr>
-                                          ))}
-                                      </tbody>
-                                    </table>
-                                  </div>
-
-                                  <div className="career-econ-footer">
-                                    <span>
-                                      Avg Loadout:{" "}
-                                      <b style={{ color: "#2dd4bf" }}>{activeRound.avg_loadout_ally.toLocaleString()}</b> /{" "}
-                                      <b style={{ color: "#fb7185" }}>{activeRound.avg_loadout_enemy.toLocaleString()}</b>
-                                    </span>
-                                    <span>
-                                      Avg Bank:{" "}
-                                      <b style={{ color: "#2dd4bf" }}>{activeRound.avg_bank_ally.toLocaleString()}</b> /{" "}
-                                      <b style={{ color: "#fb7185" }}>{activeRound.avg_bank_enemy.toLocaleString()}</b>
-                                    </span>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })() : (
-                          <div className="career-empty-subtab">
-                            <p>No timeline round results recorded for this match.</p>
-                          </div>
-                        )}
-                      </div>
-                    )}
                   </div>
                 ) : (
                   /* ==========================================================================
@@ -5188,7 +4783,7 @@ export default function App() {
                         <div>
                           <h2 className="career-title">MATCH HISTORY</h2>
                           <span className="career-subtitle">
-                            Every match played with SageBot is saved locally. Click any game to inspect scoreboard.
+                            History of competitive matches played with SageBot.
                           </span>
                         </div>
                       </div>
@@ -5219,9 +4814,8 @@ export default function App() {
                             return (
                               <div
                                 key={m.match_id}
-                                className={`career-match-card ${
-                                  isWin ? "card-win" : isLoss ? "card-loss" : "card-draw"
-                                }`}
+                                className={`career-match-card ${isWin ? "card-win" : isLoss ? "card-loss" : "card-draw"
+                                  }`}
                                 onClick={() => setSelectedCareerMatch(m)}
                               >
                                 {/* Left Result Vertical Stripe */}
@@ -5270,9 +4864,8 @@ export default function App() {
                                   </div>
                                   {m.my_rr_change !== 0 && (
                                     <span
-                                      className={`career-card-rr-change ${
-                                        m.my_rr_change > 0 ? "rr-up" : "rr-down"
-                                      }`}
+                                      className={`career-card-rr-change ${m.my_rr_change > 0 ? "rr-up" : "rr-down"
+                                        }`}
                                     >
                                       {m.my_rr_change > 0 ? `+${m.my_rr_change}` : m.my_rr_change}
                                     </span>
@@ -5295,9 +4888,8 @@ export default function App() {
                                 {/* Result & Rounds Banner */}
                                 <div className="career-card-result-center">
                                   <span
-                                    className={`career-card-result-tag ${
-                                      isWin ? "tag-win" : isLoss ? "tag-loss" : "tag-draw"
-                                    }`}
+                                    className={`career-card-result-tag ${isWin ? "tag-win" : isLoss ? "tag-loss" : "tag-draw"
+                                      }`}
                                   >
                                     {m.result}
                                   </span>
@@ -5327,17 +4919,496 @@ export default function App() {
                                         </span>
                                       </div>
                                       <div className="career-card-mvp-action">
-                                        {isMatchMVP ? (
+                                        {isMatchMVP && (
                                           <span className="career-mvp-badge match-mvp">MATCH MVP ▶</span>
-                                        ) : isTeamMVP ? (
-                                          <span className="career-mvp-badge team-mvp">TEAM MVP ▶</span>
-                                        ) : (
-                                          <span className="career-card-inspect-arrow">View Scoreboard →</span>
                                         )}
+                                        {isTeamMVP && (
+                                          <span className="career-mvp-badge team-mvp">TEAM MVP ▶</span>
+                                        )}
+                                        <span className="career-card-inspect-arrow">View Scoreboard →</span>
                                       </div>
                                     </div>
                                   );
                                 })()}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* TAB: PLAYERS (ENCOUNTER DIRECTORY & DETAILED HISTORY) */}
+            {activeTab === "players" && (
+              <div className="tab-pane players-tab-pane">
+                {selectedPlayerEncounter ? (
+                  /* ==========================================================================
+                     PLAYER PROFILE & ENCOUNTER HISTORY VIEW
+                     ========================================================================== */
+                  <div className="player-detail-container">
+                    <div className="player-detail-nav">
+                      <button
+                        type="button"
+                        className="career-back-btn"
+                        onClick={() => setSelectedPlayerEncounter(null)}
+                      >
+                        ← Back to Players Directory
+                      </button>
+                    </div>
+
+                    {/* BIG PLAYER PROFILE HERO BANNER */}
+                    {(() => {
+                      const heroSplashUrl =
+                        MAP_SPLASHES[selectedPlayerEncounter.last_seen_map.toLowerCase()] || "";
+                      const totalWins =
+                        selectedPlayerEncounter.wins_as_ally + selectedPlayerEncounter.wins_against;
+                      const totalLosses =
+                        selectedPlayerEncounter.losses_as_ally + selectedPlayerEncounter.losses_against;
+                      const totalGames = selectedPlayerEncounter.encounters_count;
+                      const winRate =
+                        totalGames > 0 ? Math.round((totalWins / totalGames) * 100) : 0;
+
+                      return (
+                        <div
+                          className="player-profile-hero"
+                          style={{
+                            backgroundImage: heroSplashUrl
+                              ? `linear-gradient(to right, rgba(15, 23, 42, 0.96) 0%, rgba(15, 23, 42, 0.8) 50%, rgba(15, 23, 42, 0.9) 100%), url(${heroSplashUrl})`
+                              : undefined,
+                            backgroundSize: "cover",
+                            backgroundPosition: "center right",
+                          }}
+                        >
+                          <div className="player-hero-left">
+                            <div className="player-hero-avatar-wrap">
+                              {selectedPlayerEncounter.last_seen_agent_id ? (
+                                <img
+                                  className="player-hero-agent-img"
+                                  src={`https://media.valorant-api.com/agents/${selectedPlayerEncounter.last_seen_agent_id}/displayicon.png`}
+                                  alt={selectedPlayerEncounter.last_seen_agent_name}
+                                />
+                              ) : (
+                                <div className="tracker-agent-placeholder">?</div>
+                              )}
+                            </div>
+                            <div className="player-hero-identity">
+                              <div className="player-hero-name-line">
+                                <span className="player-hero-gamename">{selectedPlayerEncounter.name}</span>
+                                {selectedPlayerEncounter.tag && (
+                                  <span className="player-hero-tagline">#{selectedPlayerEncounter.tag}</span>
+                                )}
+                              </div>
+                              <div className="player-hero-rank-line">
+                                {selectedPlayerEncounter.last_rank_tier > 0 && (
+                                  <img
+                                    className="tracker-rank-img-mini"
+                                    src={getRankIconUrl(selectedPlayerEncounter.last_rank_tier)}
+                                    alt=""
+                                  />
+                                )}
+                                <span
+                                  className="player-hero-rank-text"
+                                  style={{ color: getRankColor(selectedPlayerEncounter.last_rank_name) }}
+                                >
+                                  {selectedPlayerEncounter.last_rank_name || "Unranked"}
+                                </span>
+                                {selectedPlayerEncounter.last_rank_tier > 0 && (
+                                  <>
+                                    <span className="tracker-rank-dot-mini">•</span>
+                                    <span className="tracker-rank-rr-mini">
+                                      {selectedPlayerEncounter.last_rr} RR
+                                    </span>
+                                  </>
+                                )}
+                              </div>
+                              <div className="player-hero-last-seen-line">
+                                Last seen on <b>{selectedPlayerEncounter.last_seen_map}</b> as{" "}
+                                <b>{selectedPlayerEncounter.last_seen_agent_name || "Agent"}</b> •{" "}
+                                {selectedPlayerEncounter.last_seen_date_str}{" "}
+                                {selectedPlayerEncounter.last_seen_time_str &&
+                                  `at ${selectedPlayerEncounter.last_seen_time_str}`}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="player-hero-stats-strip">
+                            <div className="player-hero-stat-box">
+                              <span className="stat-label">TOTAL GAMES</span>
+                              <span className="stat-val">{totalGames}</span>
+                            </div>
+                            <div className="player-hero-stat-box">
+                              <span className="stat-label">WIN RATE</span>
+                              <span
+                                className="stat-val"
+                                style={{ color: winRate >= 50 ? "#2dd4bf" : "#fb7185" }}
+                              >
+                                {winRate}%
+                              </span>
+                              <span className="stat-sub">
+                                {totalWins}W - {totalLosses}L
+                              </span>
+                            </div>
+                            <div className="player-hero-stat-box">
+                              <span className="stat-label">AS TEAMMATE</span>
+                              <span className="stat-val" style={{ color: "#2dd4bf" }}>
+                                {selectedPlayerEncounter.matches_as_ally}x
+                              </span>
+                              <span className="stat-sub">
+                                {selectedPlayerEncounter.wins_as_ally}W -{" "}
+                                {selectedPlayerEncounter.losses_as_ally}L
+                              </span>
+                            </div>
+                            <div className="player-hero-stat-box">
+                              <span className="stat-label">AS ENEMY</span>
+                              <span className="stat-val" style={{ color: "#fb7185" }}>
+                                {selectedPlayerEncounter.matches_as_enemy}x
+                              </span>
+                              <span className="stat-sub">
+                                {selectedPlayerEncounter.wins_against}W -{" "}
+                                {selectedPlayerEncounter.losses_against}L
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* ENCOUNTER MATCHES LIST */}
+                    <div className="player-history-section">
+                      <div className="player-history-header">
+                        <History size={16} style={{ color: "#2dd4bf" }} />
+                        <h3>MATCH ENCOUNTER HISTORY</h3>
+                        <span className="player-history-count">
+                          ({selectedPlayerEncounter.history ? selectedPlayerEncounter.history.length : 0}{" "}
+                          matches)
+                        </span>
+                      </div>
+
+                      <div className="player-history-grid">
+                        {selectedPlayerEncounter.history &&
+                        selectedPlayerEncounter.history.length > 0 ? (
+                          selectedPlayerEncounter.history.map((h) => {
+                            const isAlly = h.relationship === "PLAYED WITH";
+                            const isWin = h.result === "VICTORY";
+                            const isLoss = h.result === "DEFEAT";
+                            const splashUrl = MAP_SPLASHES[h.map_name.toLowerCase()] || "";
+
+                            return (
+                              <div
+                                key={h.match_id}
+                                className={`player-history-card ${
+                                  isWin ? "card-win" : isLoss ? "card-loss" : "card-draw"
+                                }`}
+                              >
+                                <div className="career-card-stripe" />
+
+                                {/* Relationship Badge (PLAYED WITH / PLAYED AGAINST) */}
+                                <div className="player-hist-rel-col">
+                                  <span
+                                    className={`player-hist-rel-pill ${
+                                      isAlly ? "rel-ally" : "rel-enemy"
+                                    }`}
+                                  >
+                                    {isAlly ? "🤝 PLAYED WITH" : "⚔️ PLAYED AGAINST"}
+                                  </span>
+                                </div>
+
+                                {/* Agent Icon & Name they played */}
+                                <div className="player-hist-agent-box">
+                                  {h.agent_id ? (
+                                    <img
+                                      className="career-card-agent-img"
+                                      src={`https://media.valorant-api.com/agents/${h.agent_id}/displayicon.png`}
+                                      alt={h.agent_name}
+                                    />
+                                  ) : (
+                                    <div className="tracker-agent-placeholder">?</div>
+                                  )}
+                                  <div className="player-hist-agent-names">
+                                    <span className="player-hist-agent-name">
+                                      {h.agent_name || "Agent"}
+                                    </span>
+                                    <span className="player-hist-rank-text">
+                                      {h.rank_name || "Unranked"}{" "}
+                                      {h.rr > 0 ? `• ${h.rr} RR` : ""}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                {/* Match Result Tag & Score */}
+                                <div className="career-card-result-center">
+                                  <span
+                                    className={`career-card-result-tag ${
+                                      isWin ? "tag-win" : isLoss ? "tag-loss" : "tag-draw"
+                                    }`}
+                                  >
+                                    {h.result}
+                                  </span>
+                                  <span className="career-card-rounds-score">
+                                    {h.score_ally} - {h.score_enemy}
+                                  </span>
+                                </div>
+
+                                {/* Player stats in that match (ACS, KDA) */}
+                                <div className="career-card-kda-box">
+                                  <div className="career-card-kda-line">
+                                    <span className="career-card-kda-label">THEIR KDA</span>
+                                    <span className="career-card-kda-vals">
+                                      {h.kills} / {h.deaths} / {h.assists}
+                                    </span>
+                                  </div>
+                                  <div className="career-card-score-line">
+                                    SCORE <span className="career-card-score-num">{h.score}</span>
+                                  </div>
+                                </div>
+
+                                {/* Map art banner & Inspect button */}
+                                <div
+                                  className="career-card-map-art"
+                                  style={{
+                                    backgroundImage: splashUrl
+                                      ? `linear-gradient(to right, rgba(15, 23, 42, 1) 0%, rgba(15, 23, 42, 0.45) 45%, rgba(15, 23, 42, 0.75) 100%), url(${splashUrl})`
+                                      : undefined,
+                                  }}
+                                >
+                                  <div className="career-card-map-info">
+                                    <span className="career-card-map-name">{h.map_name}</span>
+                                    <span className="career-card-date-time">
+                                      {h.date_str} {h.time_str && `• ${h.time_str}`}
+                                    </span>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    className="career-card-inspect-arrow"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      const found = careerMatches.find((m) => m.match_id === h.match_id);
+                                      if (found) {
+                                        setSelectedCareerMatch(found);
+                                        setActiveTab("career");
+                                      } else {
+                                        loadCareerMatches().then(() => {
+                                          setActiveTab("career");
+                                        });
+                                      }
+                                    }}
+                                  >
+                                    Inspect Match Scoreboard →
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })
+                        ) : (
+                          <div className="career-empty-subtab">
+                            <p>No recorded matches found for this player.</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  /* ==========================================================================
+                     PLAYERS DIRECTORY LIST VIEW
+                     ========================================================================== */
+                  <div className="players-list-container">
+                    <div className="career-top-header">
+                      <div className="career-title-area">
+                        <Users size={18} className="career-header-icon" />
+                        <div>
+                          <h2 className="career-title">PLAYERS DIRECTORY</h2>
+                          <span className="career-subtitle">
+                            Every player met in competitive matches with SageBot. Click any card to inspect encounter history.
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Search Bar */}
+                      <div className="players-search-wrapper">
+                        <input
+                          type="text"
+                          className="players-search-input"
+                          placeholder="Search players by name, tag, agent, map..."
+                          value={playerSearchQuery}
+                          onChange={(e) => setPlayerSearchQuery(e.target.value)}
+                        />
+                      </div>
+                    </div>
+
+                    {isLoadingPlayers && encounteredPlayers.length === 0 ? (
+                      <div className="shop-loading-card">
+                        <RefreshCw size={24} className="spin" style={{ color: "#2dd4bf" }} />
+                        <span>Loading encountered players...</span>
+                      </div>
+                    ) : encounteredPlayers.length === 0 ? (
+                      <div className="career-empty-subtab" style={{ padding: "64px 20px" }}>
+                        <Users size={32} style={{ color: "#475569", marginBottom: "12px" }} />
+                        <p style={{ fontSize: "14px", fontWeight: 700, color: "#94a3b8" }}>
+                          No players encountered yet.
+                        </p>
+                        <span style={{ fontSize: "12px", color: "#64748b" }}>
+                          Play competitive games with SageBot running to automatically remember players, their ranks, win ratios, and match histories!
+                        </span>
+                      </div>
+                    ) : (() => {
+                      const filtered = encounteredPlayers.filter((p) => {
+                        if (!playerSearchQuery.trim()) return true;
+                        const q = playerSearchQuery.toLowerCase();
+                        return (
+                          p.name.toLowerCase().includes(q) ||
+                          p.tag.toLowerCase().includes(q) ||
+                          p.last_seen_agent_name.toLowerCase().includes(q) ||
+                          p.last_seen_map.toLowerCase().includes(q)
+                        );
+                      });
+
+                      if (filtered.length === 0) {
+                        return (
+                          <div className="career-empty-subtab" style={{ padding: "48px 20px" }}>
+                            <p style={{ color: "#94a3b8", fontWeight: 700 }}>
+                              No players match "{playerSearchQuery}"
+                            </p>
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div className="players-cards-grid">
+                          {filtered.map((p) => {
+                            const splashUrl = MAP_SPLASHES[p.last_seen_map.toLowerCase()] || "";
+                            const totalWins = p.wins_as_ally + p.wins_against;
+                            const totalLosses = p.losses_as_ally + p.losses_against;
+                            const totalGames = p.encounters_count;
+                            const winRate =
+                              totalGames > 0 ? Math.round((totalWins / totalGames) * 100) : 0;
+                            const isNetWin = totalWins >= totalLosses;
+                            const isLastWin = p.last_result === "VICTORY";
+                            const isLastLoss = p.last_result === "DEFEAT";
+
+                            return (
+                              <div
+                                key={p.puuid}
+                                className={`player-encounter-card ${
+                                  isNetWin ? "card-win" : "card-loss"
+                                }`}
+                                onClick={() => setSelectedPlayerEncounter(p)}
+                              >
+                                <div className="career-card-stripe" />
+
+                                {/* 1. Agent Icon & Identity & Rank */}
+                                <div className="player-card-identity-box">
+                                  <div className="career-card-agent-box">
+                                    {p.last_seen_agent_id ? (
+                                      <img
+                                        className="career-card-agent-img"
+                                        src={`https://media.valorant-api.com/agents/${p.last_seen_agent_id}/displayicon.png`}
+                                        alt={p.last_seen_agent_name}
+                                      />
+                                    ) : (
+                                      <div className="tracker-agent-placeholder">?</div>
+                                    )}
+                                  </div>
+                                  <div className="player-card-identity-col">
+                                    <div className="player-card-name-row">
+                                      <span className="player-card-gamename">{p.name}</span>
+                                      {p.tag && (
+                                        <span className="player-card-tagline">#{p.tag}</span>
+                                      )}
+                                    </div>
+                                    <div className="player-card-rank-subline">
+                                      {p.last_rank_tier > 0 && (
+                                        <img
+                                          className="tracker-rank-img-mini"
+                                          src={getRankIconUrl(p.last_rank_tier)}
+                                          alt=""
+                                        />
+                                      )}
+                                      <span
+                                        className="player-card-rank-text"
+                                        style={{ color: getRankColor(p.last_rank_name) }}
+                                      >
+                                        {p.last_rank_name || "Unranked"}
+                                      </span>
+                                      {p.last_rank_tier > 0 && (
+                                        <>
+                                          <span className="tracker-rank-dot-mini">•</span>
+                                          <span className="tracker-rank-rr-mini">
+                                            {p.last_rr} RR
+                                          </span>
+                                        </>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* 2. Ratio & Record Pill */}
+                                <div className="player-card-ratio-col">
+                                  <div className="player-card-ratio-head">
+                                    <span className="ratio-count">
+                                      Met <b>{p.encounters_count}x</b>
+                                    </span>
+                                    <span className="ratio-dot">•</span>
+                                    <span
+                                      className="ratio-winrate"
+                                      style={{ color: winRate >= 50 ? "#2dd4bf" : "#fb7185" }}
+                                    >
+                                      {winRate}% WR
+                                    </span>
+                                    <span className="ratio-record">
+                                      ({totalWins}W - {totalLosses}L)
+                                    </span>
+                                  </div>
+                                  <div className="player-card-ratio-sub">
+                                    <span>
+                                      With: <b>{p.matches_as_ally}x</b> ({p.wins_as_ally}W-
+                                      {p.losses_as_ally}L)
+                                    </span>
+                                    <span className="ratio-sub-dot">•</span>
+                                    <span>
+                                      Against: <b>{p.matches_as_enemy}x</b> ({p.wins_against}W-
+                                      {p.losses_against}L)
+                                    </span>
+                                  </div>
+                                </div>
+
+                                {/* 3. Last Encounter Result */}
+                                <div className="player-card-last-result-col">
+                                  <span className="last-res-caption">LAST MATCH</span>
+                                  <div className="last-res-banner">
+                                    <span
+                                      className={`career-card-result-tag ${
+                                        isLastWin ? "tag-win" : isLastLoss ? "tag-loss" : "tag-draw"
+                                      }`}
+                                    >
+                                      {p.last_result || "MATCH"}
+                                    </span>
+                                    <span className="last-res-score">
+                                      {p.last_score_ally} - {p.last_score_enemy}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                {/* 4. Map Splash Art Banner & Date/Time */}
+                                <div
+                                  className="career-card-map-art"
+                                  style={{
+                                    backgroundImage: splashUrl
+                                      ? `linear-gradient(to right, rgba(15, 23, 42, 1) 0%, rgba(15, 23, 42, 0.45) 45%, rgba(15, 23, 42, 0.75) 100%), url(${splashUrl})`
+                                      : undefined,
+                                  }}
+                                >
+                                  <div className="career-card-map-info">
+                                    <span className="career-card-map-name">{p.last_seen_map}</span>
+                                    <span className="career-card-date-time">
+                                      {p.last_seen_date_str}{" "}
+                                      {p.last_seen_time_str && `• ${p.last_seen_time_str}`}
+                                    </span>
+                                  </div>
+                                  <span className="career-card-inspect-arrow">View Profile →</span>
+                                </div>
                               </div>
                             );
                           })}

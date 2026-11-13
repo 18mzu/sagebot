@@ -1436,18 +1436,12 @@ fn get_career_matches() -> Result<Vec<career::CareerMatch>, String> {
 
 #[tauri::command]
 fn delete_career_match(match_id: String) -> Result<Vec<career::CareerMatch>, String> {
-    let mut matches = career::load_career_matches();
-    matches.retain(|m| m.match_id != match_id);
-    career::save_career_matches(&matches)?;
-    Ok(career::load_career_matches())
+    career::delete_match_by_id(&match_id)
 }
 
 #[tauri::command]
 fn get_encounter_memory() -> Result<Vec<encounter_memory::PlayerEncounter>, String> {
-    let map = encounter_memory::load_encounters();
-    let mut list: Vec<_> = map.into_values().collect();
-    list.sort_by(|a, b| b.last_seen_timestamp.cmp(&a.last_seen_timestamp));
-    Ok(list)
+    Ok(encounter_memory::get_all_visible_encounters())
 }
 
 #[tauri::command]

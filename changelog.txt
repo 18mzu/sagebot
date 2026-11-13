@@ -1,3 +1,8 @@
-[v4.0.1]
-- fixed critical securities
-- updated Remote
+[v4.1]
+- added Career
+- updated Party detection
+- updated Tracker UI
+- added Main indicator
+- added Player.
+- added Player database
+- added Match database
