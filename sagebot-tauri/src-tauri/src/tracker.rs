@@ -2524,7 +2524,37 @@ pub async fn fetch_latest_completed_match_internal(
     }
     let unmasked = fetch_unmasked_names(client, &pd_host, &match_puuids, access_token, jwt, client_version).await;
 
-    if let Some(cm) = crate::career::parse_match_details_with_names(&m_json, my_puuid, last_roster.as_ref(), &unmasked) {
+    if let Some(mut cm) = crate::career::parse_match_details_with_names(&m_json, my_puuid, last_roster.as_ref(), &unmasked) {
+        let comp_url = format!("https://{}/mmr/v1/players/{}/competitiveupdates?startIndex=0&endIndex=5&queue=competitive", pd_host, my_puuid);
+        if let Ok(c_resp) = client.get(&comp_url)
+            .header("Authorization", format!("Bearer {}", access_token))
+            .header("X-Riot-Entitlements-JWT", jwt)
+            .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+            .header("X-Riot-ClientVersion", client_version)
+            .send().await
+        {
+            if let Ok(c_json) = c_resp.json::<serde_json::Value>().await {
+                if let Some(matches) = c_json.get("Matches").and_then(|m| m.as_array()) {
+                    if let Some(m) = matches.iter().find(|item| item.get("MatchID").and_then(|v| v.as_str()) == Some(&cm.match_id)) {
+                        let tier_after = m.get("TierAfterUpdate").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                        let rr_after = m.get("RankedRatingAfterUpdate").and_then(|v| v.as_i64()).unwrap_or(0);
+                        let rr_earned = m.get("RankedRatingEarned").and_then(|v| v.as_i64()).unwrap_or(0);
+                        cm.my_rr_change = rr_earned;
+                        if tier_after > 0 {
+                            cm.my_rank_tier = tier_after;
+                            cm.my_rank_name = get_rank_name(tier_after).to_string();
+                        }
+                        if let Some(self_p) = cm.players.iter_mut().find(|p| p.is_self) {
+                            self_p.rr = rr_after;
+                            if tier_after > 0 {
+                                self_p.rank_tier = tier_after;
+                                self_p.rank_name = get_rank_name(tier_after).to_string();
+                            }
+                        }
+                    }
+                }
+            }
+        }
         let _ = crate::career::save_career_match(cm);
     }
 

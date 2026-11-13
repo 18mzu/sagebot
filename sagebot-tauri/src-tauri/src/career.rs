@@ -1190,7 +1190,62 @@ pub async fn sync_career_matches_internal(
         .and_then(|h| h.as_array())
         .ok_or_else(|| "No matches array in history".to_string())?;
 
-    let existing_matches = load_career_matches();
+    // Fetch competitiveupdates (up to 20 matches) for exact TierAfterUpdate, RankedRatingAfterUpdate, and RankedRatingEarned
+    let mut comp_updates: HashMap<String, (u32, i64, i64)> = HashMap::new();
+    let comp_url = format!("https://{}/mmr/v1/players/{}/competitiveupdates?startIndex=0&endIndex=20&queue=competitive", pd_host, my_puuid);
+    if let Ok(c_resp) = client.get(&comp_url)
+        .header("Authorization", format!("Bearer {}", access_token))
+        .header("X-Riot-Entitlements-JWT", jwt)
+        .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+        .header("X-Riot-ClientVersion", client_version)
+        .send().await
+    {
+        if c_resp.status().is_success() {
+            if let Ok(c_json) = c_resp.json::<serde_json::Value>().await {
+                if let Some(matches) = c_json.get("Matches").and_then(|m| m.as_array()) {
+                    for m in matches {
+                        if let Some(mid) = m.get("MatchID").and_then(|v| v.as_str()) {
+                            let tier_after = m.get("TierAfterUpdate").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                            let rr_after = m.get("RankedRatingAfterUpdate").and_then(|v| v.as_i64()).unwrap_or(0);
+                            let rr_earned = m.get("RankedRatingEarned").and_then(|v| v.as_i64()).unwrap_or(0);
+                            comp_updates.insert(mid.to_string(), (tier_after, rr_after, rr_earned));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let mut existing_matches = load_career_matches();
+    let mut updated_existing = false;
+    for em in &mut existing_matches {
+        if let Some(&(tier_after, rr_after, rr_earned)) = comp_updates.get(&em.match_id) {
+            if em.my_rr_change == 0 && rr_earned != 0 {
+                em.my_rr_change = rr_earned;
+                updated_existing = true;
+            }
+            if tier_after > 0 && em.my_rank_tier != tier_after {
+                em.my_rank_tier = tier_after;
+                em.my_rank_name = crate::tracker::get_rank_name(tier_after).to_string();
+                updated_existing = true;
+            }
+            if let Some(self_p) = em.players.iter_mut().find(|p| p.is_self) {
+                if self_p.rr == 0 && rr_after > 0 {
+                    self_p.rr = rr_after;
+                    updated_existing = true;
+                }
+                if tier_after > 0 && self_p.rank_tier != tier_after {
+                    self_p.rank_tier = tier_after;
+                    self_p.rank_name = crate::tracker::get_rank_name(tier_after).to_string();
+                    updated_existing = true;
+                }
+            }
+        }
+    }
+    if updated_existing {
+        let _ = save_career_matches(&existing_matches);
+    }
+
     let existing_ids: HashSet<String> = existing_matches
         .iter()
         .filter(|m| {
@@ -1284,7 +1339,21 @@ pub async fn sync_career_matches_internal(
             overlap >= 2
         });
 
-        if let Some(cm) = parse_match_details_with_names(&m_json, my_puuid, matched_roster, &unmasked) {
+        if let Some(mut cm) = parse_match_details_with_names(&m_json, my_puuid, matched_roster, &unmasked) {
+            if let Some(&(tier_after, rr_after, rr_earned)) = comp_updates.get(&cm.match_id) {
+                cm.my_rr_change = rr_earned;
+                if tier_after > 0 {
+                    cm.my_rank_tier = tier_after;
+                    cm.my_rank_name = crate::tracker::get_rank_name(tier_after).to_string();
+                }
+                if let Some(self_p) = cm.players.iter_mut().find(|p| p.is_self) {
+                    self_p.rr = rr_after;
+                    if tier_after > 0 {
+                        self_p.rank_tier = tier_after;
+                        self_p.rank_name = crate::tracker::get_rank_name(tier_after).to_string();
+                    }
+                }
+            }
             new_matches.push(cm);
         }
     }
