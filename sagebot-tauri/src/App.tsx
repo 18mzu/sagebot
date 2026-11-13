@@ -742,6 +742,16 @@ export default function App() {
       if (matches) {
         setCareerMatches(matches);
       }
+      // Background sync from Riot match history to catch any matches that ended
+      // while SageBot was closed, restarted, or in lobby
+      invoke<CareerMatch[]>("sync_career_matches")
+        .then((updated) => {
+          if (updated && updated.length > 0) {
+            setCareerMatches(updated);
+            loadEncounterMemory();
+          }
+        })
+        .catch(() => {});
     } catch (e) {
       console.error("Failed to load career matches:", e);
     }
@@ -1107,6 +1117,8 @@ export default function App() {
             rosterRef.current = next;
             return next;
           });
+          loadCareerMatches();
+          loadEncounterMemory();
         }
         // Webhook notification on rank change
         const self = res.ally_team.find((p) => p.is_self);
@@ -2180,10 +2192,12 @@ export default function App() {
                     dispatchConclude(allyFinal, enemyFinal, finalMap, rawMode);
                   }
                   loadCareerMatches();
+                  loadEncounterMemory();
                 })
                 .catch(() => {
                   dispatchConclude(allyFinal, enemyFinal, finalMap, rawMode);
                   loadCareerMatches();
+                  loadEncounterMemory();
                 });
 
               // STOP SageBot when game concludes UNLESS Fully Auto Play is on

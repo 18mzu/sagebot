@@ -2511,7 +2511,20 @@ pub async fn fetch_latest_completed_match_internal(
             }
         }
     };
-    if let Some(cm) = crate::career::parse_match_details(&m_json, my_puuid, last_roster.as_ref()) {
+
+    let mut match_puuids: Vec<String> = Vec::new();
+    if let Some(players) = m_json.get("players").and_then(|p| p.as_array()) {
+        for p in players {
+            if let Some(s) = p.get("subject").and_then(|v| v.as_str()) {
+                if !s.is_empty() {
+                    match_puuids.push(s.to_string());
+                }
+            }
+        }
+    }
+    let unmasked = fetch_unmasked_names(client, &pd_host, &match_puuids, access_token, jwt, client_version).await;
+
+    if let Some(cm) = crate::career::parse_match_details_with_names(&m_json, my_puuid, last_roster.as_ref(), &unmasked) {
         let _ = crate::career::save_career_match(cm);
     }
 

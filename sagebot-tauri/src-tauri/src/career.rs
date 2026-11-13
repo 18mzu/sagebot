@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -356,6 +356,15 @@ pub fn parse_match_details(
     my_puuid: &str,
     live_roster: Option<&crate::tracker::LiveMatchRoster>,
 ) -> Option<CareerMatch> {
+    parse_match_details_with_names(m_json, my_puuid, live_roster, &HashMap::new())
+}
+
+pub fn parse_match_details_with_names(
+    m_json: &serde_json::Value,
+    my_puuid: &str,
+    live_roster: Option<&crate::tracker::LiveMatchRoster>,
+    unmasked_names: &HashMap<String, String>,
+) -> Option<CareerMatch> {
     let match_info = m_json.get("matchInfo")?;
     let match_id = match_info.get("matchId").and_then(|v| v.as_str())?.to_string();
     let timestamp = match_info.get("gameStartMillis").and_then(|v| v.as_u64()).unwrap_or(0);
@@ -562,6 +571,13 @@ pub fn parse_match_details(
                     } else {
                         (live.name.clone(), tag_line.clone())
                     }
+                } else if let Some(unmasked) = unmasked_names.get(&puuid) {
+                    if unmasked.contains('#') {
+                        let parts: Vec<&str> = unmasked.split('#').collect();
+                        (parts[0].to_string(), parts.get(1).unwrap_or(&"").to_string())
+                    } else {
+                        (unmasked.clone(), tag_line.clone())
+                    }
                 } else if !game_name.is_empty() {
                     (game_name.clone(), tag_line.clone())
                 } else {
@@ -573,8 +589,19 @@ pub fn parse_match_details(
             } else {
                 let rank_t = comp_tier;
                 let rank_n = crate::tracker::get_rank_name(rank_t).to_string();
-                let n = if !game_name.is_empty() { game_name.clone() } else { format!("Player {}", player_idx + 1) };
-                (n, tag_line.clone(), rank_t, rank_n, 0i64, String::new())
+                let name_clean = if let Some(unmasked) = unmasked_names.get(&puuid) {
+                    if unmasked.contains('#') {
+                        let parts: Vec<&str> = unmasked.split('#').collect();
+                        (parts[0].to_string(), parts.get(1).unwrap_or(&"").to_string())
+                    } else {
+                        (unmasked.clone(), tag_line.clone())
+                    }
+                } else if !game_name.is_empty() {
+                    (game_name.clone(), tag_line.clone())
+                } else {
+                    (format!("Player {}", player_idx + 1), String::new())
+                };
+                (name_clean.0, name_clean.1, rank_t, rank_n, 0i64, String::new())
             };
 
             let agent_name = resolve_agent_name(&character_id);
@@ -1136,4 +1163,111 @@ fn format_timestamp_date_time(ts_ms: u64) -> (String, String) {
     let time_str = format!("{:02}:{:02} {}", hour_12, min, am_pm);
 
     (date_str, time_str)
+}
+
+/// Automatically synchronizes the latest matches from Riot's match history API.
+/// This catches all matches even if SageBot was closed, restarted, or in lobby.
+pub async fn sync_career_matches_internal(
+    client: &reqwest::Client,
+    access_token: &str,
+    jwt: &str,
+    my_puuid: &str,
+    glz_host: &str,
+    client_version: &str,
+) -> Result<Vec<CareerMatch>, String> {
+    let parts: Vec<&str> = glz_host.split('.').collect();
+    let shard = if parts.len() >= 2 { parts[1] } else { "ap" };
+    let pd_host = format!("pd.{}.a.pvp.net", shard);
+
+    let hist_url = format!("https://{}/match-history/v1/history/{}?startIndex=0&endIndex=15", pd_host, my_puuid);
+    let hist_resp = client.get(&hist_url)
+        .header("Authorization", format!("Bearer {}", access_token))
+        .header("X-Riot-Entitlements-JWT", jwt)
+        .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+        .header("X-Riot-ClientVersion", client_version)
+        .send().await
+        .map_err(|e| format!("Failed to fetch match history: {}", e))?;
+
+    let hist_json = hist_resp.json::<serde_json::Value>().await
+        .map_err(|e| format!("Failed to parse match history json: {}", e))?;
+
+    let history_items = hist_json.get("History")
+        .and_then(|h| h.as_array())
+        .ok_or_else(|| "No matches array in history".to_string())?;
+
+    let existing_matches = load_career_matches();
+    let existing_ids: HashSet<String> = existing_matches.iter().map(|m| m.match_id.clone()).collect();
+
+    let last_roster = {
+        let lock = crate::tracker::get_last_active_roster_holder().read().await;
+        if lock.is_some() {
+            lock.clone()
+        } else {
+            let p = crate::config::AppConfig::data_dir().join("last_roster.json");
+            if let Ok(data) = std::fs::read_to_string(p) {
+                serde_json::from_str::<crate::tracker::LiveMatchRoster>(&data).ok()
+            } else {
+                None
+            }
+        }
+    };
+
+    let mut new_matches: Vec<CareerMatch> = Vec::new();
+
+    for item in history_items {
+        let match_id = match item.get("MatchID").and_then(|m| m.as_str()) {
+            Some(id) => id,
+            None => continue,
+        };
+
+        if existing_ids.contains(match_id) {
+            continue;
+        }
+
+        let match_url = format!("https://{}/match-details/v1/matches/{}", pd_host, match_id);
+        let match_resp = match client.get(&match_url)
+            .header("Authorization", format!("Bearer {}", access_token))
+            .header("X-Riot-Entitlements-JWT", jwt)
+            .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+            .header("X-Riot-ClientVersion", client_version)
+            .send().await {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
+
+        let m_json: serde_json::Value = match match_resp.json().await {
+            Ok(j) => j,
+            Err(_) => continue,
+        };
+
+        let mut match_puuids: Vec<String> = Vec::new();
+        if let Some(players) = m_json.get("players").and_then(|p| p.as_array()) {
+            for p in players {
+                if let Some(s) = p.get("subject").and_then(|v| v.as_str()) {
+                    if !s.is_empty() {
+                        match_puuids.push(s.to_string());
+                    }
+                }
+            }
+        }
+
+        let unmasked = crate::tracker::fetch_unmasked_names(
+            client,
+            &pd_host,
+            &match_puuids,
+            access_token,
+            jwt,
+            client_version,
+        ).await;
+
+        if let Some(cm) = parse_match_details_with_names(&m_json, my_puuid, last_roster.as_ref(), &unmasked) {
+            new_matches.push(cm);
+        }
+    }
+
+    if !new_matches.is_empty() {
+        let _ = save_career_matches(&new_matches);
+    }
+
+    Ok(load_career_matches())
 }
