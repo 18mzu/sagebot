@@ -1497,6 +1497,25 @@ pub async fn get_live_match_roster_internal(
         client_version,
     ).await;
 
+    // Check if we have a concluded match roster in memory or disk cache
+    let cached_concluded = {
+        let lock = get_last_active_roster_holder().read().await;
+        if lock.is_some() {
+            lock.clone()
+        } else {
+            let p = crate::config::data_dir().join("last_roster.json");
+            std::fs::read_to_string(p).ok().and_then(|d| serde_json::from_str::<LiveMatchRoster>(&d).ok())
+        }
+    };
+
+    if let Some(mut last) = cached_concluded {
+        if !last.ally_team.is_empty() || !last.enemy_team.is_empty() {
+            last.state = "CONCLUDED".to_string();
+            last.server_name = lobby_server;
+            return Ok(last);
+        }
+    }
+
     Ok(LiveMatchRoster {
         state: "NO_MATCH".to_string(),
         match_id: "".to_string(),
@@ -1800,10 +1819,31 @@ async fn parse_coregame_roster(
         .filter_map(|p| p.get("Subject").and_then(|s| s.as_str()).map(|s| s.to_string()))
         .collect();
 
+    // Check if we have an existing cached roster for this exact match
+    let cached_roster_opt = {
+        let lock = get_last_active_roster_holder().read().await;
+        if lock.is_some() {
+            lock.clone()
+        } else {
+            let p = crate::config::data_dir().join("last_roster.json");
+            std::fs::read_to_string(p).ok().and_then(|d| serde_json::from_str::<LiveMatchRoster>(&d).ok())
+        }
+    };
+
+    let mut cached_players: HashMap<String, TrackedPlayer> = HashMap::new();
+    if let Some(ref c) = cached_roster_opt {
+        if c.match_id == match_id {
+            for p in c.ally_team.iter().chain(c.enemy_team.iter()) {
+                cached_players.insert(p.puuid.to_lowercase(), p.clone());
+            }
+        }
+    }
+
     // Fetch unmasked names
     let names_map = fetch_unmasked_names(client, pd_host, &puuids, access_token, jwt, client_version).await;
 
-    // Concurrently fetch MMR & stats for each player
+    // Concurrently fetch MMR & stats for each player (reusing cache when already available)
+    let mut pre_resolved: Vec<(TrackedPlayer, Vec<String>)> = Vec::new();
     let mut futures = Vec::new();
     for p in &players {
         let puuid = p.get("Subject").and_then(|s| s.as_str()).unwrap_or("").to_string();
@@ -1832,6 +1872,29 @@ async fn parse_coregame_roster(
         } else {
             party_map.get(&puuid).cloned().unwrap_or_default()
         };
+
+        // If player stats were already fetched and cached for this exact match, reuse them
+        let cached_entry = cached_players.get(&puuid.to_lowercase()).cloned();
+        let has_cached_stats = cached_entry.as_ref().map(|cp| {
+            cp.current_tier > 0 || cp.peak_tier > 0 || cp.win_rate > 0.0 || !cp.recent_matches.is_empty()
+        }).unwrap_or(false);
+
+        if let Some(mut cp) = cached_entry.filter(|_| has_cached_stats) {
+            if !char_id.is_empty() {
+                cp.agent_id = char_id.clone();
+                cp.agent_name = agent_name.clone();
+            }
+            cp.team = team_id.clone();
+            if !party_tag.is_empty() {
+                cp.party_tag = party_tag.clone();
+            }
+            if !player_name.starts_with("Player#") && !player_name.starts_with("Player ") {
+                cp.name = player_name.clone();
+            }
+            let c_mids: Vec<String> = cp.recent_matches.iter().map(|m| m.match_id.clone()).collect();
+            pre_resolved.push((cp, c_mids));
+            continue;
+        }
 
         // Skins
         let loadout_items = loadouts_by_sub.get(&puuid)
@@ -1893,13 +1956,25 @@ async fn parse_coregame_roster(
 
     let results = futures::future::join_all(futures).await;
 
+    let mut all_results = pre_resolved;
+    all_results.extend(results);
+
+    let live_puuids: std::collections::HashSet<String> = all_results.iter().map(|(p, _)| p.puuid.to_lowercase()).collect();
+    // Preserve any players from cached roster who were missing in this poll (e.g. disconnected or left near match end)
+    for (cpuuid, cplayer) in &cached_players {
+        if !live_puuids.contains(cpuuid) {
+            let c_mids = cplayer.recent_matches.iter().map(|m| m.match_id.clone()).collect();
+            all_results.push((cplayer.clone(), c_mids));
+        }
+    }
+
     let mut ally_team = Vec::new();
     let mut enemy_team = Vec::new();
     let mut ally_matches: HashMap<String, Vec<String>> = HashMap::new();
     let mut enemy_matches: HashMap<String, Vec<String>> = HashMap::new();
 
     let is_ffa = gamemode.eq_ignore_ascii_case("deathmatch") || (gamemode.to_lowercase().contains("deathmatch") && !gamemode.to_lowercase().contains("team"));
-    for (player, m_ids) in results {
+    for (player, m_ids) in all_results {
         if is_ffa {
             if player.is_self {
                 ally_matches.insert(player.puuid.clone(), m_ids);

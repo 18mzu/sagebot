@@ -448,6 +448,7 @@ export interface CareerKillEvent {
   weapon_name: string;
   is_headshot: boolean;
   event_type: "kill" | "plant" | "defuse" | string;
+  kill_distance_meters?: number;
 }
 
 export interface CareerRoundPlayerEconomy {
@@ -549,6 +550,28 @@ const MAP_SPLASHES: Record<string, string> = {
   glitch: "https://media.valorant-api.com/maps/d6336a5a-428f-c591-98db-c8a291159134/splash.png",
   piazza: "https://media.valorant-api.com/maps/de28aa9b-4cbe-1003-320e-6cb3ec309557/splash.png",
   gauntlet: "https://media.valorant-api.com/maps/dd3a1cd9-41b1-50ea-3bd6-a7bb3c5978bd/splash.png",
+};
+
+const MAP_DISPLAY_ICONS: Record<string, string> = {
+  ascent: "https://media.valorant-api.com/maps/7eaecc1b-4337-bbf6-6ab9-04b8f06b3319/displayicon.png",
+  bind: "https://media.valorant-api.com/maps/2c9d57ec-4431-9c5e-2939-8f9ef6dd5cba/displayicon.png",
+  breeze: "https://media.valorant-api.com/maps/2fb9a4fd-47b8-4e7d-a969-74b4046ebd53/displayicon.png",
+  fracture: "https://media.valorant-api.com/maps/b529448b-4d60-346e-e89e-00a4c527a405/displayicon.png",
+  haven: "https://media.valorant-api.com/maps/2bee0dc9-4ffe-519b-1cbd-7fbe763a6047/displayicon.png",
+  icebox: "https://media.valorant-api.com/maps/e2ad5c54-4114-a870-9641-8ea21279579a/displayicon.png",
+  lotus: "https://media.valorant-api.com/maps/2fe4ed3a-450a-948b-6d6b-e89a78e680a9/displayicon.png",
+  pearl: "https://media.valorant-api.com/maps/fd267378-4d1d-484f-ff52-77821ed10dc2/displayicon.png",
+  split: "https://media.valorant-api.com/maps/d960549e-485c-e861-8d71-aa9d1aed12a2/displayicon.png",
+  sunset: "https://media.valorant-api.com/maps/92584fbe-486a-b1b2-9faa-39b0f486b498/displayicon.png",
+  abyss: "https://media.valorant-api.com/maps/224b0a95-48b9-f703-1bd8-67aca101a61f/displayicon.png",
+  summit: "https://media.valorant-api.com/maps/756da597-416b-c0f2-f47b-afbdf28670bc/displayicon.png",
+  corrode: "https://media.valorant-api.com/maps/1c18ab1f-420d-0d8b-71d0-77ad3c439115/displayicon.png",
+  district: "https://media.valorant-api.com/maps/690b3ed2-4dff-945b-8223-6da834e30d24/displayicon.png",
+  kasbah: "https://media.valorant-api.com/maps/12452a9d-48c3-0b02-e7eb-0381c3520404/displayicon.png",
+  drift: "https://media.valorant-api.com/maps/2c09d728-42d5-30d8-43dc-96a05cc7ee9d/displayicon.png",
+  glitch: "https://media.valorant-api.com/maps/d6336a5a-428f-c591-98db-c8a291159134/displayicon.png",
+  piazza: "https://media.valorant-api.com/maps/de28aa9b-4cbe-1003-320e-6cb3ec309557/displayicon.png",
+  gauntlet: "https://media.valorant-api.com/maps/dd3a1cd9-41b1-50ea-3bd6-a7bb3c5978bd/displayicon.png",
 };
 
 interface ToastMsg {
@@ -3672,7 +3695,7 @@ export default function App() {
             <div
               className="tracker-agent-avatar-wrap"
               data-tooltip={player.agent_name || "Agent"}
-              data-tooltip-pos="bottom"
+              data-tooltip-pos="right"
             >
               {player.agent_id ? (
                 <img
@@ -3694,7 +3717,7 @@ export default function App() {
               <div className="tracker-player-top-line">
                 <span
                   className="tracker-player-name"
-                  {...(cleanRawName.length > 18 ? { "data-tooltip": cleanRawName, "data-tooltip-pos": "bottom" } : {})}
+                  {...(cleanRawName.length > 20 ? { "data-tooltip": cleanRawName, "data-tooltip-pos": "bottom" } : {})}
                 >
                   <span className="tracker-gamename">{gameName}</span>
                   {tagLine && <span className="tracker-tagline">#{tagLine}</span>}
@@ -4153,6 +4176,10 @@ export default function App() {
             >
               <Play size={14} fill={activeTab === "main" ? "currentColor" : "none"} />
               <span>Main</span>
+              <span
+                className={`nav-live-dot ${isRunning ? "dot-bot-running" : "dot-bot-stopped"}`}
+                data-tooltip={isRunning ? "SageBot: Running" : "SageBot: Stopped"}
+              />
             </button>
             <button
               className={`nav-btn ${activeTab === "config" ? "active" : ""}`}
@@ -4218,7 +4245,12 @@ export default function App() {
                     <span className="status-label">STATUS:</span>
                     <span
                       className={`status-value ${isRunning ? "val-running" : "val-stopped"}`}
+                      style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
                     >
+                      <span
+                        className={`nav-live-dot ${isRunning ? "dot-bot-running" : "dot-bot-stopped"}`}
+                        style={{ margin: 0 }}
+                      />
                       {isRunning ? "RUNNING" : "STOPPED"}
                     </span>
                   </div>
@@ -4595,7 +4627,7 @@ export default function App() {
                                       <div
                                         className="tracker-agent-avatar-wrap"
                                         data-tooltip={p.agent_name || "Agent"}
-                                        data-tooltip-pos="bottom"
+                                        data-tooltip-pos="right"
                                       >
                                         {p.agent_id ? (
                                           <img
@@ -4878,14 +4910,14 @@ export default function App() {
                                 })}
                               </div>
 
-                              {/* ACTIVE ROUND DETAILS: 2 COLUMNS */}
+                              {/* ACTIVE ROUND DETAILS: 3 COLUMNS (EVENT LOG | MINIMAP BLUEPRINT | ECONOMY & EQUIPMENT) */}
                               <div className="career-round-details-grid">
                                 {/* LEFT COLUMN: EVENT LOG */}
                                 <div className="career-timeline-column">
                                   <div className="career-timeline-col-header">
                                     <h3>EVENT LOG</h3>
                                     <span className="career-col-subtitle">
-                                      Round {activeRound.round_num} Timeline Events
+                                      Round {activeRound.round_num} Events
                                     </span>
                                   </div>
                                   <div className="career-event-log-list">
@@ -4902,12 +4934,12 @@ export default function App() {
                                             } ${isPlant ? "event-plant" : isDefuse ? "event-defuse" : ""}`}
                                           >
                                             <span className="career-event-time">{ev.time_str}</span>
-                                            <div className="career-event-actor">
+                                            <div className="career-event-actor" title={ev.killer_name}>
                                               {ev.killer_agent_id ? (
                                                 <img
                                                   src={`https://media.valorant-api.com/agents/${ev.killer_agent_id}/displayicon.png`}
                                                   alt=""
-                                                  className="career-actor-agent-icon"
+                                                  className={`career-actor-agent-icon ${ev.killer_is_ally ? "border-ally" : "border-enemy"}`}
                                                 />
                                               ) : (
                                                 <div className="tracker-agent-placeholder">?</div>
@@ -4921,21 +4953,26 @@ export default function App() {
                                               ) : isDefuse ? (
                                                 <span className="career-event-defuse-badge">🔧 Defused</span>
                                               ) : (
-                                                <span className="career-event-weapon-tag">
-                                                  {ev.weapon_name}
-                                                  {ev.is_headshot && <span className="hs-marker">🎯</span>}
-                                                </span>
+                                                <div className="career-event-weapon-tag">
+                                                  <span>
+                                                    {ev.weapon_name || "Kill"}
+                                                    {ev.is_headshot && <span className="hs-marker"> 🎯</span>}
+                                                  </span>
+                                                  {typeof ev.kill_distance_meters === "number" && ev.kill_distance_meters > 0 && (
+                                                    <span className="career-kill-distance">{ev.kill_distance_meters}m</span>
+                                                  )}
+                                                </div>
                                               )}
                                             </div>
 
                                             {!isPlant && !isDefuse && ev.victim_name && (
-                                              <div className="career-event-victim">
+                                              <div className="career-event-victim" title={ev.victim_name}>
                                                 <span className="career-actor-name">{ev.victim_name}</span>
                                                 {ev.victim_agent_id && (
                                                   <img
                                                     src={`https://media.valorant-api.com/agents/${ev.victim_agent_id}/displayicon.png`}
                                                     alt=""
-                                                    className="career-actor-agent-icon"
+                                                    className={`career-actor-agent-icon ${!ev.killer_is_ally ? "border-ally" : "border-enemy"}`}
                                                   />
                                                 )}
                                               </div>
@@ -4948,6 +4985,46 @@ export default function App() {
                                         <p>No kill events logged for this round.</p>
                                       </div>
                                     )}
+                                  </div>
+                                </div>
+
+                                {/* CENTER COLUMN: OVERHEAD MINIMAP BLUEPRINT */}
+                                <div className="career-timeline-column career-minimap-column">
+                                  <div className="career-timeline-col-header">
+                                    <h3>MINIMAP BLUEPRINT</h3>
+                                    <span className="career-col-subtitle">
+                                      {selectedCareerMatch.map_name.toUpperCase()}
+                                    </span>
+                                  </div>
+                                  <div className="career-minimap-wrapper">
+                                    <div className="career-minimap-frame">
+                                      {MAP_DISPLAY_ICONS[selectedCareerMatch.map_name.toLowerCase()] ? (
+                                        <img
+                                          src={MAP_DISPLAY_ICONS[selectedCareerMatch.map_name.toLowerCase()]}
+                                          alt={selectedCareerMatch.map_name}
+                                          className="career-minimap-img"
+                                        />
+                                      ) : (
+                                        <div className="career-minimap-placeholder">
+                                          <span>No overhead blueprint available</span>
+                                        </div>
+                                      )}
+
+                                      {activeRound.events && activeRound.events.some((ev) => ev.event_type === "plant") && (
+                                        <div className="career-minimap-spike-indicator">
+                                          <span className="career-spike-pulse" />
+                                          <span>⚡ SPIKE PLANTED</span>
+                                        </div>
+                                      )}
+                                    </div>
+
+                                    <div className={`career-minimap-outcome ${activeRound.winning_team === "Ally" ? "outcome-ally" : "outcome-enemy"}`}>
+                                      <span>ROUND {activeRound.round_num}</span>
+                                      <span>•</span>
+                                      <span>
+                                        {activeRound.winning_team === "Ally" ? "ALLY ROUND WIN" : "ENEMY ROUND WIN"} ({(activeRound.round_result_type || "").toUpperCase()})
+                                      </span>
+                                    </div>
                                   </div>
                                 </div>
 
@@ -4973,53 +5050,105 @@ export default function App() {
                                     <table className="career-econ-table">
                                       <thead>
                                         <tr>
-                                          <th style={{ width: "160px", textAlign: "left" }}>PLAYER</th>
-                                          <th style={{ textAlign: "center", width: "40px" }}>K</th>
-                                          <th style={{ textAlign: "center", width: "40px" }}>A</th>
-                                          <th style={{ textAlign: "right", width: "110px" }}>ECON (LOAD / BANK)</th>
-                                          <th style={{ textAlign: "left", width: "120px" }}>EQUIPMENT</th>
+                                          <th style={{ width: "150px", textAlign: "left" }}>PLAYER</th>
+                                          <th style={{ textAlign: "center", width: "35px" }}>K</th>
+                                          <th style={{ textAlign: "center", width: "35px" }}>A</th>
+                                          <th style={{ textAlign: "right", width: "105px" }}>ECON (LOAD / BANK)</th>
+                                          <th style={{ textAlign: "left", width: "115px" }}>EQUIPMENT</th>
                                         </tr>
                                       </thead>
                                       <tbody>
-                                        {activeRound.player_economies.map((pe, peIdx) => (
-                                          <tr
-                                            key={pe.puuid || peIdx}
-                                            className={`career-econ-row ${pe.is_ally ? "econ-ally" : "econ-enemy"}`}
-                                          >
-                                            <td>
-                                              <div className="career-econ-player-cell">
-                                                {pe.agent_id ? (
-                                                  <img
-                                                    src={`https://media.valorant-api.com/agents/${pe.agent_id}/displayicon.png`}
-                                                    alt=""
-                                                    className="career-actor-agent-icon"
-                                                  />
-                                                ) : null}
-                                                <span className="career-econ-player-name">{pe.name}</span>
-                                              </div>
-                                            </td>
-                                            <td style={{ textAlign: "center" }}>
-                                              <span className="career-econ-val">{pe.kills}</span>
-                                            </td>
-                                            <td style={{ textAlign: "center" }}>
-                                              <span className="career-econ-val">{pe.assists}</span>
-                                            </td>
-                                            <td style={{ textAlign: "right" }}>
-                                              <div className="career-econ-vals">
-                                                <span className="econ-loadout">{pe.loadout_value.toLocaleString()}</span>
-                                                <span className="econ-bank">{pe.remaining_bank.toLocaleString()}</span>
-                                              </div>
-                                            </td>
-                                            <td>
-                                              <div className="career-equip-vals">
-                                                <span className="career-wep-text">{pe.weapon_name || "—"}</span>
-                                                {pe.armor_name && (
-                                                  <span className="career-arm-text">{pe.armor_name}</span>
-                                                )}
-                                              </div>
-                                            </td>
-                                          </tr>
-                                        ))}
+                                        {/* ALLIES SECTION */}
+                                        <tr className="career-econ-section-header header-ally">
+                                          <td colSpan={5}>ALLIES</td>
+                                        </tr>
+                                        {activeRound.player_economies
+                                          .filter((pe) => pe.is_ally)
+                                          .map((pe, peIdx) => (
+                                            <tr
+                                              key={pe.puuid || `ally-${peIdx}`}
+                                              className="career-econ-row econ-ally"
+                                            >
+                                              <td>
+                                                <div className="career-econ-player-cell">
+                                                  {pe.agent_id ? (
+                                                    <img
+                                                      src={`https://media.valorant-api.com/agents/${pe.agent_id}/displayicon.png`}
+                                                      alt=""
+                                                      className="career-actor-agent-icon border-ally"
+                                                    />
+                                                  ) : null}
+                                                  <span className="career-econ-player-name">{pe.name}</span>
+                                                </div>
+                                              </td>
+                                              <td style={{ textAlign: "center" }}>
+                                                <span className="career-econ-val">{pe.kills}</span>
+                                              </td>
+                                              <td style={{ textAlign: "center" }}>
+                                                <span className="career-econ-val">{pe.assists}</span>
+                                              </td>
+                                              <td style={{ textAlign: "right" }}>
+                                                <div className="career-econ-vals">
+                                                  <span className="econ-loadout">{pe.loadout_value.toLocaleString()}</span>
+                                                  <span className="econ-bank">{pe.remaining_bank.toLocaleString()}</span>
+                                                </div>
+                                              </td>
+                                              <td>
+                                                <div className="career-equip-vals">
+                                                  <span className="career-wep-text">{pe.weapon_name || "—"}</span>
+                                                  {pe.armor_name && (
+                                                    <span className="career-arm-text">{pe.armor_name}</span>
+                                                  )}
+                                                </div>
+                                              </td>
+                                            </tr>
+                                          ))}
+
+                                        {/* ENEMIES SECTION */}
+                                        <tr className="career-econ-section-header header-enemy">
+                                          <td colSpan={5}>ENEMIES</td>
+                                        </tr>
+                                        {activeRound.player_economies
+                                          .filter((pe) => !pe.is_ally)
+                                          .map((pe, peIdx) => (
+                                            <tr
+                                              key={pe.puuid || `enemy-${peIdx}`}
+                                              className="career-econ-row econ-enemy"
+                                            >
+                                              <td>
+                                                <div className="career-econ-player-cell">
+                                                  {pe.agent_id ? (
+                                                    <img
+                                                      src={`https://media.valorant-api.com/agents/${pe.agent_id}/displayicon.png`}
+                                                      alt=""
+                                                      className="career-actor-agent-icon border-enemy"
+                                                    />
+                                                  ) : null}
+                                                  <span className="career-econ-player-name">{pe.name}</span>
+                                                </div>
+                                              </td>
+                                              <td style={{ textAlign: "center" }}>
+                                                <span className="career-econ-val">{pe.kills}</span>
+                                              </td>
+                                              <td style={{ textAlign: "center" }}>
+                                                <span className="career-econ-val">{pe.assists}</span>
+                                              </td>
+                                              <td style={{ textAlign: "right" }}>
+                                                <div className="career-econ-vals">
+                                                  <span className="econ-loadout">{pe.loadout_value.toLocaleString()}</span>
+                                                  <span className="econ-bank">{pe.remaining_bank.toLocaleString()}</span>
+                                                </div>
+                                              </td>
+                                              <td>
+                                                <div className="career-equip-vals">
+                                                  <span className="career-wep-text">{pe.weapon_name || "—"}</span>
+                                                  {pe.armor_name && (
+                                                    <span className="career-arm-text">{pe.armor_name}</span>
+                                                  )}
+                                                </div>
+                                              </td>
+                                            </tr>
+                                          ))}
                                       </tbody>
                                     </table>
                                   </div>

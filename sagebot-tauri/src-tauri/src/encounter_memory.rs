@@ -167,3 +167,4 @@ pub fn get_encounter(puuid: &str) -> Option<PlayerEncounter> {
     let map = load_encounters();
     map.get(&puuid.to_lowercase()).cloned()
 }
+

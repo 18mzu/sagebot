@@ -65,6 +65,8 @@ pub struct CareerKillEvent {
     pub weapon_name: String,
     pub is_headshot: bool,
     pub event_type: String, // "kill" | "plant" | "defuse"
+    #[serde(default)]
+    pub kill_distance_meters: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -217,6 +219,7 @@ pub fn load_career_matches() -> Vec<CareerMatch> {
                                     weapon_name: "Vandal".to_string(),
                                     is_headshot: true,
                                     event_type: "kill".to_string(),
+                                    kill_distance_meters: Some(22),
                                 });
                             }
                         }
@@ -728,6 +731,7 @@ pub fn parse_match_details(
                     weapon_name: "Planted".to_string(),
                     is_headshot: false,
                     event_type: "plant".to_string(),
+                    kill_distance_meters: None,
                 });
             }
 
@@ -752,6 +756,7 @@ pub fn parse_match_details(
                     weapon_name: "Defused".to_string(),
                     is_headshot: false,
                     event_type: "defuse".to_string(),
+                    kill_distance_meters: None,
                 });
             }
 
@@ -777,6 +782,23 @@ pub fn parse_match_details(
                                 .map(|s| s.to_lowercase().contains("head"))
                                 .unwrap_or(false);
 
+                            let distance_meters: Option<u32> = (|| {
+                                let victim_loc = k.get("victimLocation")?;
+                                let vx = victim_loc.get("x")?.as_f64()?;
+                                let vy = victim_loc.get("y")?.as_f64()?;
+                                let locs = k.get("playerLocations")?.as_array()?;
+                                for pl in locs {
+                                    if pl.get("subject")?.as_str()? == sub {
+                                        let loc = pl.get("location")?;
+                                        let kx = loc.get("x")?.as_f64()?;
+                                        let ky = loc.get("y")?.as_f64()?;
+                                        let dist_cm = ((vx - kx).powi(2) + (vy - ky).powi(2)).sqrt();
+                                        return Some((dist_cm / 100.0).round() as u32);
+                                    }
+                                }
+                                None
+                            })();
+
                             events.push(CareerKillEvent {
                                 time_in_round: time_sec,
                                 time_str,
@@ -791,6 +813,7 @@ pub fn parse_match_details(
                                 weapon_name: weapon,
                                 is_headshot: is_hs,
                                 event_type: "kill".to_string(),
+                                kill_distance_meters: distance_meters,
                             });
                         }
                     }
