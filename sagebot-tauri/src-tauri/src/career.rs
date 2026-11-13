@@ -309,8 +309,8 @@ pub fn save_career_match(m: CareerMatch) -> Result<(), String> {
     matches.retain(|existing| existing.match_id != m.match_id);
     matches.insert(0, m);
     matches.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-    if matches.len() > 200 {
-        matches.truncate(200);
+    if matches.len() > 1000 {
+        matches.truncate(1000);
     }
 
     let json = serde_json::to_string_pretty(&matches)
@@ -334,8 +334,8 @@ pub fn save_career_matches(batch: &[CareerMatch]) -> Result<(), String> {
         matches.push(m.clone());
     }
     matches.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-    if matches.len() > 200 {
-        matches.truncate(200);
+    if matches.len() > 1000 {
+        matches.truncate(1000);
     }
     let json = serde_json::to_string_pretty(&matches)
         .map_err(|e| format!("Failed to serialize career matches: {}", e))?;
@@ -490,16 +490,12 @@ pub fn parse_match_details_with_names(
         }
     }
 
-    // Map live roster players for party tags and exact ranks/RR
+    // Map live roster players strictly by PUUID for party tags and exact ranks/RR
     let mut live_player_map: HashMap<String, &crate::tracker::TrackedPlayer> = HashMap::new();
-    let mut live_agent_map: HashMap<String, &crate::tracker::TrackedPlayer> = HashMap::new();
     if let Some(roster) = live_roster {
         for p in roster.ally_team.iter().chain(roster.enemy_team.iter()) {
             if !p.puuid.is_empty() {
                 live_player_map.insert(p.puuid.to_lowercase(), p);
-            }
-            if !p.agent_id.is_empty() {
-                live_agent_map.insert(p.agent_id.to_lowercase(), p);
             }
         }
     }
@@ -560,8 +556,7 @@ pub fn parse_match_details_with_names(
             let pl = plants.get(&puuid).copied().unwrap_or(0);
             let df = defuses.get(&puuid).copied().unwrap_or(0);
 
-            let live_opt = live_player_map.get(&puuid.to_lowercase()).copied()
-                .or_else(|| live_agent_map.get(&character_id.to_lowercase()).copied());
+            let live_opt = live_player_map.get(&puuid.to_lowercase()).copied();
 
             let (final_name, final_tag, final_rank_tier, final_rank_name, final_rr, party_tag) = if let Some(live) = live_opt {
                 let name_clean = if !live.name.is_empty() {
@@ -1179,7 +1174,7 @@ pub async fn sync_career_matches_internal(
     let shard = if parts.len() >= 2 { parts[1] } else { "ap" };
     let pd_host = format!("pd.{}.a.pvp.net", shard);
 
-    let hist_url = format!("https://{}/match-history/v1/history/{}?startIndex=0&endIndex=15", pd_host, my_puuid);
+    let hist_url = format!("https://{}/match-history/v1/history/{}?startIndex=0&endIndex=20", pd_host, my_puuid);
     let hist_resp = client.get(&hist_url)
         .header("Authorization", format!("Bearer {}", access_token))
         .header("X-Riot-Entitlements-JWT", jwt)
@@ -1196,7 +1191,23 @@ pub async fn sync_career_matches_internal(
         .ok_or_else(|| "No matches array in history".to_string())?;
 
     let existing_matches = load_career_matches();
-    let existing_ids: HashSet<String> = existing_matches.iter().map(|m| m.match_id.clone()).collect();
+    let existing_ids: HashSet<String> = existing_matches
+        .iter()
+        .filter(|m| {
+            // Re-sync if duplicate player names exist in the same match (from older bug)
+            let mut seen_names = HashSet::new();
+            for p in &m.players {
+                if !p.name.is_empty() && !p.name.starts_with("Player ") {
+                    let key = format!("{}#{}", p.name.to_lowercase(), p.tag.to_lowercase());
+                    if !seen_names.insert(key) {
+                        return false;
+                    }
+                }
+            }
+            true
+        })
+        .map(|m| m.match_id.clone())
+        .collect();
 
     let last_roster = {
         let lock = crate::tracker::get_last_active_roster_holder().read().await;
@@ -1260,7 +1271,20 @@ pub async fn sync_career_matches_internal(
             client_version,
         ).await;
 
-        if let Some(cm) = parse_match_details_with_names(&m_json, my_puuid, last_roster.as_ref(), &unmasked) {
+        // Only use last_roster if at least 2 players from this match appear in last_roster
+        let matched_roster = last_roster.as_ref().filter(|r| {
+            let roster_puuids: HashSet<String> = r.ally_team.iter()
+                .chain(r.enemy_team.iter())
+                .filter(|p| !p.puuid.is_empty())
+                .map(|p| p.puuid.to_lowercase())
+                .collect();
+            let overlap = match_puuids.iter()
+                .filter(|p| roster_puuids.contains(&p.to_lowercase()))
+                .count();
+            overlap >= 2
+        });
+
+        if let Some(cm) = parse_match_details_with_names(&m_json, my_puuid, matched_roster, &unmasked) {
             new_matches.push(cm);
         }
     }

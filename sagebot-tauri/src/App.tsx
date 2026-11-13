@@ -4891,11 +4891,6 @@ export default function App() {
                                       >
                                         <span className="career-gamename">{p.name || "Player"}</span>
                                         {p.tag && <span className="career-tagline">#{p.tag}</span>}
-                                        {p.party_tag && (
-                                          <span className={`career-party-mini-pill ${partyClass}`}>
-                                            {p.party_tag}
-                                          </span>
-                                        )}
                                       </div>
                                       <div
                                         className="tracker-player-rank-subline"
@@ -5055,33 +5050,32 @@ export default function App() {
                                 </div>
 
                                 {/* Rank & RR Change */}
-                                <div className="career-card-rank-box">
-                                  {m.my_rank_tier > 0 && (
+                                <div className="career-card-rank-box" data-tooltip={m.my_rank_name || "Unranked"}>
+                                  {m.my_rank_tier > 0 ? (
                                     <img
                                       className="career-card-rank-icon"
                                       src={getRankIconUrl(m.my_rank_tier)}
-                                      alt=""
+                                      alt={m.my_rank_name || "Rank"}
                                     />
-                                  )}
-                                  <div className="career-card-rank-col">
+                                  ) : (
                                     <span
                                       className="career-card-rank-text"
                                       style={{ color: getRankColor(m.my_rank_name) }}
                                     >
-                                      {m.my_rank_name || "Unranked"}
+                                      Unranked
                                     </span>
-                                    {m.my_rank_tier > 0 && (() => {
-                                      const selfPlayer = m.players.find((p) => p.is_self);
-                                      if (selfPlayer && selfPlayer.rr > 0) {
-                                        return (
-                                          <span className="career-card-rr-text">
-                                            {selfPlayer.rr} RR
-                                          </span>
-                                        );
-                                      }
-                                      return null;
-                                    })()}
-                                  </div>
+                                  )}
+                                  {m.my_rank_tier > 0 && (() => {
+                                    const selfPlayer = m.players.find((p) => p.is_self);
+                                    if (selfPlayer && selfPlayer.rr > 0) {
+                                      return (
+                                        <span className="career-card-rr-text">
+                                          {selfPlayer.rr} RR
+                                        </span>
+                                      );
+                                    }
+                                    return null;
+                                  })()}
                                   {m.my_rr_change !== 0 && (
                                     <span
                                       className={`career-card-rr-change ${m.my_rr_change > 0 ? "rr-up" : "rr-down"
