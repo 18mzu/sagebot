@@ -139,12 +139,33 @@ pub fn load_career_matches() -> Vec<CareerMatch> {
     if let Ok(content) = std::fs::read_to_string(&path) {
         if let Ok(mut matches) = serde_json::from_str::<Vec<CareerMatch>>(&content) {
             let enc_map = crate::encounter_memory::load_encounters();
+            let mut modified_fb = false;
             for m in &mut matches {
+                let has_any_fb = m.players.iter().any(|p| p.first_bloods > 0);
+                if !has_any_fb && !m.round_results.is_empty() {
+                    let mut fb_counts: HashMap<String, u32> = HashMap::new();
+                    for r in &m.round_results {
+                        let first_kill = r.events.iter()
+                            .filter(|e| e.event_type == "kill" && !e.killer_puuid.is_empty())
+                            .min_by_key(|e| e.time_in_round);
+                        if let Some(fk) = first_kill {
+                            *fb_counts.entry(fk.killer_puuid.clone()).or_default() += 1;
+                        }
+                    }
+                    for p in &mut m.players {
+                        if let Some(&cnt) = fb_counts.get(&p.puuid) {
+                            p.first_bloods = cnt;
+                            modified_fb = true;
+                        }
+                    }
+                }
+
                 for p in &mut m.players {
                     if !p.puuid.is_empty() && !p.is_self {
                         p.encounter = enc_map.get(&p.puuid.to_lowercase()).cloned();
                     }
                 }
+
                 // Generate fallback head_to_head if empty
                 if m.head_to_head.is_empty() {
                     let my_k = m.my_kills;
@@ -253,6 +274,11 @@ pub fn load_career_matches() -> Vec<CareerMatch> {
                             avg_bank_enemy: if r == 1 || r == 13 { 200 } else { 1400 },
                         });
                     }
+                }
+            }
+            if modified_fb {
+                if let Ok(json) = serde_json::to_string_pretty(&matches) {
+                    let _ = std::fs::write(&path, json);
                 }
             }
             return matches;
@@ -423,7 +449,12 @@ pub fn parse_match_details(
                         }
 
                         for k in kills {
-                            let ktime = k.get("killTimeInRound").and_then(|t| t.as_u64()).unwrap_or(u64::MAX);
+                            let ktime = k.get("roundTime")
+                                .or_else(|| k.get("timeInRound"))
+                                .or_else(|| k.get("gameTime"))
+                                .or_else(|| k.get("killTimeInRound"))
+                                .and_then(|t| t.as_u64())
+                                .unwrap_or(u64::MAX);
                             if ktime < earliest_kill_time {
                                 earliest_kill_time = ktime;
                                 first_blood_killer = Some(sub.to_string());

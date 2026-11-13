@@ -230,3 +230,10 @@ pub fn get_all_visible_encounters() -> Vec<PlayerEncounter> {
     list.sort_by(|a, b| b.last_seen_timestamp.cmp(&a.last_seen_timestamp));
     list
 }
+
+pub fn delete_encounter(puuid: &str) -> Result<Vec<PlayerEncounter>, String> {
+    let mut map = load_encounters();
+    map.remove(&puuid.to_lowercase());
+    save_encounters(&map)?;
+    Ok(get_all_visible_encounters())
+}

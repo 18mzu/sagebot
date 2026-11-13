@@ -5137,12 +5137,129 @@ input[type="number"] {
   gap: 10px;
 }
 
+/* ==========================================================================
+   TRACKER ENCOUNTER INDICATOR PILL
+   ========================================================================== */
+.tracker-encounter-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  padding: 3px 9px;
+  border-radius: 6px;
+  text-transform: uppercase;
+  margin-left: 8px;
+}
+
+.tracker-encounter-pill.enc-detected {
+  color: #2dd4bf;
+  background: rgba(45, 212, 191, 0.12);
+  border: 1px solid rgba(45, 212, 191, 0.35);
+}
+
+.tracker-encounter-pill.enc-detected .tracker-encounter-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #2dd4bf;
+  box-shadow: 0 0 8px #2dd4bf;
+}
+
+.tracker-encounter-pill.enc-none {
+  color: #fb7185;
+  background: rgba(251, 113, 133, 0.1);
+  border: 1px solid rgba(251, 113, 133, 0.28);
+}
+
+.tracker-encounter-pill.enc-none .tracker-encounter-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #f43f5e;
+  box-shadow: 0 0 6px rgba(244, 63, 94, 0.6);
+}
+
+/* ==========================================================================
+   PLAYERS DIRECTORY SEARCH & COUNTER
+   ========================================================================== */
+.career-header-counter-pill {
+  font-size: 11px;
+  font-weight: 800;
+  color: #2dd4bf;
+  background: rgba(45, 212, 191, 0.12);
+  border: 1px solid rgba(45, 212, 191, 0.3);
+  padding: 3px 10px;
+  border-radius: 9999px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.players-search-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 250px;
+}
+
+.players-search-icon {
+  position: absolute;
+  left: 11px;
+  color: #64748b;
+  pointer-events: none;
+}
+
+.players-search-input {
+  width: 100%;
+  padding: 8px 32px 8px 32px;
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  color: #f1f5f9;
+  font-size: 12px;
+  font-weight: 600;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.players-search-input:focus {
+  border-color: rgba(45, 212, 191, 0.5);
+  box-shadow: 0 0 10px rgba(45, 212, 191, 0.15);
+}
+
+.players-search-clear-btn {
+  position: absolute;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.players-search-clear-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: #f8fafc;
+}
+
+/* ==========================================================================
+   PLAYER ENCOUNTER CARD (DIRECTORY LIST)
+   ========================================================================== */
 .player-encounter-card {
   position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 18px;
+  height: 68px;
+  padding: 0;
   background: rgba(15, 23, 42, 0.75);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 10px;
@@ -5152,16 +5269,60 @@ input[type="number"] {
 }
 
 .player-encounter-card:hover {
-  transform: translateY(-1px);
-  border-color: rgba(45, 212, 191, 0.35);
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+  transform: translateY(-2px);
+  border-color: rgba(45, 212, 191, 0.4);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+}
+
+.player-encounter-card.card-live-ally {
+  border-color: rgba(56, 189, 248, 0.7) !important;
+  box-shadow: 0 0 16px rgba(56, 189, 248, 0.22) !important;
+}
+
+.player-encounter-card.card-live-ally .career-card-stripe {
+  background: #38bdf8 !important;
+  box-shadow: 0 0 10px #38bdf8 !important;
+}
+
+.player-encounter-card.card-live-enemy {
+  border-color: rgba(244, 63, 94, 0.7) !important;
+  box-shadow: 0 0 16px rgba(244, 63, 94, 0.22) !important;
+}
+
+.player-encounter-card.card-live-enemy .career-card-stripe {
+  background: #f43f5e !important;
+  box-shadow: 0 0 10px #f43f5e !important;
+}
+
+.live-encounter-badge {
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  padding: 2px 7px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+.live-encounter-badge.live-ally {
+  background: rgba(56, 189, 248, 0.2);
+  border: 1px solid rgba(56, 189, 248, 0.6);
+  color: #38bdf8;
+  box-shadow: 0 0 8px rgba(56, 189, 248, 0.25);
+}
+
+.live-encounter-badge.live-enemy {
+  background: rgba(244, 63, 94, 0.2);
+  border: 1px solid rgba(244, 63, 94, 0.6);
+  color: #fb7185;
+  box-shadow: 0 0 8px rgba(244, 63, 94, 0.25);
 }
 
 .player-card-identity-box {
   display: flex;
   align-items: center;
   gap: 12px;
-  min-width: 200px;
+  padding-left: 14px;
+  min-width: 220px;
   z-index: 1;
 }
 
@@ -5169,24 +5330,33 @@ input[type="number"] {
   display: flex;
   flex-direction: column;
   gap: 3px;
+  min-width: 0;
 }
 
 .player-card-name-row {
   display: flex;
   align-items: baseline;
   gap: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
 }
 
 .player-card-gamename {
   font-size: 13px;
   font-weight: 800;
   color: #f8fafc;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .player-card-tagline {
   font-size: 11px;
   font-weight: 700;
   color: #64748b;
+  flex-shrink: 0;
 }
 
 .player-card-rank-subline {
@@ -5202,68 +5372,19 @@ input[type="number"] {
   font-weight: 700;
 }
 
-.player-card-ratio-col {
+.player-card-middle-col {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   z-index: 1;
 }
 
-.player-card-ratio-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-}
-
-.ratio-count {
-  color: #cbd5e1;
-  font-weight: 600;
-}
-
-.ratio-count b {
-  color: #f1f5f9;
-  font-weight: 800;
-}
-
-.ratio-dot {
-  color: #475569;
-}
-
-.ratio-winrate {
-  font-weight: 800;
-}
-
-.ratio-record {
-  color: #94a3b8;
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.player-card-ratio-sub {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 10px;
-  color: #64748b;
-  font-weight: 600;
-}
-
-.player-card-ratio-sub b {
-  color: #cbd5e1;
-}
-
-.ratio-sub-dot {
-  color: #334155;
-}
-
-.player-card-last-result-col {
+.player-card-last-match-wrap {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  z-index: 1;
+  gap: 2px;
 }
 
 .last-res-caption {
@@ -5336,6 +5457,7 @@ input[type="number"] {
   display: flex;
   align-items: baseline;
   gap: 6px;
+  white-space: nowrap;
 }
 
 .player-hero-gamename {
@@ -5363,6 +5485,12 @@ input[type="number"] {
   font-weight: 800;
 }
 
+.player-hero-last-seen-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .player-hero-last-seen-line {
   font-size: 11px;
   color: #94a3b8;
@@ -5373,10 +5501,16 @@ input[type="number"] {
   color: #e2e8f0;
 }
 
+.player-hero-last-time-line {
+  font-size: 11px;
+  color: #64748b;
+  font-weight: 700;
+}
+
 .player-hero-stats-strip {
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: 14px;
   z-index: 1;
 }
 
@@ -5387,9 +5521,9 @@ input[type="number"] {
   gap: 2px;
   background: rgba(15, 23, 42, 0.7);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  padding: 8px 16px;
+  padding: 8px 14px;
   border-radius: 8px;
-  min-width: 90px;
+  min-width: 88px;
 }
 
 .player-hero-stat-box .stat-label {
@@ -5406,10 +5540,11 @@ input[type="number"] {
   color: #f1f5f9;
 }
 
-.player-hero-stat-box .stat-sub {
-  font-size: 10px;
-  font-weight: 700;
-  color: #94a3b8;
+.player-hero-stat-box .stat-sub-label {
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 /* ==========================================================================
@@ -5453,33 +5588,90 @@ input[type="number"] {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 18px;
+  height: 68px;
+  padding: 0;
   background: rgba(15, 23, 42, 0.75);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 10px;
   overflow: hidden;
-  transition: transform 0.15s ease, border-color 0.15s ease;
+  cursor: pointer;
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .player-history-card:hover {
-  transform: translateY(-1px);
-  border-color: rgba(255, 255, 255, 0.18);
+  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, 0.22);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
 }
 
-.player-hist-rel-col {
+.player-hist-left-col {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-left: 14px;
   z-index: 1;
-  min-width: 150px;
+  min-width: 220px;
+}
+
+.player-hist-agent-avatar-wrap {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  flex-shrink: 0;
+}
+
+.player-hist-agent-avatar {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.player-hist-info-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.player-hist-top-rel-row {
+  display: flex;
+  align-items: center;
+}
+
+.player-hist-agent-name-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.player-hist-agent-name {
+  font-size: 12px;
+  font-weight: 800;
+  color: #f1f5f9;
+}
+
+.player-hist-meta-sep {
+  color: #475569;
+  font-size: 10px;
+}
+
+.player-hist-rank-text {
+  font-size: 11px;
+  font-weight: 700;
+  color: #94a3b8;
 }
 
 .player-hist-rel-pill {
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 800;
   letter-spacing: 0.04em;
-  padding: 4px 10px;
-  border-radius: 6px;
+  padding: 2px 7px;
+  border-radius: 4px;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
 }
 
 .player-hist-rel-pill.rel-ally {
@@ -5492,32 +5684,6 @@ input[type="number"] {
   color: #fb7185;
   background: rgba(251, 113, 133, 0.14);
   border: 1px solid rgba(251, 113, 133, 0.35);
-}
-
-.player-hist-agent-box {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  z-index: 1;
-  min-width: 140px;
-}
-
-.player-hist-agent-names {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.player-hist-agent-name {
-  font-size: 12px;
-  font-weight: 800;
-  color: #f1f5f9;
-}
-
-.player-hist-rank-text {
-  font-size: 10px;
-  font-weight: 700;
-  color: #94a3b8;
 }
 
 .career-empty-subtab,

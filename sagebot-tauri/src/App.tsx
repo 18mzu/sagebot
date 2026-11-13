@@ -33,6 +33,7 @@ import {
   History,
   Smartphone,
   Shield,
+  Search,
 } from "lucide-react";
 import { RemoteHost, type PairRequest } from "./remoteHost";
 import { formatCodeDisplay, generatePairCode, randomHex } from "./secureChannel";
@@ -723,6 +724,35 @@ export default function App() {
     } catch (e) {
       console.error("Failed to delete match:", e);
     }
+  };
+
+  const deletePlayerEncounter = async (puuid: string) => {
+    try {
+      const updated = await invoke<PlayerEncounter[]>("delete_player_encounter", { puuid });
+      if (updated) {
+        setEncounteredPlayers(updated);
+        setSelectedPlayerEncounter(null);
+        showToast("Player removed from directory.");
+      }
+    } catch (e) {
+      console.error("Failed to delete player encounter:", e);
+    }
+  };
+
+  const formatLocalTimestamp = (ms: number) => {
+    if (!ms) return { dateStr: "", timeStr: "" };
+    const d = new Date(ms);
+    const dateStr = d.toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+    const timeStr = d.toLocaleTimeString(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+    return { dateStr, timeStr };
   };
 
   const [status, setStatus] = useState<StatusResponse>({
@@ -3717,11 +3747,17 @@ export default function App() {
       ? `party-${player.party_tag.toLowerCase().replace(/[^a-z0-9]/g, "")}`
       : "";
 
+    const isMetBefore = !player.is_self && Boolean(
+      player.encounter ||
+      (player.puuid && encounteredPlayers.some((e) => e.puuid && e.puuid.toLowerCase() === player.puuid.toLowerCase()))
+    );
+    const metRowClass = isMetBefore ? (isAlly ? "tracker-row-met-ally" : "tracker-row-met-enemy") : "";
+
     return (
       <tr
         key={player.puuid || Math.random()}
         className={`tracker-row ${isAlly ? "ally-row" : "enemy-row"} ${player.is_self ? "self-row" : ""
-          } ${player.party_tag ? `has-party ${partyClass}` : ""}`}
+          } ${player.party_tag ? `has-party ${partyClass}` : ""} ${metRowClass}`}
       >
         {/* MERGED PLAYER COLUMN: Agent logo + Name & Lvl (Left capsule indicates party) */}
         <td>
@@ -3764,6 +3800,14 @@ export default function App() {
                   {tagLine && <span className="tracker-tagline">#{tagLine}</span>}
                 </span>
                 <div className="tracker-player-badges">
+                  {isMetBefore && (
+                    <span
+                      className={`tracker-badge-met-live ${isAlly ? "badge-ally" : "badge-enemy"}`}
+                      data-tooltip="Encountered in a previous match with SageBot"
+                    >
+                      Met Before
+                    </span>
+                  )}
                   {player.is_incognito && (cleanRawName.startsWith("Player ") || cleanRawName === "Player" || !hasTag) && (
                     <span
                       className="tracker-badge-incognito"
@@ -4178,9 +4222,6 @@ export default function App() {
             >
               <History size={14} />
               <span>Career</span>
-              {careerMatches.length > 0 && (
-                <span className="career-count-badge">{careerMatches.length}</span>
-              )}
             </button>
             <button
               className={`nav-btn ${activeTab === "players" ? "active" : ""}`}
@@ -4192,9 +4233,6 @@ export default function App() {
             >
               <Users size={14} />
               <span>Players</span>
-              {encounteredPlayers.length > 0 && (
-                <span className="career-count-badge">{encounteredPlayers.length}</span>
-              )}
             </button>
             <button
               className={`nav-btn ${activeTab === "shop" ? "active" : ""}`}
@@ -4348,6 +4386,21 @@ export default function App() {
                       ) : (
                         <span className="tracker-status-tag tag-offline">WAITING FOR MATCH</span>
                       )}
+                      {(() => {
+                        if (!roster || (roster.ally_team.length === 0 && roster.enemy_team.length === 0)) return null;
+                        const allyEnc = roster.ally_team.filter((p) => !p.is_self && ((p.encounter && (p.encounter.encounters_count ?? 0) > 0) || (p.puuid && encounteredPlayers.some((e) => e.puuid && e.puuid.toLowerCase() === p.puuid.toLowerCase())))).length;
+                        const enemyEnc = roster.enemy_team.filter((p) => (p.encounter && (p.encounter.encounters_count ?? 0) > 0) || (p.puuid && encounteredPlayers.some((e) => e.puuid && e.puuid.toLowerCase() === p.puuid.toLowerCase()))).length;
+                        const totalEnc = allyEnc + enemyEnc;
+                        return (
+                          <span
+                            className={`tracker-encounter-pill ${totalEnc > 0 ? "enc-detected" : "enc-none"}`}
+                            data-tooltip={totalEnc > 0 ? `${totalEnc} player(s) in this match have been encountered before.` : "No players in this match have been encountered before."}
+                          >
+                            <span className="tracker-encounter-dot" />
+                            <span>{totalEnc > 0 ? `${totalEnc} Encountered Before` : "No Past Encounters"}</span>
+                          </span>
+                        );
+                      })()}
                     </div>
                     <div className="tracker-meta-row">
                       <span className="tracker-meta-item">
@@ -4592,7 +4645,10 @@ export default function App() {
                             <span className="career-score-enemy">{selectedCareerMatch.score_enemy}</span>
                           </div>
                           <div className="career-hero-meta-block">
-                            <span className="career-meta-date">{selectedCareerMatch.date_str}</span>
+                            <span className="career-meta-date">
+                              {formatLocalTimestamp(selectedCareerMatch.timestamp).dateStr || selectedCareerMatch.date_str}
+                              {formatLocalTimestamp(selectedCareerMatch.timestamp).timeStr ? ` • ${formatLocalTimestamp(selectedCareerMatch.timestamp).timeStr}` : ""}
+                            </span>
                             <span className="career-meta-dot">•</span>
                             <span className="career-meta-mode">{selectedCareerMatch.gamemode.toUpperCase()}</span>
                             <span className="career-meta-dot">•</span>
@@ -4679,97 +4735,97 @@ export default function App() {
                                           </span>
                                         )}
                                       </div>
-                                        <div
-                                          className="tracker-player-rank-subline"
-                                          data-tooltip={
-                                            p.rank_tier > 0
-                                              ? `${p.rank_name} • ${p.rr} RR`
-                                              : "Unranked"
-                                          }
+                                      <div
+                                        className="tracker-player-rank-subline"
+                                        data-tooltip={
+                                          p.rank_tier > 0
+                                            ? `${p.rank_name} • ${p.rr} RR`
+                                            : "Unranked"
+                                        }
+                                      >
+                                        <img
+                                          className="tracker-rank-img-mini"
+                                          src={getRankIconUrl(p.rank_tier)}
+                                          alt=""
+                                        />
+                                        <span
+                                          className="tracker-rank-text-mini"
+                                          style={{ color: getRankColor(p.rank_name) }}
                                         >
-                                          <img
-                                            className="tracker-rank-img-mini"
-                                            src={getRankIconUrl(p.rank_tier)}
-                                            alt=""
-                                          />
-                                          <span
-                                            className="tracker-rank-text-mini"
-                                            style={{ color: getRankColor(p.rank_name) }}
-                                          >
-                                            {p.rank_name || "Unranked"}
-                                          </span>
-                                          {p.rank_tier > 0 && (
-                                            <>
-                                              <span className="tracker-rank-dot-mini">•</span>
-                                              <span className="tracker-rank-rr-mini">{p.rr} RR</span>
-                                            </>
-                                          )}
-                                        </div>
+                                          {p.rank_name || "Unranked"}
+                                        </span>
+                                        {p.rank_tier > 0 && (
+                                          <>
+                                            <span className="tracker-rank-dot-mini">•</span>
+                                            <span className="tracker-rank-rr-mini">{p.rr} RR</span>
+                                          </>
+                                        )}
                                       </div>
                                     </div>
-                                  </td>
+                                  </div>
+                                </td>
 
-                                  {/* PERFORMANCE SCORE (ACS) */}
-                                  <td style={{ textAlign: "center" }}>
-                                    <span className="career-score-val">{p.score}</span>
-                                  </td>
+                                {/* PERFORMANCE SCORE (ACS) */}
+                                <td style={{ textAlign: "center" }}>
+                                  <span className="career-score-val">{p.score}</span>
+                                </td>
 
-                                  {/* K, D, A, K/D (Expanded into 4 single-line columns) */}
-                                  <td style={{ textAlign: "center" }}>
-                                    <span className="career-stat-num">{p.kills}</span>
-                                  </td>
-                                  <td style={{ textAlign: "center" }}>
-                                    <span className="career-stat-num">{p.deaths}</span>
-                                  </td>
-                                  <td style={{ textAlign: "center" }}>
-                                    <span className="career-stat-num">{p.assists}</span>
-                                  </td>
-                                  <td style={{ textAlign: "center" }}>
-                                    <span
-                                      className="career-kd-val"
-                                      style={{
-                                        color: p.kd_ratio >= 1.0 ? "#10b981" : "#f87171",
-                                        fontWeight: 800,
-                                      }}
-                                    >
-                                      {p.kd_ratio.toFixed(2)}
-                                    </span>
-                                  </td>
+                                {/* K, D, A, K/D (Expanded into 4 single-line columns) */}
+                                <td style={{ textAlign: "center" }}>
+                                  <span className="career-stat-num">{p.kills}</span>
+                                </td>
+                                <td style={{ textAlign: "center" }}>
+                                  <span className="career-stat-num">{p.deaths}</span>
+                                </td>
+                                <td style={{ textAlign: "center" }}>
+                                  <span className="career-stat-num">{p.assists}</span>
+                                </td>
+                                <td style={{ textAlign: "center" }}>
+                                  <span
+                                    className="career-kd-val"
+                                    style={{
+                                      color: p.kd_ratio >= 1.0 ? "#10b981" : "#f87171",
+                                      fontWeight: 800,
+                                    }}
+                                  >
+                                    {p.kd_ratio.toFixed(2)}
+                                  </span>
+                                </td>
 
-                                  {/* HS% */}
-                                  <td style={{ textAlign: "center" }}>
-                                    <span
-                                      className="career-hs-val"
-                                      style={{
-                                        color:
-                                          p.headshot_percent >= 30
-                                            ? "#10b981"
-                                            : p.headshot_percent >= 20
-                                              ? "#e2e8f0"
-                                              : "#94a3b8",
-                                      }}
-                                    >
-                                      {p.headshot_percent > 0 ? `${p.headshot_percent}%` : "—"}
-                                    </span>
-                                  </td>
+                                {/* HS% */}
+                                <td style={{ textAlign: "center" }}>
+                                  <span
+                                    className="career-hs-val"
+                                    style={{
+                                      color:
+                                        p.headshot_percent >= 30
+                                          ? "#10b981"
+                                          : p.headshot_percent >= 20
+                                            ? "#e2e8f0"
+                                            : "#94a3b8",
+                                    }}
+                                  >
+                                    {p.headshot_percent > 0 ? `${p.headshot_percent}%` : "—"}
+                                  </span>
+                                </td>
 
-                                  {/* FIRST BLOODS */}
-                                  <td style={{ textAlign: "center" }}>
-                                    <span className="career-stat-num">{p.first_bloods || 0}</span>
-                                  </td>
+                                {/* FIRST BLOODS */}
+                                <td style={{ textAlign: "center" }}>
+                                  <span className="career-stat-num">{p.first_bloods || 0}</span>
+                                </td>
 
-                                  {/* MULTI KILLS */}
-                                  <td style={{ textAlign: "center" }}>
-                                    <span className="career-stat-num" style={{ color: p.multi_kills > 0 ? "#facc15" : undefined }}>
-                                      {p.multi_kills || 0}
-                                    </span>
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
+                                {/* MULTI KILLS */}
+                                <td style={{ textAlign: "center" }}>
+                                  <span className="career-stat-num" style={{ color: p.multi_kills > 0 ? "#facc15" : undefined }}>
+                                    {p.multi_kills || 0}
+                                  </span>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
 
                   </div>
                 ) : (
@@ -4787,7 +4843,9 @@ export default function App() {
                           </span>
                         </div>
                       </div>
-
+                      <div className="career-header-counter-pill">
+                        {careerMatches.length} Matches Saved
+                      </div>
                     </div>
 
                     {/* MATCHES LIST */}
@@ -4915,7 +4973,7 @@ export default function App() {
                                       <div className="career-card-map-info">
                                         <span className="career-card-map-name">{m.map_name}</span>
                                         <span className="career-card-date-time">
-                                          {m.date_str} {m.time_str && `• ${m.time_str}`}
+                                          {formatLocalTimestamp(m.timestamp).dateStr || m.date_str} • {formatLocalTimestamp(m.timestamp).timeStr || m.time_str}
                                         </span>
                                       </div>
                                       <div className="career-card-mvp-action">
@@ -4925,7 +4983,6 @@ export default function App() {
                                         {isTeamMVP && (
                                           <span className="career-mvp-badge team-mvp">TEAM MVP ▶</span>
                                         )}
-                                        <span className="career-card-inspect-arrow">View Scoreboard →</span>
                                       </div>
                                     </div>
                                   );
@@ -4957,19 +5014,28 @@ export default function App() {
                       >
                         ← Back to Players Directory
                       </button>
+                      <button
+                        type="button"
+                        className="career-delete-record-btn"
+                        onClick={async () => {
+                          if (window.confirm(`Delete encounter history for ${selectedPlayerEncounter.name}?`)) {
+                            await deletePlayerEncounter(selectedPlayerEncounter.puuid);
+                            setSelectedPlayerEncounter(null);
+                          }
+                        }}
+                      >
+                        <Trash2 size={13} />
+                        <span>Delete Player Record</span>
+                      </button>
                     </div>
 
                     {/* BIG PLAYER PROFILE HERO BANNER */}
                     {(() => {
                       const heroSplashUrl =
                         MAP_SPLASHES[selectedPlayerEncounter.last_seen_map.toLowerCase()] || "";
-                      const totalWins =
-                        selectedPlayerEncounter.wins_as_ally + selectedPlayerEncounter.wins_against;
-                      const totalLosses =
-                        selectedPlayerEncounter.losses_as_ally + selectedPlayerEncounter.losses_against;
-                      const totalGames = selectedPlayerEncounter.encounters_count;
-                      const winRate =
-                        totalGames > 0 ? Math.round((totalWins / totalGames) * 100) : 0;
+                      const localSeen = formatLocalTimestamp(selectedPlayerEncounter.last_seen_timestamp);
+                      const seenDate = localSeen.dateStr || selectedPlayerEncounter.last_seen_date_str;
+                      const seenTime = localSeen.timeStr || selectedPlayerEncounter.last_seen_time_str;
 
                       return (
                         <div
@@ -4995,7 +5061,7 @@ export default function App() {
                               )}
                             </div>
                             <div className="player-hero-identity">
-                              <div className="player-hero-name-line">
+                              <div className="player-hero-name-line" title={`${selectedPlayerEncounter.name}${selectedPlayerEncounter.tag ? ` #${selectedPlayerEncounter.tag}` : ""}`}>
                                 <span className="player-hero-gamename">{selectedPlayerEncounter.name}</span>
                                 {selectedPlayerEncounter.tag && (
                                   <span className="player-hero-tagline">#{selectedPlayerEncounter.tag}</span>
@@ -5024,51 +5090,53 @@ export default function App() {
                                   </>
                                 )}
                               </div>
-                              <div className="player-hero-last-seen-line">
-                                Last seen on <b>{selectedPlayerEncounter.last_seen_map}</b> as{" "}
-                                <b>{selectedPlayerEncounter.last_seen_agent_name || "Agent"}</b> •{" "}
-                                {selectedPlayerEncounter.last_seen_date_str}{" "}
-                                {selectedPlayerEncounter.last_seen_time_str &&
-                                  `at ${selectedPlayerEncounter.last_seen_time_str}`}
+                              <div className="player-hero-last-seen-wrap">
+                                <div className="player-hero-last-seen-line">
+                                  Last seen on <b>{selectedPlayerEncounter.last_seen_map}</b> as{" "}
+                                  <b>{selectedPlayerEncounter.last_seen_agent_name || "Agent"}</b>
+                                </div>
+                                <div className="player-hero-last-time-line">
+                                  {seenDate} {seenTime && `• ${seenTime}`}
+                                </div>
                               </div>
                             </div>
                           </div>
 
                           <div className="player-hero-stats-strip">
                             <div className="player-hero-stat-box">
-                              <span className="stat-label">TOTAL GAMES</span>
-                              <span className="stat-val">{totalGames}</span>
-                            </div>
-                            <div className="player-hero-stat-box">
-                              <span className="stat-label">WIN RATE</span>
-                              <span
-                                className="stat-val"
-                                style={{ color: winRate >= 50 ? "#2dd4bf" : "#fb7185" }}
-                              >
-                                {winRate}%
+                              <span className="stat-label">AS TEAMMATE</span>
+                              <span className="stat-val" style={{ color: "#2dd4bf" }}>
+                                {selectedPlayerEncounter.wins_as_ally}
                               </span>
-                              <span className="stat-sub">
-                                {totalWins}W - {totalLosses}L
+                              <span className="stat-sub-label" style={{ color: "#2dd4bf" }}>
+                                WON
                               </span>
                             </div>
                             <div className="player-hero-stat-box">
                               <span className="stat-label">AS TEAMMATE</span>
-                              <span className="stat-val" style={{ color: "#2dd4bf" }}>
-                                {selectedPlayerEncounter.matches_as_ally}x
+                              <span className="stat-val" style={{ color: "#fb7185" }}>
+                                {selectedPlayerEncounter.losses_as_ally}
                               </span>
-                              <span className="stat-sub">
-                                {selectedPlayerEncounter.wins_as_ally}W -{" "}
-                                {selectedPlayerEncounter.losses_as_ally}L
+                              <span className="stat-sub-label" style={{ color: "#fb7185" }}>
+                                LOST
+                              </span>
+                            </div>
+                            <div className="player-hero-stat-box">
+                              <span className="stat-label">AS ENEMY</span>
+                              <span className="stat-val" style={{ color: "#2dd4bf" }}>
+                                {selectedPlayerEncounter.wins_against}
+                              </span>
+                              <span className="stat-sub-label" style={{ color: "#2dd4bf" }}>
+                                WON
                               </span>
                             </div>
                             <div className="player-hero-stat-box">
                               <span className="stat-label">AS ENEMY</span>
                               <span className="stat-val" style={{ color: "#fb7185" }}>
-                                {selectedPlayerEncounter.matches_as_enemy}x
+                                {selectedPlayerEncounter.losses_against}
                               </span>
-                              <span className="stat-sub">
-                                {selectedPlayerEncounter.wins_against}W -{" "}
-                                {selectedPlayerEncounter.losses_against}L
+                              <span className="stat-sub-label" style={{ color: "#fb7185" }}>
+                                LOST
                               </span>
                             </div>
                           </div>
@@ -5089,61 +5157,71 @@ export default function App() {
 
                       <div className="player-history-grid">
                         {selectedPlayerEncounter.history &&
-                        selectedPlayerEncounter.history.length > 0 ? (
+                          selectedPlayerEncounter.history.length > 0 ? (
                           selectedPlayerEncounter.history.map((h) => {
                             const isAlly = h.relationship === "PLAYED WITH";
                             const isWin = h.result === "VICTORY";
                             const isLoss = h.result === "DEFEAT";
                             const splashUrl = MAP_SPLASHES[h.map_name.toLowerCase()] || "";
+                            const lt = formatLocalTimestamp(h.timestamp);
+                            const hDate = lt.dateStr || h.date_str;
+                            const hTime = lt.timeStr || h.time_str;
 
                             return (
                               <div
                                 key={h.match_id}
-                                className={`player-history-card ${
-                                  isWin ? "card-win" : isLoss ? "card-loss" : "card-draw"
-                                }`}
+                                className={`player-history-card ${isWin ? "card-win" : isLoss ? "card-loss" : "card-draw"}`}
+                                onClick={() => {
+                                  const found = careerMatches.find((m) => m.match_id === h.match_id);
+                                  if (found) {
+                                    setSelectedCareerMatch(found);
+                                    setActiveTab("career");
+                                  } else {
+                                    loadCareerMatches().then(() => {
+                                      setActiveTab("career");
+                                    });
+                                  }
+                                }}
                               >
                                 <div className="career-card-stripe" />
 
-                                {/* Relationship Badge (PLAYED WITH / PLAYED AGAINST) */}
-                                <div className="player-hist-rel-col">
-                                  <span
-                                    className={`player-hist-rel-pill ${
-                                      isAlly ? "rel-ally" : "rel-enemy"
-                                    }`}
-                                  >
-                                    {isAlly ? "🤝 PLAYED WITH" : "⚔️ PLAYED AGAINST"}
-                                  </span>
-                                </div>
-
-                                {/* Agent Icon & Name they played */}
-                                <div className="player-hist-agent-box">
-                                  {h.agent_id ? (
-                                    <img
-                                      className="career-card-agent-img"
-                                      src={`https://media.valorant-api.com/agents/${h.agent_id}/displayicon.png`}
-                                      alt={h.agent_name}
-                                    />
-                                  ) : (
-                                    <div className="tracker-agent-placeholder">?</div>
-                                  )}
-                                  <div className="player-hist-agent-names">
-                                    <span className="player-hist-agent-name">
-                                      {h.agent_name || "Agent"}
-                                    </span>
-                                    <span className="player-hist-rank-text">
-                                      {h.rank_name || "Unranked"}{" "}
-                                      {h.rr > 0 ? `• ${h.rr} RR` : ""}
-                                    </span>
+                                {/* Left: Avatar (40px) + Top relationship pill (no emoji) + Agent & Rank */}
+                                <div className="player-hist-left-col">
+                                  <div className="player-hist-agent-avatar-wrap">
+                                    {h.agent_id ? (
+                                      <img
+                                        className="player-hist-agent-avatar"
+                                        src={`https://media.valorant-api.com/agents/${h.agent_id}/displayicon.png`}
+                                        alt={h.agent_name}
+                                      />
+                                    ) : (
+                                      <div className="tracker-agent-placeholder">?</div>
+                                    )}
+                                  </div>
+                                  <div className="player-hist-info-wrap">
+                                    <div className="player-hist-top-rel-row">
+                                      <span
+                                        className={`player-hist-rel-pill ${isAlly ? "rel-ally" : "rel-enemy"}`}
+                                      >
+                                        {isAlly ? "PLAYED WITH" : "PLAYED AGAINST"}
+                                      </span>
+                                    </div>
+                                    <div className="player-hist-agent-name-row">
+                                      <span className="player-hist-agent-name">
+                                        {h.agent_name || "Agent"}
+                                      </span>
+                                      <span className="player-hist-meta-sep">•</span>
+                                      <span className="player-hist-rank-text">
+                                        {h.rank_name || "Unranked"}{h.rr > 0 ? ` (${h.rr} RR)` : ""}
+                                      </span>
+                                    </div>
                                   </div>
                                 </div>
 
-                                {/* Match Result Tag & Score */}
+                                {/* Middle: Match Result Tag & Score */}
                                 <div className="career-card-result-center">
                                   <span
-                                    className={`career-card-result-tag ${
-                                      isWin ? "tag-win" : isLoss ? "tag-loss" : "tag-draw"
-                                    }`}
+                                    className={`career-card-result-tag ${isWin ? "tag-win" : isLoss ? "tag-loss" : "tag-draw"}`}
                                   >
                                     {h.result}
                                   </span>
@@ -5152,7 +5230,7 @@ export default function App() {
                                   </span>
                                 </div>
 
-                                {/* Player stats in that match (ACS, KDA) */}
+                                {/* Player stats in that match (KDA, Score) */}
                                 <div className="career-card-kda-box">
                                   <div className="career-card-kda-line">
                                     <span className="career-card-kda-label">THEIR KDA</span>
@@ -5165,7 +5243,7 @@ export default function App() {
                                   </div>
                                 </div>
 
-                                {/* Map art banner & Inspect button */}
+                                {/* Right: Map art banner & local machine date/time (NO BUTTON) */}
                                 <div
                                   className="career-card-map-art"
                                   style={{
@@ -5177,27 +5255,9 @@ export default function App() {
                                   <div className="career-card-map-info">
                                     <span className="career-card-map-name">{h.map_name}</span>
                                     <span className="career-card-date-time">
-                                      {h.date_str} {h.time_str && `• ${h.time_str}`}
+                                      {hDate} {hTime && `• ${hTime}`}
                                     </span>
                                   </div>
-                                  <button
-                                    type="button"
-                                    className="career-card-inspect-arrow"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      const found = careerMatches.find((m) => m.match_id === h.match_id);
-                                      if (found) {
-                                        setSelectedCareerMatch(found);
-                                        setActiveTab("career");
-                                      } else {
-                                        loadCareerMatches().then(() => {
-                                          setActiveTab("career");
-                                        });
-                                      }
-                                    }}
-                                  >
-                                    Inspect Match Scoreboard →
-                                  </button>
                                 </div>
                               </div>
                             );
@@ -5219,22 +5279,38 @@ export default function App() {
                       <div className="career-title-area">
                         <Users size={18} className="career-header-icon" />
                         <div>
-                          <h2 className="career-title">PLAYERS DIRECTORY</h2>
+                          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                            <h2 className="career-title">PLAYERS DIRECTORY</h2>
+                            <span className="career-header-counter-pill">
+                              {encounteredPlayers.length} Players Encountered
+                            </span>
+                          </div>
                           <span className="career-subtitle">
-                            Every player met in competitive matches with SageBot. Click any card to inspect encounter history.
+                            Players encountered in competitive matches with SageBot.
                           </span>
                         </div>
                       </div>
 
-                      {/* Search Bar */}
+                      {/* Search Bar (Search ONLY by Name, X clear button) */}
                       <div className="players-search-wrapper">
+                        <Search size={14} className="players-search-icon" />
                         <input
                           type="text"
                           className="players-search-input"
-                          placeholder="Search players by name, tag, agent, map..."
+                          placeholder="Search players by name..."
                           value={playerSearchQuery}
                           onChange={(e) => setPlayerSearchQuery(e.target.value)}
                         />
+                        {playerSearchQuery && (
+                          <button
+                            type="button"
+                            className="players-search-clear-btn"
+                            onClick={() => setPlayerSearchQuery("")}
+                            title="Clear search"
+                          >
+                            <X size={13} />
+                          </button>
+                        )}
                       </div>
                     </div>
 
@@ -5254,15 +5330,10 @@ export default function App() {
                         </span>
                       </div>
                     ) : (() => {
+                      // Filter by name only
                       const filtered = encounteredPlayers.filter((p) => {
                         if (!playerSearchQuery.trim()) return true;
-                        const q = playerSearchQuery.toLowerCase();
-                        return (
-                          p.name.toLowerCase().includes(q) ||
-                          p.tag.toLowerCase().includes(q) ||
-                          p.last_seen_agent_name.toLowerCase().includes(q) ||
-                          p.last_seen_map.toLowerCase().includes(q)
-                        );
+                        return p.name.toLowerCase().includes(playerSearchQuery.trim().toLowerCase());
                       });
 
                       if (filtered.length === 0) {
@@ -5275,30 +5346,68 @@ export default function App() {
                         );
                       }
 
+                      // Check if a player is in the current live Tracker match
+                      const isMatchActive = Boolean(
+                        roster &&
+                        (roster.state === "COREGAME" || roster.state === "PREGAME" || roster.state === "INGAME") &&
+                        (roster.ally_team.length > 0 || roster.enemy_team.length > 0)
+                      );
+
+                      const getLiveRole = (puuid: string): "ally" | "enemy" | null => {
+                        if (!isMatchActive || !roster || !puuid) return null;
+                        const pLower = puuid.toLowerCase();
+                        const allyFound = roster.ally_team.some(
+                          (a) => !a.is_self && a.puuid && a.puuid.toLowerCase() === pLower
+                        );
+                        if (allyFound) return "ally";
+                        const enemyFound = roster.enemy_team.some(
+                          (e) => e.puuid && e.puuid.toLowerCase() === pLower
+                        );
+                        if (enemyFound) return "enemy";
+                        return null;
+                      };
+
+                      // Sort: live active players first (allies then enemies), then by timestamp descending
+                      const sortedPlayers = [...filtered].sort((a, b) => {
+                        const roleA = getLiveRole(a.puuid);
+                        const roleB = getLiveRole(b.puuid);
+                        if (roleA && !roleB) return -1;
+                        if (!roleA && roleB) return 1;
+                        if (roleA && roleB) {
+                          if (roleA === "ally" && roleB === "enemy") return -1;
+                          if (roleA === "enemy" && roleB === "ally") return 1;
+                        }
+                        return (b.last_seen_timestamp || 0) - (a.last_seen_timestamp || 0);
+                      });
+
                       return (
                         <div className="players-cards-grid">
-                          {filtered.map((p) => {
+                          {sortedPlayers.map((p) => {
                             const splashUrl = MAP_SPLASHES[p.last_seen_map.toLowerCase()] || "";
-                            const totalWins = p.wins_as_ally + p.wins_against;
-                            const totalLosses = p.losses_as_ally + p.losses_against;
-                            const totalGames = p.encounters_count;
-                            const winRate =
-                              totalGames > 0 ? Math.round((totalWins / totalGames) * 100) : 0;
-                            const isNetWin = totalWins >= totalLosses;
                             const isLastWin = p.last_result === "VICTORY";
                             const isLastLoss = p.last_result === "DEFEAT";
+                            const liveRole = getLiveRole(p.puuid);
+                            const localSeen = formatLocalTimestamp(p.last_seen_timestamp);
+                            const seenDate = localSeen.dateStr || p.last_seen_date_str;
+                            const seenTime = localSeen.timeStr || p.last_seen_time_str;
 
                             return (
                               <div
                                 key={p.puuid}
                                 className={`player-encounter-card ${
-                                  isNetWin ? "card-win" : "card-loss"
+                                  liveRole === "ally"
+                                    ? "card-live-ally"
+                                    : liveRole === "enemy"
+                                    ? "card-live-enemy"
+                                    : isLastWin
+                                    ? "card-win"
+                                    : "card-loss"
                                 }`}
                                 onClick={() => setSelectedPlayerEncounter(p)}
                               >
                                 <div className="career-card-stripe" />
 
-                                {/* 1. Agent Icon & Identity & Rank */}
+                                {/* 1. Agent Icon & Identity & Rank (Name and Tag on ONE line) */}
                                 <div className="player-card-identity-box">
                                   <div className="career-card-agent-box">
                                     {p.last_seen_agent_id ? (
@@ -5312,7 +5421,7 @@ export default function App() {
                                     )}
                                   </div>
                                   <div className="player-card-identity-col">
-                                    <div className="player-card-name-row">
+                                    <div className="player-card-name-row" title={`${p.name}${p.tag ? ` #${p.tag}` : ""}`}>
                                       <span className="player-card-gamename">{p.name}</span>
                                       {p.tag && (
                                         <span className="player-card-tagline">#{p.tag}</span>
@@ -5344,54 +5453,31 @@ export default function App() {
                                   </div>
                                 </div>
 
-                                {/* 2. Ratio & Record Pill */}
-                                <div className="player-card-ratio-col">
-                                  <div className="player-card-ratio-head">
-                                    <span className="ratio-count">
-                                      Met <b>{p.encounters_count}x</b>
+                                {/* 2. Middle: Last Encounter Result (+ Live Role Badge if in current match) */}
+                                <div className="player-card-middle-col">
+                                  {liveRole && (
+                                    <span className={`live-encounter-badge ${liveRole === "ally" ? "live-ally" : "live-enemy"}`}>
+                                      {liveRole === "ally" ? "CURRENT TEAMMATE" : "CURRENT ENEMY"}
                                     </span>
-                                    <span className="ratio-dot">•</span>
-                                    <span
-                                      className="ratio-winrate"
-                                      style={{ color: winRate >= 50 ? "#2dd4bf" : "#fb7185" }}
-                                    >
-                                      {winRate}% WR
-                                    </span>
-                                    <span className="ratio-record">
-                                      ({totalWins}W - {totalLosses}L)
-                                    </span>
-                                  </div>
-                                  <div className="player-card-ratio-sub">
-                                    <span>
-                                      With: <b>{p.matches_as_ally}x</b> ({p.wins_as_ally}W-
-                                      {p.losses_as_ally}L)
-                                    </span>
-                                    <span className="ratio-sub-dot">•</span>
-                                    <span>
-                                      Against: <b>{p.matches_as_enemy}x</b> ({p.wins_against}W-
-                                      {p.losses_against}L)
-                                    </span>
+                                  )}
+                                  <div className="player-card-last-match-wrap">
+                                    <span className="last-res-caption">LAST MATCH</span>
+                                    <div className="last-res-banner">
+                                      <span
+                                        className={`career-card-result-tag ${
+                                          isLastWin ? "tag-win" : isLastLoss ? "tag-loss" : "tag-draw"
+                                        }`}
+                                      >
+                                        {p.last_result || "MATCH"}
+                                      </span>
+                                      <span className="last-res-score">
+                                        {p.last_score_ally} - {p.last_score_enemy}
+                                      </span>
+                                    </div>
                                   </div>
                                 </div>
 
-                                {/* 3. Last Encounter Result */}
-                                <div className="player-card-last-result-col">
-                                  <span className="last-res-caption">LAST MATCH</span>
-                                  <div className="last-res-banner">
-                                    <span
-                                      className={`career-card-result-tag ${
-                                        isLastWin ? "tag-win" : isLastLoss ? "tag-loss" : "tag-draw"
-                                      }`}
-                                    >
-                                      {p.last_result || "MATCH"}
-                                    </span>
-                                    <span className="last-res-score">
-                                      {p.last_score_ally} - {p.last_score_enemy}
-                                    </span>
-                                  </div>
-                                </div>
-
-                                {/* 4. Map Splash Art Banner & Date/Time */}
+                                {/* 3. Map Splash Art Banner & Local Date/Time (Flush right, NO button) */}
                                 <div
                                   className="career-card-map-art"
                                   style={{
@@ -5403,11 +5489,9 @@ export default function App() {
                                   <div className="career-card-map-info">
                                     <span className="career-card-map-name">{p.last_seen_map}</span>
                                     <span className="career-card-date-time">
-                                      {p.last_seen_date_str}{" "}
-                                      {p.last_seen_time_str && `• ${p.last_seen_time_str}`}
+                                      {seenDate} {seenTime && `• ${seenTime}`}
                                     </span>
                                   </div>
-                                  <span className="career-card-inspect-arrow">View Profile →</span>
                                 </div>
                               </div>
                             );

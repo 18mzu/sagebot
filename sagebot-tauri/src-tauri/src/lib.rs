@@ -1449,6 +1449,11 @@ fn get_player_encounter(puuid: String) -> Option<encounter_memory::PlayerEncount
     encounter_memory::get_encounter(&puuid)
 }
 
+#[tauri::command]
+fn delete_player_encounter(puuid: String) -> Result<Vec<encounter_memory::PlayerEncounter>, String> {
+    encounter_memory::delete_encounter(&puuid)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     encounter_memory::rebuild_from_career();
@@ -1579,7 +1584,8 @@ pub fn run() {
             get_career_matches,
             delete_career_match,
             get_encounter_memory,
-            get_player_encounter
+            get_player_encounter,
+            delete_player_encounter
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
