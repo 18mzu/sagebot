@@ -680,6 +680,7 @@ export default function App() {
   const [selectedPlayerEncounter, setSelectedPlayerEncounter] = useState<PlayerEncounter | null>(null);
   const [playerSearchQuery, setPlayerSearchQuery] = useState<string>("");
   const [isLoadingPlayers, setIsLoadingPlayers] = useState<boolean>(false);
+  const [playerToDelete, setPlayerToDelete] = useState<PlayerEncounter | null>(null);
 
   const loadCareerMatches = async () => {
     try {
@@ -3747,17 +3748,11 @@ export default function App() {
       ? `party-${player.party_tag.toLowerCase().replace(/[^a-z0-9]/g, "")}`
       : "";
 
-    const isMetBefore = !player.is_self && Boolean(
-      player.encounter ||
-      (player.puuid && encounteredPlayers.some((e) => e.puuid && e.puuid.toLowerCase() === player.puuid.toLowerCase()))
-    );
-    const metRowClass = isMetBefore ? (isAlly ? "tracker-row-met-ally" : "tracker-row-met-enemy") : "";
-
     return (
       <tr
         key={player.puuid || Math.random()}
         className={`tracker-row ${isAlly ? "ally-row" : "enemy-row"} ${player.is_self ? "self-row" : ""
-          } ${player.party_tag ? `has-party ${partyClass}` : ""} ${metRowClass}`}
+          } ${player.party_tag ? `has-party ${partyClass}` : ""}`}
       >
         {/* MERGED PLAYER COLUMN: Agent logo + Name & Lvl (Left capsule indicates party) */}
         <td>
@@ -3800,14 +3795,6 @@ export default function App() {
                   {tagLine && <span className="tracker-tagline">#{tagLine}</span>}
                 </span>
                 <div className="tracker-player-badges">
-                  {isMetBefore && (
-                    <span
-                      className={`tracker-badge-met-live ${isAlly ? "badge-ally" : "badge-enemy"}`}
-                      data-tooltip="Encountered in a previous match with SageBot"
-                    >
-                      Met Before
-                    </span>
-                  )}
                   {player.is_incognito && (cleanRawName.startsWith("Player ") || cleanRawName === "Player" || !hasTag) && (
                     <span
                       className="tracker-badge-incognito"
@@ -4386,21 +4373,6 @@ export default function App() {
                       ) : (
                         <span className="tracker-status-tag tag-offline">WAITING FOR MATCH</span>
                       )}
-                      {(() => {
-                        if (!roster || (roster.ally_team.length === 0 && roster.enemy_team.length === 0)) return null;
-                        const allyEnc = roster.ally_team.filter((p) => !p.is_self && ((p.encounter && (p.encounter.encounters_count ?? 0) > 0) || (p.puuid && encounteredPlayers.some((e) => e.puuid && e.puuid.toLowerCase() === p.puuid.toLowerCase())))).length;
-                        const enemyEnc = roster.enemy_team.filter((p) => (p.encounter && (p.encounter.encounters_count ?? 0) > 0) || (p.puuid && encounteredPlayers.some((e) => e.puuid && e.puuid.toLowerCase() === p.puuid.toLowerCase()))).length;
-                        const totalEnc = allyEnc + enemyEnc;
-                        return (
-                          <span
-                            className={`tracker-encounter-pill ${totalEnc > 0 ? "enc-detected" : "enc-none"}`}
-                            data-tooltip={totalEnc > 0 ? `${totalEnc} player(s) in this match have been encountered before.` : "No players in this match have been encountered before."}
-                          >
-                            <span className="tracker-encounter-dot" />
-                            <span>{totalEnc > 0 ? `${totalEnc} Encountered Before` : "No Past Encounters"}</span>
-                          </span>
-                        );
-                      })()}
                     </div>
                     <div className="tracker-meta-row">
                       <span className="tracker-meta-item">
@@ -5017,12 +4989,7 @@ export default function App() {
                       <button
                         type="button"
                         className="career-delete-record-btn"
-                        onClick={async () => {
-                          if (window.confirm(`Delete encounter history for ${selectedPlayerEncounter.name}?`)) {
-                            await deletePlayerEncounter(selectedPlayerEncounter.puuid);
-                            setSelectedPlayerEncounter(null);
-                          }
-                        }}
+                        onClick={() => setPlayerToDelete(selectedPlayerEncounter)}
                       >
                         <Trash2 size={13} />
                         <span>Delete Player Record</span>
@@ -5248,7 +5215,7 @@ export default function App() {
                                   className="career-card-map-art"
                                   style={{
                                     backgroundImage: splashUrl
-                                      ? `linear-gradient(to right, rgba(15, 23, 42, 1) 0%, rgba(15, 23, 42, 0.45) 45%, rgba(15, 23, 42, 0.75) 100%), url(${splashUrl})`
+                                      ? `linear-gradient(to right, rgba(15, 23, 42, 1) 0%, rgba(15, 23, 42, 0.6) 30%, rgba(15, 23, 42, 0.45) 100%), url(${splashUrl})`
                                       : undefined,
                                   }}
                                 >
@@ -5482,7 +5449,7 @@ export default function App() {
                                   className="career-card-map-art"
                                   style={{
                                     backgroundImage: splashUrl
-                                      ? `linear-gradient(to right, rgba(15, 23, 42, 1) 0%, rgba(15, 23, 42, 0.45) 45%, rgba(15, 23, 42, 0.75) 100%), url(${splashUrl})`
+                                      ? `linear-gradient(to right, rgba(15, 23, 42, 1) 0%, rgba(15, 23, 42, 0.6) 30%, rgba(15, 23, 42, 0.45) 100%), url(${splashUrl})`
                                       : undefined,
                                   }}
                                 >
@@ -7752,6 +7719,49 @@ export default function App() {
                 }}
               >
                 I know what I'm doing
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Player Record Confirmation Modal */}
+      {playerToDelete && (
+        <div className="modal-backdrop" style={{ zIndex: 9999 }}>
+          <div className="modal-card" style={{ maxWidth: 420 }}>
+            <div className="modal-header kill-modal-header">
+              <AlertTriangle color="#ef4444" size={20} />
+              <span style={{ fontSize: "15px", fontWeight: 700, color: "#ef4444" }}>
+                Delete Player Record?
+              </span>
+            </div>
+            <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <p style={{ margin: 0, fontWeight: 700, color: "#f87171", fontSize: "14px" }}>
+                Are you sure you want to remove this player's record?
+              </p>
+              <p style={{ margin: 0, fontSize: "13px", color: "#cbd5e1", lineHeight: "1.5" }}>
+                This will permanently delete all encounter history, win/loss stats, and saved match references for <strong style={{ color: "#f1f5f9" }}>{playerToDelete.name}{playerToDelete.tag ? ` #${playerToDelete.tag}` : ""}</strong>.
+              </p>
+            </div>
+            <div className="modal-actions" style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 16 }}>
+              <button
+                type="button"
+                className="modal-btn secondary"
+                onClick={() => setPlayerToDelete(null)}
+              >
+                No
+              </button>
+              <button
+                type="button"
+                className="modal-btn danger"
+                onClick={async () => {
+                  const targetPuuid = playerToDelete.puuid;
+                  setPlayerToDelete(null);
+                  await deletePlayerEncounter(targetPuuid);
+                }}
+                style={{ background: "#dc2626", borderColor: "#ef4444", color: "#ffffff", fontWeight: 700 }}
+              >
+                Yes
               </button>
             </div>
           </div>
