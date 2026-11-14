@@ -1,8 +1,9 @@
-[v4.1]
-- added Career
-- updated Party detection
-- updated Tracker UI
-- added Main indicator
-- added Player.
-- added Player database
-- added Match database
+[v4.2]
+- updated new Music
+- added Custom keybinds for Voting
+- updated default timing for some functions
+- improved Auto Voting
+- revamped Agent Selection, now working separately from Main
+- improved Agent Queue
+- added Roles filter
+- added Agent Select method: Linear, Random, Fill

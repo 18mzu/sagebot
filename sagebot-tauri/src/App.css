@@ -385,6 +385,7 @@ body, html, #root {
   min-height: 0;
   padding: 16px 20px;
   overflow-y: auto;
+  scrollbar-gutter: stable;
   gap: 12px;
 }
 
@@ -752,8 +753,8 @@ input:checked + .slider:before {
   display: flex;
   gap: 14px;
   width: 100%;
-  height: calc(100vh - 120px);
-  min-height: 480px;
+  flex: 1;
+  min-height: 440px;
 }
 
 .agents-grid-column {
@@ -764,22 +765,196 @@ input:checked + .slider:before {
   height: 100%;
 }
 
+.agent-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.agent-filter-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.agent-filter-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.16s ease;
+}
+
+.agent-filter-btn:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.agent-filter-btn.active {
+  color: #34d399;
+  background: rgba(16, 185, 129, 0.14);
+  border-color: rgba(16, 185, 129, 0.45);
+}
+
+.fill-roles-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
+}
+
+.fill-role-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 7px 10px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.16s ease;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.fill-role-card:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.fill-role-card.active {
+  color: #f8fafc;
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.48);
+  box-shadow: inset 0 0 0 1px rgba(16, 185, 129, 0.18);
+}
+
+.fill-role-card.active.missing-role {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.45);
+  box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.16);
+}
+
+.fill-role-card-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.fill-role-count {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.fill-role-card.active .fill-role-count {
+  background: rgba(16, 185, 129, 0.22);
+  color: #34d399;
+}
+
+.fill-role-card.active.missing-role .fill-role-count {
+  background: rgba(239, 68, 68, 0.22);
+  color: #f87171;
+}
+
+.fill-priority-strip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.fill-priority-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.fill-priority-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-main);
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  border-radius: 6px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.fill-priority-chip.missing-role {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.45);
+}
+
+.fill-prio-num {
+  color: #34d399;
+  font-family: var(--font-mono);
+  font-weight: 700;
+}
+
+.fill-move-btn {
+  background: rgba(255, 255, 255, 0.07);
+  border: none;
+  color: var(--text-muted);
+  border-radius: 4px;
+  padding: 1px 4px;
+  font-size: 9px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.fill-move-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+
+.fill-move-btn:disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
+}
+
 .agents-grid-4col {
   display: grid;
   grid-template-columns: repeat(4, 1fr) !important;
-  grid-auto-rows: 125px;
+  grid-auto-rows: 98px;
   gap: 8px;
   overflow-y: auto;
   flex: 1;
   min-height: 0;
-  padding: 4px 6px 16px 2px;
+  padding: 4px 6px 12px 2px;
 }
 
 .agent-card {
   position: relative;
   width: 100%;
-  height: 125px;
-  min-height: 125px;
+  height: 98px;
+  min-height: 98px;
   background: #11141d;
   border: 1.5px solid #282d3b;
   border-radius: 6px;
@@ -912,21 +1087,26 @@ input:checked + .slider:before {
 }
 
 .agents-settings-column {
-  width: 290px;
+  width: 280px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  height: 100%;
+  min-height: 0;
 }
 
 .agents-queue-card {
   display: flex;
   flex-direction: column;
+  height: 100%;
+  flex: 1;
+  min-height: 0;
 }
 
 .queue-list-box {
   margin-top: 10px;
-  max-height: 240px;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding-right: 2px;
 }
@@ -1421,35 +1601,6 @@ input:checked + .slider:before {
   color: #ffffff;
   box-shadow: 0 0 12px rgba(239, 68, 68, 0.4);
   transform: translateY(-1px);
-}
-
-/* Gate Intro Overlay Screen */
-.gate-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: radial-gradient(circle at 50% 25%, rgba(124, 58, 237, 0.16) 0%, transparent 60%),
-              radial-gradient(circle at 50% 85%, rgba(16, 185, 129, 0.08) 0%, transparent 50%),
-              #0a0c12;
-  display: flex;
-  flex-direction: column;
-  z-index: 1000;
-  opacity: 1;
-  transform: scale(1);
-  filter: blur(0px);
-  transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1),
-              transform 0.7s cubic-bezier(0.16, 1, 0.3, 1),
-              filter 0.7s cubic-bezier(0.16, 1, 0.3, 1);
-  will-change: opacity, transform, filter;
-}
-
-.gate-overlay.gate-crossfade-out {
-  opacity: 0;
-  transform: scale(1.035);
-  filter: blur(8px);
-  pointer-events: none;
 }
 
 /* Main Dashboard App Container */

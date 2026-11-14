@@ -7,17 +7,13 @@ import {
   Square,
   Minus,
   X,
-  AlertTriangle,
   Settings as SettingsIcon,
   RefreshCw,
   XOctagon,
-  Download,
-  Lock,
   RotateCcw,
   Upload,
   Copy,
   Trash2,
-  FileCode,
   Wrench,
   Users,
   MessageSquare,
@@ -27,633 +23,48 @@ import {
   Radar,
   EyeOff,
   ShoppingBag,
-  Clock,
-  Sparkles,
   GripVertical,
   History,
   Smartphone,
-  Shield,
   Search,
 } from "lucide-react";
 import { RemoteHost, type PairRequest } from "./remoteHost";
-import { formatCodeDisplay, generatePairCode, randomHex } from "./secureChannel";
-import { QRCodeSVG } from "qrcode.react";
+import { generatePairCode, randomHex } from "./secureChannel";
+import { AppModals } from "./modals/AppModals";
+import { MainTab } from "./tabs/MainTab";
+import { ShopTab } from "./tabs/ShopTab";
+import { ChatTab } from "./tabs/ChatTab";
+import { VotingTab } from "./tabs/VotingTab";
+import { MediaTab } from "./tabs/MediaTab";
+import { RemoteTab } from "./tabs/RemoteTab";
+import { InfoTab } from "./tabs/InfoTab";
+import { SettingsTab } from "./tabs/SettingsTab";
 import "./App.css";
-import tauriConf from "../src-tauri/tauri.conf.json";
-
-// Single source of truth for the displayed version (bump tauri.conf.json + Cargo.toml only)
-const APP_VERSION = String(tauriConf.version).replace(/\.0$/, "");
-
-const COMMS_CATEGORIES = [
-  {
-    id: 1,
-    name: "Combat",
-    options: [
-      { id: 1, text: "Need Support" },
-      { id: 2, text: "Caution here!" },
-      { id: 3, text: "Need Healing!" },
-      { id: 4, text: "On My Way" },
-      { id: 5, text: "Ultimate Status" },
-    ],
-  },
-  {
-    id: 2,
-    name: "Tactics",
-    options: [
-      { id: 1, text: "I'll Take Point" },
-      { id: 2, text: "Let's rush them!" },
-      { id: 3, text: "Be Quiet" },
-      { id: 4, text: "Fall Back!" },
-      { id: 5, text: "Play For Picks" },
-    ],
-  },
-  {
-    id: 3,
-    name: "Social",
-    options: [
-      { id: 1, text: "Thanks" },
-      { id: 2, text: "Commend" },
-      { id: 3, text: "Yes" },
-      { id: 4, text: "No" },
-      { id: 5, text: "Sorry" },
-      { id: 6, text: "Hello" },
-    ],
-  },
-  {
-    id: 4,
-    name: "Strategy",
-    options: [
-      { id: 1, text: "Going A" },
-      { id: 2, text: "Going B" },
-      { id: 3, text: "Going C" },
-      { id: 4, text: "Going Mid" },
-    ],
-  },
-];
-
-const GAMEMODE_NAMES: Record<string, string> = {
-  competitive: "Competitive",
-  unrated: "Unrated",
-  swiftplay: "Swiftplay",
-  spikerush: "Spike Rush",
-  hurm: "Team Deathmatch",
-  deathmatch: "Deathmatch",
-  ggteam: "Escalation",
-  onefa: "Replication",
-  snowball: "Snowball Fight",
-};
-
-const WEAPON_SKIN_GROUPS = [
-  {
-    category: "Sidearms",
-    weapons: [
-      { id: "classic", label: "Classic" },
-      { id: "shorty", label: "Shorty" },
-      { id: "frenzy", label: "Frenzy" },
-      { id: "ghost", label: "Ghost" },
-      { id: "bandit", label: "Bandit" },
-      { id: "sheriff", label: "Sheriff" },
-    ],
-  },
-  {
-    category: "SMGs & Shotguns",
-    weapons: [
-      { id: "stinger", label: "Stinger" },
-      { id: "spectre", label: "Spectre" },
-      { id: "bucky", label: "Bucky" },
-      { id: "judge", label: "Judge" },
-    ],
-  },
-  {
-    category: "Snipers & Heavy",
-    weapons: [
-      { id: "marshal", label: "Marshal" },
-      { id: "outlaw", label: "Outlaw" },
-      { id: "operator", label: "Operator" },
-      { id: "ares", label: "Ares" },
-      { id: "odin", label: "Odin" },
-    ],
-  },
-  {
-    category: "Rifles",
-    weapons: [
-      { id: "bulldog", label: "Bulldog" },
-      { id: "guardian", label: "Guardian" },
-      { id: "warden", label: "Warden" },
-      { id: "phantom", label: "Phantom" },
-      { id: "vandal", label: "Vandal" },
-    ],
-  },
-  {
-    category: "Melee",
-    weapons: [
-      { id: "melee", label: "Melee" },
-    ],
-  },
-];
-
-interface MacroAction {
-  key: string;
-  start_ms: number;
-  duration_ms: number;
-}
-
-interface MacroData {
-  total_loop_ms: number;
-  actions: MacroAction[];
-}
-
-interface UpdateInfo {
-  available: boolean;
-  current_version: string;
-  latest_version: string;
-  release_notes: string;
-  download_url: string;
-  release_url: string;
-  auto_update_allowed?: boolean;
-}
-
-interface AgentInfo {
-  id: string;
-  name: string;
-  role: string;
-  color: string;
-  is_starter: boolean;
-}
-
-interface AppConfig {
-  hotkey: string;
-  auto_vote_mode: number;
-  auto_overtime_vote_mode: number;
-  auto_ff_enabled: boolean;
-  auto_ff_round_5: boolean;
-  auto_ff_round_13: boolean;
-  auto_ff_round_14: boolean;
-  auto_ff_custom_rounds: number[];
-  anti_afk_mode: number;
-  anti_afk_key: string;
-  anti_afk_slow_mode: boolean;
-  chat_enabled: boolean;
-  chat_target: number;
-  chat_interval: number;
-  chat_text: string;
-  webhook_enabled: boolean;
-  webhook_url: string;
-  webhook_user_id: string;
-  webhook_notify_disconnect?: boolean;
-  webhook_notify_status?: boolean;
-  webhook_notify_agent_select?: boolean;
-  webhook_notify_queue?: boolean;
-  webhook_notify_match_start?: boolean;
-  webhook_notify_match_concludes?: boolean;
-  webhook_notify_rank_change?: boolean;
-  remote_notify_disconnect?: boolean;
-  remote_notify_status?: boolean;
-  remote_notify_rank_change?: boolean;
-  low_detail?: boolean;
-  agents_enabled: boolean;
-  instalock_enabled: boolean;
-  lock_delay: number;
-  lock_random_agent?: boolean;
-  selected_agents: string[];
-  music_volume: number;
-  auto_focus_game?: boolean;
-  always_on_top: boolean;
-  auto_derank_enabled: boolean;
-  auto_derank_target_rank?: string;
-  auto_derank_match_limit?: number;
-  auto_queue_enabled: boolean;
-  auto_queue_mode?: string;
-  comms_hotkey?: string;
-  comms_first_num?: number;
-  comms_second_num?: number;
-  comms_random?: boolean;
-  comms_delay?: number;
-  custom_macro_json?: string;
-}
-
-interface StatusResponse {
-  is_connected: boolean;
-  game_live: boolean;
-  is_game_ready: boolean;
-  client_type: string;
-  port: number;
-  pid: number;
-  error_message?: string;
-  player_name?: string;
-  player_tag?: string;
-  puuid?: string;
-  match_state: string;
-  rank_name: string;
-  rank_tier?: number;
-  map_name: string;
-  gamemode: string;
-  score_ally: number;
-  score_enemy: number;
-  current_agent: string;
-  match_id?: string;
-  server_name?: string;
-  wallet?: {
-    vp: number;
-    rp: number;
-    kc: number;
-    agent_tokens: number;
-  };
-}
-
-interface RecentMatchDetail {
-  result: string;
-  rr_change: number;
-  map_name: string;
-  tier_before?: number;
-  tier_after: number;
-  tier_name: string;
-  rr_after: number;
-  performance_bonus: number;
-  match_id: string;
-  timestamp: number;
-  is_rank_up?: boolean;
-  is_derank?: boolean;
-  kills?: number;
-  deaths?: number;
-  assists?: number;
-  kd_ratio?: number;
-  has_kda?: boolean;
-}
-
-interface TrackedPlayer {
-  puuid: string;
-  name: string;
-  team: string;
-  agent_id: string;
-  agent_name: string;
-  level: number;
-  current_tier: number;
-  current_rank_name: string;
-  current_rr: number;
-  peak_tier: number;
-  peak_rank_name: string;
-  peak_season: string;
-  last_season_tier?: number;
-  last_season_rank_name?: string;
-  last_season_name?: string;
-  leaderboard_pos?: number;
-  headshot_percent?: number;
-  win_rate: number;
-  total_games: number;
-  primary_skin: string;
-  weapon_skins?: Record<string, string>;
-  all_skins: string[];
-  recent_games?: string[];
-  recent_matches?: RecentMatchDetail[];
-  kd_ratio?: number;
-  total_kills?: number;
-  total_deaths?: number;
-  total_assists?: number;
-  party_tag?: string;
-  is_incognito: boolean;
-  is_self: boolean;
-  encounter?: PlayerEncounter | null;
-}
-
-interface LiveMatchRoster {
-  state: string;
-  match_id: string;
-  map_name: string;
-  gamemode: string;
-  server_name?: string;
-  ally_team: TrackedPlayer[];
-  enemy_team: TrackedPlayer[];
-  updated_at: string;
-  rate_limit_seconds?: number;
-}
-
-export interface StoreDailyOffer {
-  offer_id: string;
-  skin_name: string;
-  weapon_name: string;
-  icon_url: string;
-  cost_vp: number;
-}
-
-export interface StoreBundleItem {
-  item_id: string;
-  name: string;
-  icon_url: string;
-  base_price: number;
-  discounted_price: number;
-}
-
-export interface StoreFeaturedBundle {
-  bundle_id: string;
-  name: string;
-  display_icon: string;
-  total_cost_vp: number;
-  seconds_remaining: number;
-  items: StoreBundleItem[];
-}
-
-export interface StoreNightMarketOffer {
-  offer_id: string;
-  skin_name: string;
-  icon_url: string;
-  discount_percent: number;
-  original_cost_vp: number;
-  discounted_cost_vp: number;
-  is_purchased: boolean;
-}
-
-export interface StoreAccessoryOffer {
-  offer_id: string;
-  item_id: string;
-  name: string;
-  item_type: string;
-  icon_url: string;
-  cost_kc: number;
-}
-
-export interface StorefrontData {
-  daily_offers: StoreDailyOffer[];
-  daily_seconds_remaining: number;
-  featured_bundles: StoreFeaturedBundle[];
-  night_market_active: boolean;
-  night_market_offers: StoreNightMarketOffer[];
-  night_market_seconds_remaining: number;
-  accessory_offers: StoreAccessoryOffer[];
-  accessory_seconds_remaining: number;
-}
-
-type TabType =
-  | "main"
-  | "tracker"
-  | "career"
-  | "players"
-  | "shop"
-  | "config"
-  | "agents"
-  | "chat"
-  | "autovote"
-  | "music"
-  | "media"
-  | "remote"
-  | "webhook"
-  | "changelog"
-  | "settings"
-  | "info";
-
-export interface EncounterMatchHistory {
-  match_id: string;
-  timestamp: number;
-  date_str: string;
-  time_str: string;
-  map_name: string;
-  gamemode: string;
-  relationship: string; // "PLAYED WITH" or "PLAYED AGAINST"
-  result: string;       // "VICTORY", "DEFEAT", "DRAW"
-  score_ally: number;
-  score_enemy: number;
-  agent_id: string;
-  agent_name: string;
-  rank_tier: number;
-  rank_name: string;
-  rr: number;
-  kills: number;
-  deaths: number;
-  assists: number;
-  score: number;
-  is_win: boolean;
-}
-
-export interface PlayerEncounter {
-  puuid: string;
-  name: string;
-  tag: string;
-  is_hidden: boolean;
-  encounters_count: number;
-  matches_as_ally: number;
-  wins_as_ally: number;
-  losses_as_ally: number;
-  matches_as_enemy: number;
-  wins_against: number;
-  losses_against: number;
-  last_seen_timestamp: number;
-  last_seen_date_str: string;
-  last_seen_time_str: string;
-  last_seen_map: string;
-  last_seen_agent_id: string;
-  last_seen_agent_name: string;
-  last_rank_tier: number;
-  last_rank_name: string;
-  last_rr: number;
-  last_score_ally: number;
-  last_score_enemy: number;
-  last_result: string;
-  last_relationship: string;
-  history?: EncounterMatchHistory[];
-}
-
-export interface CareerHeadToHead {
-  enemy_puuid: string;
-  enemy_name: string;
-  enemy_tag: string;
-  enemy_agent_id: string;
-  enemy_agent_name: string;
-  enemy_rank_tier: number;
-  enemy_rank_name: string;
-  enemy_rr: number;
-  kills_on_enemy: number;
-  deaths_to_enemy: number;
-  damage_dealt: number;
-  damage_taken: number;
-  headshots_on_enemy: number;
-  first_kill_duels_won: number;
-  first_kill_duels_lost: number;
-}
-
-export interface CareerKillEvent {
-  time_in_round: number;
-  time_str: string;
-  killer_puuid: string;
-  killer_agent_id: string;
-  killer_name: string;
-  killer_is_ally: boolean;
-  victim_puuid: string;
-  victim_agent_id: string;
-  victim_name: string;
-  victim_is_ally: boolean;
-  weapon_name: string;
-  is_headshot: boolean;
-  event_type: "kill" | "plant" | "defuse" | string;
-  kill_distance_meters?: number;
-}
-
-export interface CareerRoundPlayerEconomy {
-  puuid: string;
-  name: string;
-  agent_id: string;
-  agent_name: string;
-  is_ally: boolean;
-  kills: number;
-  assists: number;
-  loadout_value: number;
-  remaining_bank: number;
-  weapon_name: string;
-  armor_name: string;
-}
-
-export interface CareerRoundResult {
-  round_num: number;
-  winning_team: string; // "Ally" | "Enemy"
-  round_result_type: string;
-  win_icon: string; // "elim" | "defuse" | "detonate" | "time"
-  events: CareerKillEvent[];
-  player_economies: CareerRoundPlayerEconomy[];
-  avg_loadout_ally: number;
-  avg_loadout_enemy: number;
-  avg_bank_ally: number;
-  avg_bank_enemy: number;
-}
-
-export interface CareerPlayer {
-  puuid: string;
-  name: string;
-  tag: string;
-  team: string; // "Ally" | "Enemy"
-  is_self: boolean;
-  agent_id: string;
-  agent_name: string;
-  rank_tier: number;
-  rank_name: string;
-  rr: number;
-  party_tag: string;
-  score: number;
-  kills: number;
-  deaths: number;
-  assists: number;
-  kd_ratio: number;
-  headshot_percent: number;
-  first_bloods: number;
-  multi_kills: number;
-  plants: number;
-  defuses: number;
-  trades: number;
-  encounter?: PlayerEncounter | null;
-}
-
-export interface CareerMatch {
-  match_id: string;
-  timestamp: number;
-  date_str: string;
-  time_str: string;
-  duration_seconds: number;
-  gamemode: string;
-  map_name: string;
-  result: "VICTORY" | "DEFEAT" | "DRAW" | string;
-  score_ally: number;
-  score_enemy: number;
-  my_agent_id: string;
-  my_agent_name: string;
-  my_rank_tier: number;
-  my_rank_name: string;
-  my_rr_change: number;
-  my_kills: number;
-  my_deaths: number;
-  my_assists: number;
-  my_score: number;
-  my_hs_percent: number;
-  players: CareerPlayer[];
-  head_to_head?: CareerHeadToHead[];
-  round_results?: CareerRoundResult[];
-}
-
-const MAP_SPLASHES: Record<string, string> = {
-  ascent: "https://media.valorant-api.com/maps/7eaecc1b-4337-bbf6-6ab9-04b8f06b3319/splash.png",
-  bind: "https://media.valorant-api.com/maps/2c9d57ec-4431-9c5e-2939-8f9ef6dd5cba/splash.png",
-  breeze: "https://media.valorant-api.com/maps/2fb9a4fd-47b8-4e7d-a969-74b4046ebd53/splash.png",
-  fracture: "https://media.valorant-api.com/maps/b529448b-4d60-346e-e89e-00a4c527a405/splash.png",
-  haven: "https://media.valorant-api.com/maps/2bee0dc9-4ffe-519b-1cbd-7fbe763a6047/splash.png",
-  icebox: "https://media.valorant-api.com/maps/e2ad5c54-4114-a870-9641-8ea21279579a/splash.png",
-  lotus: "https://media.valorant-api.com/maps/2fe4ed3a-450a-948b-6d6b-e89a78e680a9/splash.png",
-  pearl: "https://media.valorant-api.com/maps/fd267378-4d1d-484f-ff52-77821ed10dc2/splash.png",
-  split: "https://media.valorant-api.com/maps/d960549e-485c-e861-8d71-aa9d1aed12a2/splash.png",
-  sunset: "https://media.valorant-api.com/maps/92584fbe-486a-b1b2-9faa-39b0f486b498/splash.png",
-  abyss: "https://media.valorant-api.com/maps/224b0a95-48b9-f703-1bd8-67aca101a61f/splash.png",
-  summit: "https://media.valorant-api.com/maps/756da597-416b-c0f2-f47b-afbdf28670bc/splash.png",
-  corrode: "https://media.valorant-api.com/maps/1c18ab1f-420d-0d8b-71d0-77ad3c439115/splash.png",
-  district: "https://media.valorant-api.com/maps/690b3ed2-4dff-945b-8223-6da834e30d24/splash.png",
-  kasbah: "https://media.valorant-api.com/maps/12452a9d-48c3-0b02-e7eb-0381c3520404/splash.png",
-  drift: "https://media.valorant-api.com/maps/2c09d728-42d5-30d8-43dc-96a05cc7ee9d/splash.png",
-  glitch: "https://media.valorant-api.com/maps/d6336a5a-428f-c591-98db-c8a291159134/splash.png",
-  piazza: "https://media.valorant-api.com/maps/de28aa9b-4cbe-1003-320e-6cb3ec309557/splash.png",
-  gauntlet: "https://media.valorant-api.com/maps/dd3a1cd9-41b1-50ea-3bd6-a7bb3c5978bd/splash.png",
-};
-
-const VALORANT_AGENT_MAP: Record<string, string> = {
-  "41fb69c1-4189-7b37-f117-bcaf1e96f1bf": "Astra",
-  "b9f36430-4074-b290-eb81-0440ac023b4f": "Astra",
-  "95b78d77-474e-9714-2971-15c32582b04a": "Astra",
-  "5f8d3a7f-467b-97f3-062c-13acf203c006": "Breach",
-  "9f0d8ba9-4140-b941-57d3-a7ad57c6b417": "Brimstone",
-  "22697a3d-45bf-8dd7-4fec-84a9e28c69d7": "Chamber",
-  "1dbf2edd-4729-0984-3115-daa5eed44993": "Clove",
-  "1dbf2edd-4729-0984-3115-ffb5dde52523": "Clove",
-  "117ed9e3-49f3-6512-3ccf-0cada7e3823b": "Cypher",
-  "a3bfb854-4376-2d48-8377-93a26e38fb6f": "Cypher",
-  "cc8b64c8-4b25-4ff9-6e7f-37b4da43d235": "Deadlock",
-  "dade69b4-4f5a-8528-247b-219e5a1facd6": "Fade",
-  "e370fa57-4757-3604-3648-499e1f642d3f": "Gekko",
-  "95b78ed7-4637-86d9-7e41-71ba8c293152": "Harbor",
-  "ddd5a15c-4fbe-42fa-3789-11a55ca5ee04": "Hush",
-  "0e38b510-41a8-5780-5e8f-568b2a4f2d6c": "Iso",
-  "add6443a-41bd-e414-f6ad-e58d267f4e95": "Jett",
-  "601dbbe7-43ce-be57-2a40-4abd24953621": "KAY/O",
-  "1e58de9c-4950-5125-93e9-a0aee9f98746": "Killjoy",
-  "7c8a4701-4de6-9355-b254-e09bc2a34b72": "Miks",
-  "bb2a4828-46eb-8cd1-e765-15848195d751": "Neon",
-  "bb2a483e-4654-9406-1218-a616235b0d62": "Neon",
-  "8e253930-4c05-31dd-1b6c-968525494517": "Omen",
-  "8e253930-4c05-31dd-16ee-adacb8744f8b": "Omen",
-  "eb93336a-449b-9c1b-0a54-a891f7921d69": "Phoenix",
-  "eb9333ab-4054-7ac4-14d0-76ac36ab0ce6": "Phoenix",
-  "f94c3b30-42be-e959-889c-5aa313dba261": "Raze",
-  "a3bfb853-43b2-7238-a4f1-ad90e9e46bcc": "Reyna",
-  "569fdd95-4d10-43ab-ca70-79becc718b46": "Sage",
-  "6f2a04ca-43e0-be17-7f36-b3908627744d": "Skye",
-  "320b2a48-4d9b-a075-30f1-1f93a9b638fa": "Sova",
-  "ded3520f-4264-bfed-162d-b080e2abccf9": "Sova",
-  "b444168c-4e35-8076-db47-ef9bf368f384": "Tejo",
-  "b57f0980-4963-c36b-d8b4-028d7121287e": "Tejo",
-  "92eeef5d-43b5-1d4a-8d03-b3927a09034b": "Veto",
-  "707eab51-4836-f488-046a-cda6bf494859": "Viper",
-  "efba5359-4016-a1e5-7626-b1ae76895940": "Vyse",
-  "df222b40-4f51-4043-9831-27909339e6a0": "Vyse",
-  "df1cb487-4902-002e-5c17-d28e83e78588": "Waylay",
-  "7f94d92c-4234-0a36-9646-3a87eb8b5c89": "Yoru",
-};
-
-export function resolveAgentName(agentId?: string, fallback?: string): string {
-  if (fallback && fallback !== "Agent" && fallback.trim().length > 0) {
-    return fallback;
-  }
-  if (agentId) {
-    const mapped = VALORANT_AGENT_MAP[agentId.toLowerCase()];
-    if (mapped) return mapped;
-  }
-  return fallback || "Agent";
-}
-
-interface ToastMsg {
-  id: number;
-  text: string;
-}
-
-export interface PairedDevice {
-  id: string;
-  name: string;
-  paired_at: string;
-  /** Per-device AES-256 session key (base64). Deleting it revokes the device. */
-  key: string;
-}
+import type {
+  AgentInfo,
+  AppConfig,
+  CareerMatch,
+  LiveMatchRoster,
+  MacroAction,
+  MacroData,
+  PairedDevice,
+  PlayerEncounter,
+  RecentMatchDetail,
+  StatusResponse,
+  StorefrontData,
+  TabType,
+  ToastMsg,
+  TrackedPlayer,
+  UpdateInfo,
+} from "./types/sagebot";
+import {
+  APP_VERSION,
+  COMMS_CATEGORIES,
+  GAMEMODE_NAMES,
+  MAP_SPLASHES,
+  WEAPON_SKIN_GROUPS,
+  resolveAgentName,
+} from "./constants/valorant";
 
 const loadOrCreate = (storageKey: string, isValid: (v: string) => boolean, create: () => string): string => {
   const saved = localStorage.getItem(storageKey);
@@ -742,16 +153,13 @@ export default function App() {
       if (matches) {
         setCareerMatches(matches);
       }
-      // Background sync from Riot match history to catch any matches that ended
+      // Sync from Riot match history to catch any matches that ended
       // while SageBot was closed, restarted, or in lobby
-      invoke<CareerMatch[]>("sync_career_matches")
-        .then((updated) => {
-          if (updated && updated.length > 0) {
-            setCareerMatches(updated);
-            loadEncounterMemory();
-          }
-        })
-        .catch(() => {});
+      const updated = await invoke<CareerMatch[]>("sync_career_matches");
+      if (updated && updated.length > 0) {
+        setCareerMatches(updated);
+      }
+      await loadEncounterMemory();
     } catch (e) {
       console.error("Failed to load career matches:", e);
     }
@@ -777,7 +185,7 @@ export default function App() {
 
   const deleteCareerMatch = async (matchId: string) => {
     try {
-      const updated = await invoke<CareerMatch[]>("delete_career_match", { match_id: matchId, matchId });
+      const updated = await invoke<CareerMatch[]>("delete_career_match", { matchId });
       if (updated) {
         setCareerMatches(updated);
         if (selectedCareerMatch?.match_id === matchId) {
@@ -874,29 +282,29 @@ export default function App() {
         last_relationship: isAlly ? "PLAYED WITH" : "PLAYED AGAINST",
         history: selectedCareerMatch
           ? [
-              {
-                match_id: selectedCareerMatch.match_id,
-                map_name: selectedCareerMatch.map_name,
-                timestamp: selectedCareerMatch.timestamp,
-                date_str: selectedCareerMatch.date_str,
-                time_str: selectedCareerMatch.time_str,
-                gamemode: selectedCareerMatch.gamemode,
-                relationship: isAlly ? "PLAYED WITH" : "PLAYED AGAINST",
-                result: selectedCareerMatch.result,
-                score_ally: selectedCareerMatch.score_ally,
-                score_enemy: selectedCareerMatch.score_enemy,
-                agent_id: p.agent_id || "",
-                agent_name: resolvedAgent,
-                rank_tier: p.rank_tier || 0,
-                rank_name: p.rank_name || "Unranked",
-                rr: p.rr || 0,
-                kills: p.kills || 0,
-                deaths: p.deaths || 0,
-                assists: p.assists || 0,
-                score: p.score || 0,
-                is_win: isWin,
-              },
-            ]
+            {
+              match_id: selectedCareerMatch.match_id,
+              map_name: selectedCareerMatch.map_name,
+              timestamp: selectedCareerMatch.timestamp,
+              date_str: selectedCareerMatch.date_str,
+              time_str: selectedCareerMatch.time_str,
+              gamemode: selectedCareerMatch.gamemode,
+              relationship: isAlly ? "PLAYED WITH" : "PLAYED AGAINST",
+              result: selectedCareerMatch.result,
+              score_ally: selectedCareerMatch.score_ally,
+              score_enemy: selectedCareerMatch.score_enemy,
+              agent_id: p.agent_id || "",
+              agent_name: resolvedAgent,
+              rank_tier: p.rank_tier || 0,
+              rank_name: p.rank_name || "Unranked",
+              rr: p.rr || 0,
+              kills: p.kills || 0,
+              deaths: p.deaths || 0,
+              assists: p.assists || 0,
+              score: p.score || 0,
+              is_win: isWin,
+            },
+          ]
           : [],
       };
     }
@@ -924,6 +332,8 @@ export default function App() {
     hotkey: "F9",
     auto_vote_mode: 0,
     auto_overtime_vote_mode: 0,
+    vote_yes_key: "F5",
+    vote_no_key: "F6",
     auto_ff_enabled: false,
     auto_ff_round_5: false,
     auto_ff_round_13: false,
@@ -934,7 +344,7 @@ export default function App() {
     anti_afk_slow_mode: false,
     chat_enabled: false,
     chat_target: 0,
-    chat_interval: 180,
+    chat_interval: 3,
     chat_text: "With great Power comes great Responsibility",
     webhook_enabled: true,
     webhook_url: "",
@@ -950,9 +360,14 @@ export default function App() {
     remote_notify_status: true,
     remote_notify_rank_change: true,
     low_detail: false,
-    agents_enabled: true,
+    agents_enabled: false,
     instalock_enabled: false,
     lock_delay: 20,
+    agent_lock_mode: "linear",
+    fill_roles: [],
+    fill_fallback_mode: "priority",
+    fill_timing_mode: "last",
+    fill_delay: 20,
     selected_agents: [],
     music_volume: 80,
     auto_focus_game: false,
@@ -966,7 +381,7 @@ export default function App() {
     comms_first_num: 3,
     comms_second_num: 6,
     comms_random: false,
-    comms_delay: 5,
+    comms_delay: 3,
     custom_macro_json: "",
   });
 
@@ -978,6 +393,9 @@ export default function App() {
   const [isRebindingMain, setIsRebindingMain] = useState<boolean>(false);
   const [isRebindingAfk, setIsRebindingAfk] = useState<boolean>(false);
   const [isRebindingComms, setIsRebindingComms] = useState<boolean>(false);
+  const [isRebindingVoteYes, setIsRebindingVoteYes] = useState<boolean>(false);
+  const [isRebindingVoteNo, setIsRebindingVoteNo] = useState<boolean>(false);
+  const [agentRoleFilter, setAgentRoleFilter] = useState<string>("All");
   const [isRecordingMacro, setIsRecordingMacro] = useState<boolean>(false);
   const [macroLiveActions, setMacroLiveActions] = useState<MacroAction[]>([]);
   const [activeHoldingKeys, setActiveHoldingKeys] = useState<string[]>([]);
@@ -1234,11 +652,11 @@ export default function App() {
   };
 
   const [lockDelayInput, setLockDelayInput] = useState<string>("20");
-  const [chatIntervalInput, setChatIntervalInput] = useState<string>("180");
+  const [fillDelayInput, setFillDelayInput] = useState<string>("20");
+  const [chatIntervalInput, setChatIntervalInput] = useState<string>("3");
   const [commsDelayInput, setCommsDelayInput] = useState<string>("3");
 
   // Screen State
-  const [gatePassed] = useState<boolean>(true);
   const devBypassRef = useRef<boolean>(false);
   const botStartTimeRef = useRef<number>(0);
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
@@ -1280,6 +698,7 @@ export default function App() {
 
   // Match and event tracking refs
   const wasInMatchRef = useRef<boolean>(false);
+  const isConcludingMatchRef = useRef<boolean>(false);
   const hasFocusedCurrentMatchRef = useRef<boolean>(false);
   const prevMatchStateRef = useRef<string>("");
   const wasGameReadyRef = useRef<boolean>(false);
@@ -1432,11 +851,12 @@ export default function App() {
           if (cfg.instalock_enabled) {
             setLockDelayInput("0");
           } else {
-            const d = cfg.lock_delay >= 5 && cfg.lock_delay <= 70 ? cfg.lock_delay : 20;
+            const d = cfg.lock_delay >= 5 && cfg.lock_delay <= 75 ? cfg.lock_delay : 20;
             setLockDelayInput(String(d));
           }
-          setChatIntervalInput(String(cfg.chat_interval ?? 180));
+          setChatIntervalInput(String(cfg.chat_interval ?? 3));
           setCommsDelayInput(String(Math.max(3, cfg.comms_delay ?? 3)));
+          setFillDelayInput(String(Math.min(75, Math.max(1, cfg.fill_delay ?? 20))));
           if (cfg.always_on_top) {
             invoke("set_always_on_top", { alwaysOnTop: true }).catch(() => { });
           }
@@ -1635,10 +1055,7 @@ export default function App() {
             const id = data.agentId || data.payload?.agentId || data.agent_id || data.payload?.agent_id;
             const agentName = data.agentName || data.payload?.agentName || "Agent";
             try {
-              const resMsg = await invoke<string>("lock_agent_now", {
-                agent_id: id,
-                agentId: id,
-              });
+              const resMsg = await invoke<string>("lock_agent_now", { agentId: id });
               showToast(`Remote locked: ${agentName}`);
               bridge.send({
                 type: "lock_result",
@@ -1678,7 +1095,7 @@ export default function App() {
             updateAndSaveConfig({ auto_queue_mode: queueMode });
             configRef.current.auto_queue_mode = queueMode;
             try {
-              await invoke("start_matchmaking_queue", { queue_mode: queueMode, queueMode });
+              await invoke("start_matchmaking_queue", { queueMode });
               showToast(`Matchmaking started (${modeName})`);
               bridge.send({ type: "toast", payload: `Queue started: ${modeName}` });
             } catch (err: any) {
@@ -1764,7 +1181,6 @@ export default function App() {
     const handlePreventReload = (e: KeyboardEvent) => {
       if (e.key === "F5" || (e.ctrlKey && (e.key === "r" || e.key === "R"))) {
         e.preventDefault();
-        e.stopPropagation();
       }
     };
     window.addEventListener("keydown", handlePreventReload, true);
@@ -2110,8 +1526,9 @@ export default function App() {
           }
           prevMatchStateRef.current = res.match_state;
 
-          // 1. Match Concluded Detection: Triggers when transitioning from In Game back to Lobby
-          if (wasInMatchRef.current && isLobby) {
+          // 1. Match Concluded Detection: Triggers when transitioning from In Game back to Lobby or In Queue
+          const isPostMatch = isLobby || res.match_state === "In Queue";
+          if (wasInMatchRef.current && isPostMatch) {
             lobbyCountRef.current += 1;
             if (lobbyCountRef.current >= 3) {
               wasInMatchRef.current = false;
@@ -2172,15 +1589,18 @@ export default function App() {
                 );
               };
 
-              // Query exact completed match details directly from Riot API (ensures true scores like 100-91 in TDM)
-              invoke<{
-                map_name: string;
-                gamemode: string;
-                score_ally: number;
-                score_enemy: number;
-                won: boolean;
-              }>("get_latest_completed_match_score")
-                .then((latest) => {
+              // Lock auto-queueing until all post-match data (career + players) is fetched & saved
+              isConcludingMatchRef.current = true;
+              (async () => {
+                try {
+                  const latest = await invoke<{
+                    map_name: string;
+                    gamemode: string;
+                    score_ally: number;
+                    score_enemy: number;
+                    won: boolean;
+                  }>("get_latest_completed_match_score").catch(() => null);
+
                   if (latest && (latest.score_ally > 0 || latest.score_enemy > 0)) {
                     dispatchConclude(
                       latest.score_ally,
@@ -2191,14 +1611,15 @@ export default function App() {
                   } else {
                     dispatchConclude(allyFinal, enemyFinal, finalMap, rawMode);
                   }
-                  loadCareerMatches();
-                  loadEncounterMemory();
-                })
-                .catch(() => {
-                  dispatchConclude(allyFinal, enemyFinal, finalMap, rawMode);
-                  loadCareerMatches();
-                  loadEncounterMemory();
-                });
+
+                  await loadCareerMatches();
+                  // Give Riot's match-history a brief window to index the just-finished match before allowing next queue
+                  await new Promise((resolve) => setTimeout(resolve, 6000));
+                  await loadCareerMatches();
+                } finally {
+                  isConcludingMatchRef.current = false;
+                }
+              })();
 
               // STOP SageBot when game concludes UNLESS Fully Auto Play is on
               if (!configRef.current.auto_derank_enabled) {
@@ -2297,6 +1718,7 @@ export default function App() {
             disconnectCountRef.current += 1;
             // When disconnected, game is no longer in a match lobby - prevent false concluded trigger
             wasInMatchRef.current = false;
+            isConcludingMatchRef.current = false;
             lobbyCountRef.current = 0;
             if (disconnectCountRef.current < 4 && wasGameReadyRef.current) {
               return;
@@ -2320,9 +1742,10 @@ export default function App() {
             disconnectCountRef.current = 0;
             wasGameReadyRef.current = true;
 
-            // Auto Matchmaking Queue (Active when auto_queue_enabled OR auto_derank_enabled)
+            // Auto Matchmaking Queue (Active when auto_queue_enabled OR auto_derank_enabled, after post-match save finishes)
             if (
               runningRef.current &&
+              !isConcludingMatchRef.current &&
               (configRef.current.auto_queue_enabled || configRef.current.auto_derank_enabled)
             ) {
               if (res.match_state === "In Queue") {
@@ -2331,7 +1754,7 @@ export default function App() {
                 if (!isQueueingRef.current && Date.now() - lastQueueTimeRef.current > 10000) {
                   lastQueueTimeRef.current = Date.now();
                   const targetMode = configRef.current.auto_queue_mode || "competitive";
-                  invoke<boolean>("start_matchmaking_queue", { queue_mode: targetMode, queueMode: targetMode })
+                  invoke<boolean>("start_matchmaking_queue", { queueMode: targetMode })
                     .then((ok) => {
                       if (ok) {
                         isQueueingRef.current = true;
@@ -2413,7 +1836,7 @@ export default function App() {
       isCancelled = true;
       if (pollTimeout) clearTimeout(pollTimeout);
     };
-  }, [gatePassed]);
+  }, []);
 
   // Listen for Global Hotkey (F9 / bound hotkey) via native Rust listener
   useEffect(() => {
@@ -2421,7 +1844,7 @@ export default function App() {
     let isToggling = false;
 
     listen("global-hotkey-press", () => {
-      if (isRebindingMain || isRebindingAfk || isToggling) return;
+      if (isRebindingMain || isRebindingAfk || isRebindingComms || isRebindingVoteYes || isRebindingVoteNo || isToggling) return;
       isToggling = true;
       if (runningRef.current) {
         stopSagebot();
@@ -2438,7 +1861,7 @@ export default function App() {
     return () => {
       if (unlisten) unlisten();
     };
-  }, [isRebindingMain, isRebindingAfk]);
+  }, [isRebindingMain, isRebindingAfk, isRebindingComms, isRebindingVoteYes, isRebindingVoteNo]);
 
   // Live Match Tracker, Career & Players initial fetch when switching tabs
   useEffect(() => {
@@ -2480,18 +1903,18 @@ export default function App() {
     return () => clearInterval(ticker);
   }, [Boolean(storefront), config.low_detail, activeTab]);
 
-  // Live Match Tracker startup trigger: runs once when game gate passes or VALORANT connects
+  // Live Match Tracker startup trigger: runs once on startup
   useEffect(() => {
-    if (gatePassed && !hasDoneInitialTrackerFetchRef.current) {
+    if (!hasDoneInitialTrackerFetchRef.current) {
       hasDoneInitialTrackerFetchRef.current = true;
       fetchRoster();
     }
-  }, [gatePassed]);
+  }, []);
 
   // Keyboard capture for rebinding
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (!isRebindingMain && !isRebindingAfk && !isRebindingComms) return;
+      if (!isRebindingMain && !isRebindingAfk && !isRebindingComms && !isRebindingVoteYes && !isRebindingVoteNo) return;
       e.preventDefault();
       e.stopPropagation();
 
@@ -2499,6 +1922,8 @@ export default function App() {
         setIsRebindingMain(false);
         setIsRebindingAfk(false);
         setIsRebindingComms(false);
+        setIsRebindingVoteYes(false);
+        setIsRebindingVoteNo(false);
         return;
       }
 
@@ -2516,9 +1941,11 @@ export default function App() {
       }
 
       if (isRebindingMain) {
-        if (keyName === "F5" || keyName === "F6") {
+        const voteYesKey = (configRef.current.vote_yes_key || "F5").toUpperCase();
+        const voteNoKey = (configRef.current.vote_no_key || "F6").toUpperCase();
+        if (keyName.toUpperCase() === voteYesKey || keyName.toUpperCase() === voteNoKey) {
           addLog(
-            "[SYSTEM] F5 and F6 are reserved for Auto-Vote and cannot be Play/Pause."
+            `[SYSTEM] ${keyName} is bound to Auto-Vote and cannot be Play/Pause.`
           );
           setIsRebindingMain(false);
           return;
@@ -2554,12 +1981,36 @@ export default function App() {
         invoke("save_config", { newConfig: updated });
         addLog(`[CONFIG] Comms hotkey set to: ${keyName}`);
         setIsRebindingComms(false);
+      } else if (isRebindingVoteYes) {
+        const voteNoKey = (configRef.current.vote_no_key || "F6").toUpperCase();
+        if (keyName.toUpperCase() === configRef.current.hotkey.toUpperCase() || keyName.toUpperCase() === voteNoKey) {
+          showToast("Vote YES key conflicts with Start/Stop or Vote NO key.");
+          setIsRebindingVoteYes(false);
+          return;
+        }
+        const updated = { ...configRef.current, vote_yes_key: keyName };
+        setConfig(updated);
+        invoke("save_config", { newConfig: updated });
+        addLog(`[CONFIG] Vote YES / DRAW key set to: ${keyName}`);
+        setIsRebindingVoteYes(false);
+      } else if (isRebindingVoteNo) {
+        const voteYesKey = (configRef.current.vote_yes_key || "F5").toUpperCase();
+        if (keyName.toUpperCase() === configRef.current.hotkey.toUpperCase() || keyName.toUpperCase() === voteYesKey) {
+          showToast("Vote NO key conflicts with Start/Stop or Vote YES key.");
+          setIsRebindingVoteNo(false);
+          return;
+        }
+        const updated = { ...configRef.current, vote_no_key: keyName };
+        setConfig(updated);
+        invoke("save_config", { newConfig: updated });
+        addLog(`[CONFIG] Vote NO / CONTINUE key set to: ${keyName}`);
+        setIsRebindingVoteNo(false);
       }
     };
 
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isRebindingMain, isRebindingAfk, isRebindingComms]);
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
+  }, [isRebindingMain, isRebindingAfk, isRebindingComms, isRebindingVoteYes, isRebindingVoteNo]);
 
   // Save config helper
   const updateAndSaveConfig = (partial: Partial<AppConfig>) => {
@@ -3016,19 +2467,21 @@ export default function App() {
       function executeVote() {
         if (!tryAcquireActionLock()) return;
         const isOvertime = lastScoreRef.current.ally >= 12 && lastScoreRef.current.enemy >= 12;
+        const yesKey = configRef.current.vote_yes_key || "F5";
+        const noKey = configRef.current.vote_no_key || "F6";
         if (isOvertime) {
           if (configRef.current.auto_overtime_vote_mode === 1) {
-            invoke("trigger_vote", { voteYes: true }).catch(() => { }).finally(() => releaseActionLock(150));
+            invoke("trigger_vote", { voteYes: true, voteKey: yesKey }).catch(() => { }).finally(() => releaseActionLock(150));
           } else if (configRef.current.auto_overtime_vote_mode === 2) {
-            invoke("trigger_vote", { voteYes: false }).catch(() => { }).finally(() => releaseActionLock(150));
+            invoke("trigger_vote", { voteYes: false, voteKey: noKey }).catch(() => { }).finally(() => releaseActionLock(150));
           } else {
             releaseActionLock(0);
           }
         } else {
           if (configRef.current.auto_vote_mode === 1) {
-            invoke("trigger_vote", { voteYes: true }).catch(() => { }).finally(() => releaseActionLock(150));
+            invoke("trigger_vote", { voteYes: true, voteKey: yesKey }).catch(() => { }).finally(() => releaseActionLock(150));
           } else if (configRef.current.auto_vote_mode === 2) {
-            invoke("trigger_vote", { voteYes: false }).catch(() => { }).finally(() => releaseActionLock(150));
+            invoke("trigger_vote", { voteYes: false, voteKey: noKey }).catch(() => { }).finally(() => releaseActionLock(150));
           } else {
             releaseActionLock(0);
           }
@@ -3522,22 +2975,95 @@ export default function App() {
     };
   }, []);
 
-  // Agent Selection Helper
+  // Agent Selection & Fill Validation Helpers
+  const activeAgentLockMode =
+    config.agent_lock_mode || (config.lock_random_agent ? "random" : "linear");
+
+  const getMissingFillRoles = (selectedIds: string[], fillRolesList: string[]): string[] => {
+    return fillRolesList.filter(
+      (role) =>
+        !selectedIds.some((id) => {
+          const ag = agents.find((a) => a.id === id);
+          return ag?.role.toLowerCase() === role.toLowerCase();
+        })
+    );
+  };
+
+  const validateAgentLockEnable = (
+    selectedIds: string[],
+    mode: string,
+    fillRolesList: string[]
+  ): string | null => {
+    if (!selectedIds || selectedIds.length === 0) {
+      return "Add at least one agent to the Queue to enable Agent Lock.";
+    }
+    if (mode === "fill") {
+      if (!fillRolesList || fillRolesList.length === 0) {
+        return "Select at least one Fill role before enabling Fill mode.";
+      }
+      const missing = getMissingFillRoles(selectedIds, fillRolesList);
+      if (missing.length > 0) {
+        return `Add at least one ${missing.join(", ")} agent to the Queue for Fill mode.`;
+      }
+    }
+    return null;
+  };
+
   const toggleAgent = (agentId: string) => {
     const cur = [...config.selected_agents];
     const idx = cur.indexOf(agentId);
-    let updated: string[];
-    if (idx >= 0) {
-      updated = cur.filter((id) => id !== agentId);
-    } else {
-      updated = [...cur, agentId];
+    const updated =
+      idx >= 0 ? cur.filter((id) => id !== agentId) : [...cur, agentId];
+
+    let nextEnabled = config.agents_enabled;
+    if (nextEnabled) {
+      const err = validateAgentLockEnable(
+        updated,
+        activeAgentLockMode,
+        config.fill_roles || []
+      );
+      if (err) {
+        nextEnabled = false;
+        showToast(`Agent Lock disabled: ${err}`);
+      }
     }
-    const hasAny = updated.length > 0;
-    updateAndSaveConfig({ selected_agents: updated, agents_enabled: hasAny });
+    updateAndSaveConfig({ selected_agents: updated, agents_enabled: nextEnabled });
   };
 
   const clearAgents = () => {
+    if (config.agents_enabled) {
+      showToast("Agent Lock disabled: Queue cleared.");
+    }
     updateAndSaveConfig({ selected_agents: [], agents_enabled: false });
+  };
+
+  const toggleFillRole = (role: string) => {
+    const curRoles = [...(config.fill_roles || [])];
+    const idx = curRoles.findIndex((r) => r.toLowerCase() === role.toLowerCase());
+    const updatedRoles =
+      idx >= 0 ? curRoles.filter((_, i) => i !== idx) : [...curRoles, role];
+
+    let nextEnabled = config.agents_enabled;
+    if (nextEnabled && activeAgentLockMode === "fill") {
+      const err = validateAgentLockEnable(
+        config.selected_agents,
+        "fill",
+        updatedRoles
+      );
+      if (err) {
+        nextEnabled = false;
+        showToast(`Agent Lock disabled: ${err}`);
+      }
+    }
+    updateAndSaveConfig({ fill_roles: updatedRoles, agents_enabled: nextEnabled });
+  };
+
+  const moveFillRole = (fromIdx: number, toIdx: number) => {
+    const curRoles = [...(config.fill_roles || [])];
+    if (fromIdx === toIdx || fromIdx < 0 || toIdx < 0 || fromIdx >= curRoles.length || toIdx >= curRoles.length) return;
+    const [moved] = curRoles.splice(fromIdx, 1);
+    curRoles.splice(toIdx, 0, moved);
+    updateAndSaveConfig({ fill_roles: curRoles });
   };
 
   const moveAgent = (fromIdx: number, toIdx: number) => {
@@ -3645,10 +3171,10 @@ export default function App() {
     if (config.instalock_enabled) return;
     const trimmed = lockDelayInput.trim();
     const val = parseInt(trimmed, 10);
-    if (isNaN(val) || val < 5 || val > 70) {
+    if (isNaN(val) || val < 5 || val > 75) {
       setErrorModal({
         title: "Invalid Lock Delay",
-        message: "Lock Delay must be between 5 and 70 seconds.",
+        message: "Lock Delay must be between 5 and 75 seconds.",
         submessage: "The delay has been reset to the default of 20 seconds.",
       });
       setLockDelayInput("20");
@@ -3659,6 +3185,23 @@ export default function App() {
     }
   };
 
+  const commitFillDelay = () => {
+    const trimmed = fillDelayInput.trim();
+    const val = parseInt(trimmed, 10);
+    if (isNaN(val) || val < 1 || val > 75) {
+      setErrorModal({
+        title: "Invalid Fill Delay",
+        message: "Delayed Fill timer must be between 1 and 75 seconds.",
+        submessage: "The delay has been reset to 20 seconds.",
+      });
+      setFillDelayInput("20");
+      updateAndSaveConfig({ fill_delay: 20 });
+    } else {
+      setFillDelayInput(String(val));
+      updateAndSaveConfig({ fill_delay: val });
+    }
+  };
+
   const commitChatInterval = () => {
     const trimmed = chatIntervalInput.trim();
     const val = parseInt(trimmed, 10);
@@ -3666,10 +3209,10 @@ export default function App() {
       setErrorModal({
         title: "Invalid Chat Interval",
         message: "Chat Interval must be between 0 and 3600 seconds.",
-        submessage: "The interval has been reset to the default of 180 seconds.",
+        submessage: "The interval has been reset to the default of 3 seconds.",
       });
-      setChatIntervalInput("180");
-      updateAndSaveConfig({ chat_interval: 180 });
+      setChatIntervalInput("3");
+      updateAndSaveConfig({ chat_interval: 3 });
     } else {
       setChatIntervalInput(String(val));
       updateAndSaveConfig({ chat_interval: val });
@@ -3880,9 +3423,23 @@ export default function App() {
     // Clean player name - remove any "(Hidden)" suffix since incognito badge is shown
     const cleanRawName = (player.name || "").replace(/\s*\(Hidden\)/gi, "").trim();
     const parts = cleanRawName.split("#");
-    const hasTag = parts.length > 1 && parts[1].trim() !== "" && parts[1].trim() !== "#";
-    const gameName = parts[0] || cleanRawName || "Player";
-    const tagLine = hasTag ? parts[1] : "";
+    const hasLiveTag = parts.length > 1 && parts[1].trim() !== "" && parts[1].trim() !== "#";
+    const enc = player.encounter;
+    const hasSavedRealName = Boolean(
+      enc &&
+      !enc.is_hidden &&
+      enc.name &&
+      enc.tag &&
+      !enc.name.startsWith("Player ") &&
+      !enc.name.startsWith("Player#") &&
+      enc.name !== "Player"
+    );
+
+    const useUnmaskedSaved = !hasLiveTag && hasSavedRealName && !!enc;
+    const gameName = useUnmaskedSaved ? enc!.name : (parts[0] || cleanRawName || "Player");
+    const tagLine = useUnmaskedSaved ? enc!.tag : (hasLiveTag ? parts[1] : "");
+    const hasResolvedTag = Boolean(tagLine && tagLine.trim() !== "");
+    const resolvedFullName = tagLine ? `${gameName}#${tagLine}` : gameName;
 
     const getDisplayedSkin = (p: TrackedPlayer) => {
       // TBD is strictly for Agent Select (PREGAME)
@@ -3945,13 +3502,13 @@ export default function App() {
               <div className="tracker-player-top-line">
                 <span
                   className="tracker-player-name"
-                  {...(cleanRawName.length > 20 ? { "data-tooltip": cleanRawName, "data-tooltip-pos": "bottom" } : {})}
+                  {...(resolvedFullName.length > 20 ? { "data-tooltip": resolvedFullName, "data-tooltip-pos": "bottom" } : {})}
                 >
                   <span className="tracker-gamename">{gameName}</span>
                   {tagLine && <span className="tracker-tagline">#{tagLine}</span>}
                 </span>
                 <div className="tracker-player-badges">
-                  {player.is_incognito && (cleanRawName.startsWith("Player ") || cleanRawName === "Player" || !hasTag) && (
+                  {player.is_incognito && !hasResolvedTag && (
                     <span
                       className="tracker-badge-incognito"
                       data-tooltip="Player hides their name"
@@ -4372,6 +3929,7 @@ export default function App() {
                 setActiveTab("players");
                 setSelectedPlayerEncounter(null);
                 loadEncounterMemory();
+                loadCareerMatches();
               }}
             >
               <Users size={14} />
@@ -4415,10 +3973,23 @@ export default function App() {
               <span>Shop</span>
             </button>
 
-            {/* Divider */}
+            {/* Divider above Agents */}
             <div className="sidebar-divider" style={{ margin: "6px 4px" }} />
 
-            {/* Core Tools: Main, Config, Agents, Chat, Voting, Discord */}
+            {/* Standalone Mode: Agents */}
+            <button
+              className={`nav-btn ${activeTab === "agents" ? "active" : ""}`}
+              onClick={() => setActiveTab("agents")}
+            >
+              <Users size={14} />
+              <span>Agents</span>
+              <span
+                className={`nav-live-dot ${config.agents_enabled ? "dot-bot-running" : "dot-bot-stopped"}`}
+                data-tooltip={config.agents_enabled ? "Agent Lock: Enabled" : "Agent Lock: Disabled"}
+              />
+            </button>
+
+            {/* Core Toggle: Main */}
             <button
               className={`nav-btn ${activeTab === "main" ? "active" : ""}`}
               onClick={() => setActiveTab("main")}
@@ -4430,19 +4001,17 @@ export default function App() {
                 data-tooltip={isRunning ? "SageBot: Running" : "SageBot: Stopped"}
               />
             </button>
+
+            {/* Divider below Main */}
+            <div className="sidebar-divider" style={{ margin: "6px 4px" }} />
+
+            {/* Core Tools: Config, Chat, Voting, Remote */}
             <button
               className={`nav-btn ${activeTab === "config" ? "active" : ""}`}
               onClick={() => setActiveTab("config")}
             >
               <Wrench size={14} />
               <span>Config</span>
-            </button>
-            <button
-              className={`nav-btn ${activeTab === "agents" ? "active" : ""}`}
-              onClick={() => setActiveTab("agents")}
-            >
-              <Users size={14} />
-              <span>Agents</span>
             </button>
             <button
               className={`nav-btn ${activeTab === "chat" ? "active" : ""}`}
@@ -4488,55 +4057,16 @@ export default function App() {
           <div className="tab-viewport">
             {/* TAB 0: MAIN */}
             {activeTab === "main" && (
-              <div className="tab-pane">
-                <div className="card status-header-card">
-                  <div className="status-row">
-                    <span className="status-label">STATUS:</span>
-                    <span
-                      className={`status-value ${isRunning ? "val-running" : "val-stopped"}`}
-                      style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
-                    >
-                      <span
-                        className={`nav-live-dot ${isRunning ? "dot-bot-running" : "dot-bot-stopped"}`}
-                        style={{ margin: 0 }}
-                      />
-                      {isRunning ? "RUNNING" : "STOPPED"}
-                    </span>
-                  </div>
-                  <div className="status-row" style={{ marginTop: "6px" }}>
-                    <span className="status-label">HOTKEY:</span>
-                    <span className="status-value val-hotkey">{config.hotkey}</span>
-                  </div>
-                </div>
-
-                <button
-                  className={`primary-action-btn ${isRunning ? "btn-stop" : "btn-start"}`}
-                  onClick={() => {
-                    if (isRunning) stopSagebot();
-                    else startSagebot();
-                  }}
-                >
-                  {isRunning ? (
-                    <>
-                      <Square size={16} fill="white" /> STOP SAGEBOT
-                    </>
-                  ) : (
-                    <>
-                      <Play size={16} fill="white" /> START SAGEBOT
-                    </>
-                  )}
-                </button>
-
-                <div className="card log-card">
-                  <div className="log-container" ref={logBoxRef}>
-                    {logs.map((line, i) => (
-                      <div key={i} className="log-line">
-                        {line}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
+              <MainTab
+                isRunning={isRunning}
+                hotkey={config.hotkey}
+                logs={logs}
+                logBoxRef={logBoxRef}
+                onToggleBot={() => {
+                  if (isRunning) stopSagebot();
+                  else startSagebot();
+                }}
+              />
             )}
 
             {/* TAB: TRACKER (LIVE MATCH ROSTER) */}
@@ -5067,7 +4597,7 @@ export default function App() {
                                   )}
                                   {m.my_rank_tier > 0 && (() => {
                                     const selfPlayer = m.players.find((p) => p.is_self);
-                                    if (selfPlayer && selfPlayer.rr > 0) {
+                                    if (selfPlayer && (selfPlayer.rr > 0 || (selfPlayer.rr === 0 && m.gamemode.toLowerCase().includes("competitive")))) {
                                       return (
                                         <span className="career-card-rr-text">
                                           {selfPlayer.rr} RR
@@ -5555,15 +5085,14 @@ export default function App() {
                             return (
                               <div
                                 key={p.puuid}
-                                className={`player-encounter-card ${
-                                  liveRole === "ally"
-                                    ? "card-live-ally"
-                                    : liveRole === "enemy"
+                                className={`player-encounter-card ${liveRole === "ally"
+                                  ? "card-live-ally"
+                                  : liveRole === "enemy"
                                     ? "card-live-enemy"
                                     : isLastWin
-                                    ? "card-win"
-                                    : "card-loss"
-                                }`}
+                                      ? "card-win"
+                                      : "card-loss"
+                                  }`}
                                 onClick={() => setSelectedPlayerEncounter(p)}
                               >
                                 <div className="career-card-stripe" />
@@ -5627,9 +5156,8 @@ export default function App() {
                                     <span className="last-res-caption">LAST MATCH</span>
                                     <div className="last-res-banner">
                                       <span
-                                        className={`career-card-result-tag ${
-                                          isLastWin ? "tag-win" : isLastLoss ? "tag-loss" : "tag-draw"
-                                        }`}
+                                        className={`career-card-result-tag ${isLastWin ? "tag-win" : isLastLoss ? "tag-loss" : "tag-draw"
+                                          }`}
                                       >
                                         {p.last_result || "MATCH"}
                                       </span>
@@ -5669,277 +5197,15 @@ export default function App() {
 
             {/* TAB: SHOP (VALORANT STOREFRONT) */}
             {activeTab === "shop" && (
-              <div className="tab-pane shop-tab-pane">
-                {isStoreLoading && !storefront ? (
-                  <div className="shop-loading-card">
-                    <RefreshCw size={24} className="spin" style={{ color: "#a855f7" }} />
-                    <span>Taking a look at the shop...</span>
-                  </div>
-                ) : storefront ? (
-                  <div className="shop-container">
-                    {/* 1. FEATURED BUNDLE */}
-                    {storefront.featured_bundles.length > 0 && (() => {
-                      const currentBundle = storefront.featured_bundles[selectedBundleIdx] || storefront.featured_bundles[0];
-                      return (
-                        <div className="shop-featured-wrapper">
-                          {/* Carousel Tabs OUTSIDE the banner, always 100% visible */}
-                          {storefront.featured_bundles.length > 1 && (
-                            <div className="featured-bundle-tabs-bar">
-                              <span className="featured-tabs-heading">FEATURED COLLECTIONS</span>
-                              <div className="featured-bundle-tabs-outside">
-                                {storefront.featured_bundles.map((b, idx) => (
-                                  <button
-                                    key={b.bundle_id || idx}
-                                    className={`bundle-tab-btn-outside ${idx === selectedBundleIdx ? "active" : ""}`}
-                                    onClick={() => setSelectedBundleIdx(idx)}
-                                  >
-                                    {b.name}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-
-                          <div className="shop-featured-card">
-                            <div className="featured-banner-wrap">
-                              {/* Stacked Images for True Seamless Cross-Fade without Disappearing */}
-                              {storefront.featured_bundles.map((b, idx) => (
-                                <img
-                                  key={b.bundle_id || idx}
-                                  src={b.display_icon}
-                                  className={`featured-banner-img ${idx === selectedBundleIdx ? "active" : ""}`}
-                                  alt={b.name}
-                                  onError={(e) => {
-                                    (e.currentTarget as HTMLImageElement).style.display = "none";
-                                  }}
-                                />
-                              ))}
-
-                              <div className="featured-banner-overlay" />
-
-                              {/* TOP-LEFT: Featured Info */}
-                              <div className="featured-content-top-left">
-                                <div className="featured-timer-badge">
-                                  <Clock size={12} />
-                                  <span>FEATURED | {formatDuration(currentBundle.seconds_remaining)}</span>
-                                </div>
-                                <h1 className="featured-title">{currentBundle.name}</h1>
-                                <div className="featured-collection-tag">COLLECTION</div>
-                              </div>
-
-                              {/* BOTTOM-RIGHT: Price Badge */}
-                              <div
-                                className="featured-price-badge featured-price-bottom-right"
-                                data-tooltip={`Bundle Price: ${currentBundle.total_cost_vp.toLocaleString()} VP`}
-                              >
-                                <img
-                                  src="https://media.valorant-api.com/currencies/85ad13f7-3d1b-5128-9eb2-7cd8ee0b5741/displayicon.png"
-                                  className="currency-logo-sm"
-                                  alt="VP"
-                                />
-                                <span>{currentBundle.total_cost_vp.toLocaleString()}</span>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })()}
-
-                    {/* 2. DAILY 4-GUN ROTATING OFFERS */}
-                    <div className="shop-section">
-                      <div className="shop-section-header">
-                        <div className="section-title-line" />
-                        <div className="section-title-center">
-                          <span className="section-title-text">DAILY OFFERS</span>
-                          <span className="section-timer-badge">
-                            <Clock size={12} />
-                            <span>{formatDuration(storefront.daily_seconds_remaining)}</span>
-                          </span>
-                        </div>
-                        <div className="section-title-line" />
-                      </div>
-
-                      <div className="daily-offers-grid">
-                        {storefront.daily_offers.map((offer) => {
-                          const rarity = getSkinRarity(offer.cost_vp, offer.skin_name);
-                          return (
-                            <div
-                              key={offer.offer_id}
-                              className="daily-offer-card"
-                              style={{
-                                borderColor: `${rarity.color}66`,
-                                boxShadow: `0 4px 16px rgba(0, 0, 0, 0.4), 0 0 12px ${rarity.glow}`,
-                              }}
-                              data-tooltip={`${offer.skin_name} • ${rarity.name}`}
-                            >
-                              {/* Glowing ambient rarity aura flowing up */}
-                              <div
-                                className="daily-offer-ambient-aura"
-                                style={{
-                                  background: `radial-gradient(circle at 50% 120%, ${rarity.glow} 0%, transparent 72%)`,
-                                }}
-                              />
-                              <div className="daily-offer-img-wrap">
-                                {offer.icon_url ? (
-                                  <img
-                                    src={offer.icon_url}
-                                    className="daily-offer-img"
-                                    alt={offer.skin_name}
-                                    onError={(e) => {
-                                      (e.currentTarget as HTMLImageElement).style.display = "none";
-                                    }}
-                                  />
-                                ) : (
-                                  <div className="skin-placeholder">Weapon Skin</div>
-                                )}
-                              </div>
-                              <div className="daily-offer-footer">
-                                <div className="daily-offer-name-wrap">
-                                  <img
-                                    src={rarity.icon}
-                                    className="daily-offer-tier-icon"
-                                    alt={rarity.name}
-                                    onError={(e) => {
-                                      (e.currentTarget as HTMLImageElement).style.display = "none";
-                                    }}
-                                  />
-                                  <span
-                                    className="daily-offer-name"
-                                    data-tooltip={offer.skin_name}
-                                  >
-                                    {offer.skin_name}
-                                  </span>
-                                </div>
-                                <div className="daily-offer-price" data-tooltip={`${offer.cost_vp.toLocaleString()} VP`}>
-                                  <img
-                                    src="https://media.valorant-api.com/currencies/85ad13f7-3d1b-5128-9eb2-7cd8ee0b5741/displayicon.png"
-                                    className="currency-logo-xs"
-                                    alt="VP"
-                                  />
-                                  <span>{offer.cost_vp.toLocaleString()}</span>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {/* 3. NIGHT.MARKET (BONUS STORE) */}
-                    <div className="shop-section">
-                      <div className="shop-section-header">
-                        <div className="section-title-line" />
-                        <div className="section-title-center">
-                          <span className="section-title-text">NIGHT.MARKET</span>
-                          {storefront.night_market_active && (
-                            <span className="section-timer-badge">
-                              <Clock size={12} />
-                              <span>{formatDuration(storefront.night_market_seconds_remaining)}</span>
-                            </span>
-                          )}
-                        </div>
-                        <div className="section-title-line" />
-                      </div>
-
-                      {storefront.night_market_active && storefront.night_market_offers.length > 0 ? (
-                        <div className="night-market-grid">
-                          {storefront.night_market_offers.map((nm) => (
-                            <div key={nm.offer_id} className="night-market-card" data-tooltip={nm.skin_name}>
-                              <div className="nm-discount-tag">-{nm.discount_percent}%</div>
-                              <div className="nm-img-wrap">
-                                <img src={nm.icon_url} className="nm-img" alt={nm.skin_name} />
-                              </div>
-                              <div className="nm-info">
-                                <span className="nm-skin-name">{nm.skin_name}</span>
-                                <div className="nm-prices">
-                                  <span className="nm-orig-price">{nm.original_cost_vp.toLocaleString()}</span>
-                                  <div className="nm-disc-price">
-                                    <img
-                                      src="https://media.valorant-api.com/currencies/85ad13f7-3d1b-5128-9eb2-7cd8ee0b5741/displayicon.png"
-                                      className="currency-logo-xs"
-                                      alt="VP"
-                                    />
-                                    <span>{nm.discounted_cost_vp.toLocaleString()}</span>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="shop-night-market-closed">
-                          <Sparkles size={20} className="nm-sparkle-icon" />
-                          <div className="nm-closed-content">
-                            <span className="nm-closed-title">Night.Market is Closed</span>
-                            <span className="nm-closed-sub">The Night.Market will return towards the conclusion of the Act.</span>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* 4. ACCESSORY STORE */}
-                    {storefront.accessory_offers.length > 0 && (
-                      <div className="shop-section">
-                        <div className="shop-section-header">
-                          <div className="section-title-line" />
-                          <div className="section-title-center">
-                            <span className="section-title-text">ACCESSORY STORE</span>
-                            <span className="section-timer-badge">
-                              <Clock size={12} />
-                              <span>{formatDuration(storefront.accessory_seconds_remaining)}</span>
-                            </span>
-                          </div>
-                          <div className="section-title-line" />
-                        </div>
-
-                        <div className="accessory-offers-grid">
-                          {storefront.accessory_offers.map((acc, idx) => (
-                            <div key={acc.offer_id || idx} className="accessory-offer-card" data-tooltip={`${acc.name} • ${acc.item_type}`}>
-                              <div className="accessory-img-wrap">
-                                {acc.icon_url ? (
-                                  <img
-                                    src={acc.icon_url}
-                                    className={`accessory-img ${acc.item_type === "Player Card" ? "is-card" : acc.item_type === "Spray" ? "is-spray" : ""}`}
-                                    alt={acc.name}
-                                    onError={(e) => {
-                                      (e.currentTarget as HTMLImageElement).style.display = "none";
-                                    }}
-                                  />
-                                ) : (
-                                  <div className="accessory-title-preview">
-                                    <div className="accessory-title-accent" />
-                                    <span className="accessory-title-text">"{acc.name}"</span>
-                                    <span className="accessory-title-tag">PLAYER TITLE</span>
-                                  </div>
-                                )}
-                              </div>
-                              <div className="accessory-footer">
-                                <span className="accessory-name-label" data-tooltip={acc.name}>{acc.name}</span>
-                                <div className="accessory-price" data-tooltip={`${acc.cost_kc.toLocaleString()} KC`}>
-                                  <img
-                                    src="https://media.valorant-api.com/currencies/85ca954a-41f2-ce94-9b45-8ca3dd39a00d/displayicon.png"
-                                    className="currency-logo-xs"
-                                    alt="KC"
-                                  />
-                                  <span>{acc.cost_kc.toLocaleString()}</span>
-                                </div>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="shop-empty-card">
-                    <span>VALORANT Client is offline. Launch VALORANT to view your live store.</span>
-                    <button className="shop-retry-btn" onClick={() => fetchStorefront()}>
-                      <RefreshCw size={13} />
-                      <span>Retry</span>
-                    </button>
-                  </div>
-                )}
-              </div>
+              <ShopTab
+                isStoreLoading={isStoreLoading}
+                storefront={storefront}
+                selectedBundleIdx={selectedBundleIdx}
+                setSelectedBundleIdx={setSelectedBundleIdx}
+                formatDuration={formatDuration}
+                getSkinRarity={getSkinRarity}
+                onRetryStorefront={() => fetchStorefront()}
+              />
             )}
 
             {/* TAB: CONFIG */}
@@ -6531,17 +5797,456 @@ export default function App() {
 
             {/* TAB 3: AGENTS */}
             {activeTab === "agents" && (
-              <div className="tab-pane" style={{ padding: "14px 18px" }}>
+              <div className="tab-pane" style={{ padding: "14px 18px", gap: "12px" }}>
+                {/* 1. Agent Lock Toggle Card (modern switch card, independent from SageBot Main) */}
+                <div className="card">
+                  <div className="between-row">
+                    <div>
+                      <div className="pane-title">Agent Lock</div>
+                      <div className="pane-subtitle">
+                        Automatically locks an Agent.
+                      </div>
+                    </div>
+                    <label className="switch">
+                      <input
+                        type="checkbox"
+                        checked={config.agents_enabled}
+                        onChange={(e) => {
+                          const nextVal = e.target.checked;
+                          if (nextVal) {
+                            const err = validateAgentLockEnable(
+                              config.selected_agents,
+                              activeAgentLockMode,
+                              config.fill_roles || []
+                            );
+                            if (err) {
+                              showToast(err);
+                              return;
+                            }
+                          }
+                          updateAndSaveConfig({ agents_enabled: nextVal });
+                          addLog(
+                            nextVal
+                              ? `[AGENTS] Agent Lock enabled (${activeAgentLockMode} mode).`
+                              : "[AGENTS] Agent Lock disabled."
+                          );
+                        }}
+                      />
+                      <span className="slider round"></span>
+                    </label>
+                  </div>
+                </div>
+
+                {/* 2. Agent Lock Settings Card (between Toggle and Selection/Queue) */}
+                <div className="card">
+                  <div className="card-header">SETTINGS</div>
+
+                  {/* Row 1: Lock Mode (isolated from SETTINGS header, fixed width so buttons never jump) */}
+                  <div className="control-row" style={{ marginTop: "12px", gap: "12px" }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div className="control-title">Lock Mode</div>
+                      <div className="pane-subtitle">
+                        Choose how queued agents are selected and locked.
+                      </div>
+                    </div>
+                    <div className="segmented-control" style={{ flexShrink: 0 }}>
+                      {(
+                        [
+                          { id: "linear", label: "Linear" },
+                          { id: "random", label: "Random" },
+                          { id: "fill", label: "Fill" },
+                        ] as const
+                      ).map((m) => (
+                        <button
+                          key={m.id}
+                          type="button"
+                          className={`segmented-btn ${activeAgentLockMode === m.id ? "active" : ""}`}
+                          onClick={() => {
+                            let nextEnabled = config.agents_enabled;
+                            if (nextEnabled) {
+                              const err = validateAgentLockEnable(
+                                config.selected_agents,
+                                m.id,
+                                config.fill_roles || []
+                              );
+                              if (err) {
+                                nextEnabled = false;
+                                showToast(`Agent Lock disabled: ${err}`);
+                              }
+                            }
+                            updateAndSaveConfig({
+                              agent_lock_mode: m.id,
+                              lock_random_agent: m.id === "random",
+                              agents_enabled: nextEnabled,
+                            });
+                            addLog(`[AGENTS] Lock mode set to ${m.label}.`);
+                          }}
+                        >
+                          {m.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Mode-Specific Options (Every function on its own line) */}
+                  {activeAgentLockMode !== "fill" ? (
+                    <>
+                      {/* Row 2: Lock Delay (5 - 75s) */}
+                      <div
+                        className="control-row"
+                        style={{
+                          marginTop: "12px",
+                          paddingTop: "12px",
+                          borderTop: "1px solid var(--border-subtle)",
+                        }}
+                      >
+                        <div>
+                          <div className="control-title">Lock Delay</div>
+                          <div className="pane-subtitle">
+                            {config.instalock_enabled
+                              ? "Instalock is active (0s)."
+                              : "Delay before locking (5–75s)."}
+                          </div>
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
+                          <input
+                            type="text"
+                            disabled={config.instalock_enabled}
+                            value={config.instalock_enabled ? "0" : lockDelayInput}
+                            onChange={(e) => {
+                              if (config.instalock_enabled) return;
+                              const clean = e.target.value.replace(/[^0-9]/g, "");
+                              setLockDelayInput(clean);
+                            }}
+                            onBlur={commitLockDelay}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                commitLockDelay();
+                                (e.target as HTMLElement).blur();
+                              }
+                            }}
+                            style={
+                              config.instalock_enabled
+                                ? {
+                                  width: "54px",
+                                  padding: "4px 8px",
+                                  background: "rgba(0, 242, 255, 0.12)",
+                                  border: "2px solid #00f2ff",
+                                  borderRadius: "6px",
+                                  color: "#00f2ff",
+                                  textAlign: "center",
+                                  fontSize: "13px",
+                                  fontWeight: 700,
+                                  boxShadow:
+                                    "0 0 12px rgba(0, 242, 255, 0.5), inset 0 0 6px rgba(0, 242, 255, 0.25)",
+                                  cursor: "not-allowed",
+                                }
+                                : {
+                                  width: "54px",
+                                  padding: "4px 8px",
+                                  background: "rgba(255, 255, 255, 0.08)",
+                                  border: "1px solid rgba(255, 255, 255, 0.2)",
+                                  borderRadius: "6px",
+                                  color: "#fff",
+                                  textAlign: "center",
+                                  fontSize: "13px",
+                                  fontWeight: 600,
+                                }
+                            }
+                          />
+                          <span
+                            style={{
+                              fontSize: "12px",
+                              fontWeight: config.instalock_enabled ? 700 : 400,
+                              color: config.instalock_enabled
+                                ? "#00f2ff"
+                                : "rgba(255, 255, 255, 0.6)",
+                            }}
+                          >
+                            sec
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Row 3: Instalock */}
+                      <div
+                        className="control-row"
+                        style={{
+                          marginTop: "12px",
+                          paddingTop: "12px",
+                          borderTop: "1px solid var(--border-subtle)",
+                        }}
+                      >
+                        <div>
+                          <div className="control-title" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                            Instalock
+                            <span style={{ fontSize: "10px", color: "#f87171", background: "rgba(239, 68, 68, 0.15)", border: "1px solid rgba(239, 68, 68, 0.3)", padding: "1px 7px", borderRadius: "10px", fontWeight: 700 }}>
+                              RISKY
+                            </span>
+                          </div>
+                          <div className="pane-subtitle">
+                            Instantly locks an Agent ({activeAgentLockMode === "random" ? "Randomly" : "Priority order"}).
+                          </div>
+                        </div>
+                        <label className="switch">
+                          <input
+                            type="checkbox"
+                            checked={config.instalock_enabled}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                updateAndSaveConfig({ instalock_enabled: true, lock_delay: 0 });
+                                setLockDelayInput("0");
+                                addLog("[AGENTS] Instalock enabled (0s delay).");
+                              } else {
+                                const restored =
+                                  config.lock_delay >= 5 && config.lock_delay <= 75
+                                    ? config.lock_delay
+                                    : 20;
+                                updateAndSaveConfig({
+                                  instalock_enabled: false,
+                                  lock_delay: restored,
+                                });
+                                setLockDelayInput(String(restored));
+                                addLog(`[AGENTS] Instalock disabled (${restored}s delay).`);
+                              }
+                            }}
+                          />
+                          <span className="slider round"></span>
+                        </label>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      {/* Row 2: Fill Roles (4 equal role cards on ONE line + single-line priority strip) */}
+                      <div
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "10px",
+                          marginTop: "12px",
+                          paddingTop: "12px",
+                          borderTop: "1px solid var(--border-subtle)",
+                        }}
+                      >
+                        <div className="between-row">
+                          <div>
+                            <div className="control-title">Fill Roles &amp; Priority</div>
+                            <div className="pane-subtitle">
+                              Select roles to auto-fill (at least 1 agent of each chosen role required in Queue).
+                            </div>
+                          </div>
+                          <span className="version-pill">
+                            {(config.fill_roles || []).length} selected
+                          </span>
+                        </div>
+
+                        <div className="fill-roles-grid">
+                          {["Controller", "Initiator", "Sentinel", "Duelist"].map((roleName) => {
+                            const roleIdx = (config.fill_roles || []).findIndex(
+                              (r) => r.toLowerCase() === roleName.toLowerCase()
+                            );
+                            const isActive = roleIdx >= 0;
+                            const queuedCount = config.selected_agents.filter((id) => {
+                              const ag = agents.find((a) => a.id === id);
+                              return ag?.role.toLowerCase() === roleName.toLowerCase();
+                            }).length;
+
+                            return (
+                              <button
+                                key={roleName}
+                                type="button"
+                                className={`fill-role-card ${isActive ? "active" : ""} ${isActive && queuedCount === 0 ? "missing-role" : ""}`}
+                                onClick={() => toggleFillRole(roleName)}
+                                data-tooltip={`${roleName} — ${queuedCount} agent(s) in Queue`}
+                              >
+                                <span className="fill-role-card-left">
+                                  <span style={{ color: isActive ? "#34d399" : "var(--text-muted)", fontFamily: "var(--font-mono)", fontSize: "11px", fontWeight: 700 }}>
+                                    {isActive ? `#${roleIdx + 1}` : "+"}
+                                  </span>
+                                  <span>{roleName}</span>
+                                </span>
+                                <span className="fill-role-count">{queuedCount}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        {(config.fill_roles || []).length > 0 && (
+                          <div className="control-row" style={{ gap: "10px" }}>
+                            <span style={{ fontSize: "12px", fontWeight: 600, color: "var(--text-muted)", whiteSpace: "nowrap", flexShrink: 0 }}>
+                              Priority Order
+                            </span>
+                            <div className="fill-priority-strip">
+                              {(config.fill_roles || []).map((roleName, idx, arr) => {
+                                const hasAgent = config.selected_agents.some((id) => {
+                                  const ag = agents.find((a) => a.id === id);
+                                  return ag?.role.toLowerCase() === roleName.toLowerCase();
+                                });
+                                return (
+                                  <div
+                                    key={roleName}
+                                    className={`fill-priority-chip ${!hasAgent ? "missing-role" : ""}`}
+                                    data-tooltip={!hasAgent ? `Add at least 1 ${roleName} agent to Queue` : `${roleName} Priority #${idx + 1}`}
+                                  >
+                                    <span className="fill-prio-num">#{idx + 1}</span>
+                                    <span>{roleName}</span>
+                                    {!hasAgent && (
+                                      <span style={{ color: "#f87171", fontWeight: 800 }}>!</span>
+                                    )}
+                                    <button
+                                      type="button"
+                                      className="fill-move-btn"
+                                      disabled={idx === 0}
+                                      onClick={() => moveFillRole(idx, idx - 1)}
+                                    >
+                                      ◀
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="fill-move-btn"
+                                      disabled={idx === arr.length - 1}
+                                      onClick={() => moveFillRole(idx, idx + 1)}
+                                    >
+                                      ▶
+                                    </button>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Row 3: All Roles Satisfied Fallback */}
+                      <div
+                        className="control-row"
+                        style={{
+                          marginTop: "12px",
+                          paddingTop: "12px",
+                          borderTop: "1px solid var(--border-subtle)",
+                          gap: "12px",
+                        }}
+                      >
+                        <div>
+                          <div className="control-title">When All Roles Satisfied</div>
+                          <div className="pane-subtitle">
+                            Pick behavior if teammates already covered every chosen role.
+                          </div>
+                        </div>
+                        <div className="segmented-control" style={{ flexShrink: 0 }}>
+                          <button
+                            type="button"
+                            className={`segmented-btn ${(config.fill_fallback_mode || "priority") === "priority" ? "active" : ""}`}
+                            onClick={() => updateAndSaveConfig({ fill_fallback_mode: "priority" })}
+                          >
+                            Priority
+                          </button>
+                          <button
+                            type="button"
+                            className={`segmented-btn ${config.fill_fallback_mode === "random" ? "active" : ""}`}
+                            onClick={() => updateAndSaveConfig({ fill_fallback_mode: "random" })}
+                          >
+                            Random
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Row 4: Filling Mode */}
+                      <div
+                        className="control-row"
+                        style={{
+                          marginTop: "12px",
+                          paddingTop: "12px",
+                          borderTop: "1px solid var(--border-subtle)",
+                          gap: "12px",
+                        }}
+                      >
+                        <div>
+                          <div className="control-title">Filling Mode</div>
+                          <div className="pane-subtitle">
+                            {(config.fill_timing_mode || "last") === "last"
+                              ? "Waits until all teammates have locked."
+                              : "Fills after a delay regardless of teammates' lock status."}
+                          </div>
+                        </div>
+                        <div className="segmented-control" style={{ flexShrink: 0 }}>
+                          <button
+                            type="button"
+                            className={`segmented-btn ${(config.fill_timing_mode || "last") === "last" ? "active" : ""}`}
+                            onClick={() => updateAndSaveConfig({ fill_timing_mode: "last" })}
+                          >
+                            Last Fill
+                          </button>
+                          <button
+                            type="button"
+                            className={`segmented-btn ${config.fill_timing_mode === "delayed" ? "active" : ""}`}
+                            onClick={() => updateAndSaveConfig({ fill_timing_mode: "delayed" })}
+                          >
+                            Delayed
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Row 5: Fill Delay (Own line when Delayed mode is active) */}
+                      {config.fill_timing_mode === "delayed" && (
+                        <div
+                          className="control-row"
+                          style={{
+                            marginTop: "12px",
+                            paddingTop: "12px",
+                            borderTop: "1px solid var(--border-subtle)",
+                            gap: "12px",
+                          }}
+                        >
+                          <div>
+                            <div className="control-title">Fill Delay</div>
+                            <div className="pane-subtitle">
+                              Wait time before locking in Delayed mode (1–75s).
+                            </div>
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
+                            <input
+                              type="text"
+                              value={fillDelayInput}
+                              onChange={(e) => setFillDelayInput(e.target.value.replace(/[^0-9]/g, ""))}
+                              onBlur={commitFillDelay}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  commitFillDelay();
+                                  (e.target as HTMLElement).blur();
+                                }
+                              }}
+                              style={{
+                                width: "54px",
+                                padding: "4px 8px",
+                                background: "rgba(255, 255, 255, 0.08)",
+                                border: "1px solid rgba(255, 255, 255, 0.2)",
+                                borderRadius: "6px",
+                                color: "#fff",
+                                textAlign: "center",
+                                fontSize: "13px",
+                                fontWeight: 600,
+                              }}
+                            />
+                            <span style={{ fontSize: "12px", color: "rgba(255, 255, 255, 0.6)" }}>sec</span>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+
+                {/* 3. Agent Selection + Queue (Equal Height Side-by-Side) */}
                 <div className="agents-layout-container">
-                  {/* Left: 4-Column Agent Selection Grid */}
+                  {/* Left: Filtered Agent Selection Grid */}
                   <div className="card agents-grid-column">
-                    <div className="between-row" style={{ marginBottom: "10px" }}>
+                    <div className="between-row" style={{ marginBottom: "8px", gap: "8px", flexWrap: "wrap" }}>
                       <div>
                         <div className="card-header">
                           <span>AGENT SELECTION</span>
                         </div>
                         <div className="pane-subtitle">
-                          Click agents to queue in order of priority ({agents.length} available)
+                          Click agents to queue in priority order ({agents.length} available)
                         </div>
                       </div>
                       <button className="clear-btn" onClick={clearAgents} data-tooltip="Clear queue selection">
@@ -6549,52 +6254,76 @@ export default function App() {
                       </button>
                     </div>
 
-                    <div className="agents-grid-4col">
-                      {agents.map((ag) => {
-                        const prioIdx = config.selected_agents.indexOf(ag.id);
-                        const isSelected = prioIdx >= 0;
-                        const queueNum = isSelected ? String(prioIdx + 1).padStart(2, "0") : null;
-                        const cleanName = ag.name.toLowerCase().replace(/[^a-z0-9]/g, "");
-                        const localImg = `/agents/${cleanName}.png`;
+                    {/* Role Filter Bar */}
+                    <div className="agent-filter-bar">
+                      {[
+                        { id: "All", label: "All" },
+                        { id: "Initiator", label: "Initiators" },
+                        { id: "Duelist", label: "Duelists" },
+                        { id: "Sentinel", label: "Sentinels" },
+                        { id: "Controller", label: "Controllers" },
+                      ].map((f) => (
+                        <button
+                          key={f.id}
+                          type="button"
+                          className={`agent-filter-btn ${agentRoleFilter === f.id ? "active" : ""}`}
+                          onClick={() => setAgentRoleFilter(f.id)}
+                        >
+                          {f.label}
+                        </button>
+                      ))}
+                    </div>
 
-                        return (
-                          <div
-                            key={ag.id}
-                            className={`agent-card ${isSelected ? "selected" : "disabled-agent-greyed"}`}
-                            onClick={() => toggleAgent(ag.id)}
-                            data-tooltip={`${ag.name} (${ag.role})${isSelected ? ` - Priority #${prioIdx + 1}` : ""}`}
-                          >
-                            <div className="agent-card-aspect">
-                              <img
-                                src={localImg}
-                                alt={ag.name}
-                                className="agent-card-img"
-                                onError={(e) => {
-                                  // Fallback to valorant-api CDN if local file is missing
-                                  (e.currentTarget as HTMLImageElement).src = `https://media.valorant-api.com/agents/${ag.id}/displayicon.png`;
-                                }}
-                              />
-                              <div className="agent-card-overlay">
-                                <span className="agent-card-name">{ag.name}</span>
-                              </div>
-                              {isSelected && (
-                                <div className="agent-queue-badge">
-                                  {queueNum}
+                    <div className="agents-grid-4col">
+                      {agents
+                        .filter(
+                          (ag) =>
+                            agentRoleFilter === "All" ||
+                            ag.role.toLowerCase() === agentRoleFilter.toLowerCase()
+                        )
+                        .map((ag) => {
+                          const prioIdx = config.selected_agents.indexOf(ag.id);
+                          const isSelected = prioIdx >= 0;
+                          const queueNum = isSelected ? String(prioIdx + 1).padStart(2, "0") : null;
+                          const cleanName = ag.name.toLowerCase().replace(/[^a-z0-9]/g, "");
+                          const localImg = `/agents/${cleanName}.png`;
+
+                          return (
+                            <div
+                              key={ag.id}
+                              className={`agent-card ${isSelected ? "selected" : "disabled-agent-greyed"}`}
+                              onClick={() => toggleAgent(ag.id)}
+                              data-tooltip={`${ag.name} (${ag.role})${isSelected ? ` - Priority #${prioIdx + 1}` : ""}`}
+                            >
+                              <div className="agent-card-aspect">
+                                <img
+                                  src={localImg}
+                                  alt={ag.name}
+                                  className="agent-card-img"
+                                  onError={(e) => {
+                                    (e.currentTarget as HTMLImageElement).src = `https://media.valorant-api.com/agents/${ag.id}/displayicon.png`;
+                                  }}
+                                />
+                                <div className="agent-card-overlay">
+                                  <span className="agent-card-name">{ag.name}</span>
                                 </div>
-                              )}
-                              {ag.is_starter && (
-                                <div className="agent-starter-dot" data-tooltip="Starter Agent" />
-                              )}
+                                {isSelected && (
+                                  <div className="agent-queue-badge">
+                                    {queueNum}
+                                  </div>
+                                )}
+                                {ag.is_starter && (
+                                  <div className="agent-starter-dot" data-tooltip="Starter Agent" />
+                                )}
+                              </div>
                             </div>
-                          </div>
-                        );
-                      })}
+                          );
+                        })}
                     </div>
                   </div>
 
-                  {/* Right: Settings & Priority List */}
+                  {/* Right: Queue Board (Full Matching Height) */}
                   <div className="agents-settings-column">
-                    {/* Queue Order Card */}
                     <div className="card agents-queue-card">
                       <div className="between-row">
                         <div className="card-header">QUEUE</div>
@@ -6611,7 +6340,7 @@ export default function App() {
                           <div className="empty-queue-msg">
                             <span>No agents queued</span>
                             <span className="empty-queue-sub">
-                              Click any agent on the left to set locking priority
+                              Click any agent on the left to add to Queue
                             </span>
                           </div>
                         ) : (
@@ -6691,147 +6420,6 @@ export default function App() {
                         )}
                       </div>
                     </div>
-
-                    {/* Settings Card */}
-                    <div className="card">
-                      <div className="card-header">SETTINGS</div>
-
-                      {/* 1. Lock Delay (5 to 70 seconds, or frozen at 0s with Cyan border if Instalock is ON) */}
-                      <div className="control-row" style={{ marginTop: "10px" }}>
-                        <div>
-                          <div className="control-title">Lock Delay</div>
-                          <div className="pane-subtitle">
-                            {config.instalock_enabled
-                              ? "Instalock is active."
-                              : "Delay before locking (req. 20s)."}
-                          </div>
-                        </div>
-                        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                          <input
-                            type="text"
-                            disabled={config.instalock_enabled}
-                            value={config.instalock_enabled ? "0" : lockDelayInput}
-                            onChange={(e) => {
-                              if (config.instalock_enabled) return;
-                              const clean = e.target.value.replace(/[^0-9]/g, "");
-                              setLockDelayInput(clean);
-                            }}
-                            onBlur={commitLockDelay}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") {
-                                commitLockDelay();
-                                (e.target as HTMLElement).blur();
-                              }
-                            }}
-                            style={
-                              config.instalock_enabled
-                                ? {
-                                  width: "56px",
-                                  padding: "4px 8px",
-                                  background: "rgba(0, 242, 255, 0.12)",
-                                  border: "2px solid #00f2ff",
-                                  borderRadius: "6px",
-                                  color: "#00f2ff",
-                                  textAlign: "center",
-                                  fontSize: "13px",
-                                  fontWeight: 700,
-                                  boxShadow:
-                                    "0 0 14px rgba(0, 242, 255, 0.65), inset 0 0 6px rgba(0, 242, 255, 0.3)",
-                                  cursor: "not-allowed",
-                                }
-                                : {
-                                  width: "56px",
-                                  padding: "4px 8px",
-                                  background: "rgba(255, 255, 255, 0.08)",
-                                  border: "1px solid rgba(255, 255, 255, 0.2)",
-                                  borderRadius: "6px",
-                                  color: "#fff",
-                                  textAlign: "center",
-                                  fontSize: "13px",
-                                  fontWeight: 600,
-                                }
-                            }
-                          />
-                          <span
-                            style={{
-                              fontSize: "12px",
-                              fontWeight: config.instalock_enabled ? 700 : 400,
-                              color: config.instalock_enabled
-                                ? "#00f2ff"
-                                : "rgba(255, 255, 255, 0.6)",
-                            }}
-                          >
-                            sec
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* 2. Instalock Toggle */}
-                      <div className="control-row" style={{ marginTop: "14px" }}>
-                        <div>
-                          <div className="control-title" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                            Instalock
-                            <span style={{ fontSize: "10px", color: "#f87171", background: "rgba(239, 68, 68, 0.15)", border: "1px solid rgba(239, 68, 68, 0.3)", padding: "1px 7px", borderRadius: "10px", fontWeight: 700 }}>
-                              RISKY
-                            </span>
-                          </div>
-                          <div className="pane-subtitle">
-                            Instantly locks selected Agent(s).
-                          </div>
-                        </div>
-                        <label className="switch">
-                          <input
-                            type="checkbox"
-                            checked={config.instalock_enabled}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                updateAndSaveConfig({ instalock_enabled: true, lock_delay: 0 });
-                                setLockDelayInput("0");
-                                addLog("[CONFIG] Instalock enabled (0s delay).");
-                              } else {
-                                const restored =
-                                  config.lock_delay >= 5 && config.lock_delay <= 70
-                                    ? config.lock_delay
-                                    : 20;
-                                updateAndSaveConfig({
-                                  instalock_enabled: false,
-                                  lock_delay: restored,
-                                });
-                                setLockDelayInput(String(restored));
-                                addLog(`[CONFIG] Instalock disabled (restored to ${restored}s).`);
-                              }
-                            }}
-                          />
-                          <span className="slider round"></span>
-                        </label>
-                      </div>
-
-                      {/* 3. Random Agent Toggle */}
-                      <div className="control-row" style={{ marginTop: "14px" }}>
-                        <div>
-                          <div className="control-title">Random</div>
-                          <div className="pane-subtitle">
-                            Locks a random in-queue agent.
-                          </div>
-                        </div>
-                        <label className="switch">
-                          <input
-                            type="checkbox"
-                            checked={config.lock_random_agent ?? false}
-                            onChange={(e) => {
-                              const val = e.target.checked;
-                              if (val && (!config.selected_agents || config.selected_agents.length === 0)) {
-                                showToast("You must add at least one agent in queue.");
-                                return;
-                              }
-                              updateAndSaveConfig({ lock_random_agent: val });
-                              addLog(val ? "[CONFIG] Random agent lock enabled." : "[CONFIG] Random agent lock disabled.");
-                            }}
-                          />
-                          <span className="slider round"></span>
-                        </label>
-                      </div>
-                    </div>
                   </div>
                 </div>
               </div>
@@ -6839,841 +6427,94 @@ export default function App() {
 
             {/* TAB 4: CHAT */}
             {activeTab === "chat" && (
-              <div className="tab-pane">
-                <div className="card">
-                  <div className="pane-title">Auto Chat</div>
-                  <div className="pane-subtitle">
-                    Send a message through in-game chat.
-                  </div>
-
-                  <div className="control-row" style={{ marginTop: "12px" }}>
-                    <div>
-                      <div className="control-title">Enable</div>
-                      <div className="pane-subtitle">Send recurring in-game messages.</div>
-                    </div>
-                    <label className="switch">
-                      <input
-                        type="checkbox"
-                        checked={config.chat_enabled}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setShowChatWarningModal(true);
-                          } else {
-                            updateAndSaveConfig({ chat_enabled: false });
-                            addLog("[CHAT] Chat automation deactivated.");
-                          }
-                        }}
-                      />
-                      <span className="slider round"></span>
-                    </label>
-                  </div>
-
-                  <div className="control-row" style={{ marginTop: "14px" }}>
-                    <div>
-                      <div className="control-title">Channel</div>
-                      <div className="pane-subtitle">Destination chat stream.</div>
-                    </div>
-                    <div className="segmented-control">
-                      <button
-                        type="button"
-                        className={`segmented-btn ${config.chat_target === 0 ? "active" : ""}`}
-                        onClick={() => {
-                          updateAndSaveConfig({ chat_target: 0 });
-                          addLog("[CHAT] Target set to Team chat.");
-                        }}
-                      >
-                        Team Chat
-                      </button>
-                      <button
-                        type="button"
-                        className={`segmented-btn ${config.chat_target === 1 ? "active" : ""}`}
-                        onClick={() => {
-                          updateAndSaveConfig({ chat_target: 1 });
-                          addLog("[CHAT] Target set to All chat.");
-                        }}
-                      >
-                        All Chat (/all)
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="control-row" style={{ marginTop: "14px" }}>
-                    <div>
-                      <div className="control-title">Interval</div>
-                      <div className="pane-subtitle">(0 – 3600 seconds).</div>
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                      <input
-                        type="text"
-                        className="interval-input"
-                        value={chatIntervalInput}
-                        onChange={(e) => {
-                          const clean = e.target.value.replace(/[^0-9]/g, "");
-                          setChatIntervalInput(clean);
-                        }}
-                        onBlur={commitChatInterval}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            commitChatInterval();
-                            (e.target as HTMLElement).blur();
-                          }
-                        }}
-                      />
-                      <span style={{ fontSize: "12px", color: "rgba(255, 255, 255, 0.6)" }}>
-                        sec
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="between-row" style={{ marginTop: "16px" }}>
-                    <span className="field-label">
-                      Message Content (max. 500 chars.)
-                    </span>
-                    <span className="char-count">
-                      {config.chat_text.length}/500
-                    </span>
-                  </div>
-
-                  <textarea
-                    className="chat-textarea"
-                    maxLength={500}
-                    value={config.chat_text}
-                    onChange={(e) =>
-                      updateAndSaveConfig({ chat_text: e.target.value })
-                    }
-                  />
-
-                  <div className="preset-buttons-row">
-                    <button
-                      className="preset-btn"
-                      onClick={() =>
-                        updateAndSaveConfig({
-                          chat_text:
-                            "SageBot so broke :weary:",
-                        })
-                      }
-                    >
-                      SageBot so broke 😩
-                    </button>
-                    <button
-                      className="preset-btn"
-                      onClick={() =>
-                        updateAndSaveConfig({
-                          chat_text:
-                            "Wintrading refers to any actions that a player or group of players may take in order to fix the outcome of a match, usually to boost a player’s MMR, rank, or account level. Wintrading undermines the integrity of the competitive experience and dilutes the value of ranked play by predetermining the results of a match. Additionally, players who find themselves in a fixed game are thrust into a deeply negative experience over which they have no control.",
-                        })
-                      }
-                    >
-                      Wintrading
-                    </button>
-                  </div>
-                </div>
-              </div>
+              <ChatTab
+                config={config}
+                chatIntervalInput={chatIntervalInput}
+                setChatIntervalInput={setChatIntervalInput}
+                commitChatInterval={commitChatInterval}
+                setShowChatWarningModal={setShowChatWarningModal}
+                updateAndSaveConfig={updateAndSaveConfig}
+                onLog={addLog}
+              />
             )}
 
             {/* TAB 5: VOTING */}
             {activeTab === "autovote" && (
-              <div className="tab-pane">
-                {/* 1. Auto Surrender */}
-                <div className="card">
-                  <div className="pane-title">Auto Surrender</div>
-                  <div className="pane-subtitle">
-                    Automatically casts surrender vote.
-                  </div>
-
-                  <div className="control-row" style={{ marginTop: "14px" }}>
-                    <div>
-                      <div className="control-title">Surrender Vote</div>
-                      <div className="pane-subtitle">Vote response key.</div>
-                    </div>
-                    <div className="segmented-control">
-                      <button
-                        type="button"
-                        className={`segmented-btn ${config.auto_vote_mode === 0 ? "active" : ""}`}
-                        onClick={() => {
-                          updateAndSaveConfig({ auto_vote_mode: 0 });
-                          addLog("[SETTINGS] Auto-Vote disabled.");
-                        }}
-                      >
-                        Disabled
-                      </button>
-                      <button
-                        type="button"
-                        className={`segmented-btn vote-yes ${config.auto_vote_mode === 1 ? "active" : ""}`}
-                        onClick={() => {
-                          updateAndSaveConfig({ auto_vote_mode: 1 });
-                          addLog("[SETTINGS] Auto-Vote set to YES (F5).");
-                        }}
-                      >
-                        Vote YES (F5)
-                      </button>
-                      <button
-                        type="button"
-                        className={`segmented-btn vote-no ${config.auto_vote_mode === 2 ? "active" : ""}`}
-                        onClick={() => {
-                          updateAndSaveConfig({ auto_vote_mode: 2 });
-                          addLog("[SETTINGS] Auto-Vote set to NO (F6).");
-                        }}
-                      >
-                        Vote NO (F6)
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                {/* 2. Auto Overtime Voting */}
-                <div className="card" style={{ marginTop: "12px" }}>
-                  <div className="pane-title">Auto Overtime Voting</div>
-                  <div className="pane-subtitle">
-                    Automatically casts overtime vote.
-                  </div>
-
-                  <div className="control-row" style={{ marginTop: "14px" }}>
-                    <div>
-                      <div className="control-title">Overtime Vote</div>
-                      <div className="pane-subtitle">Overtime response key.</div>
-                    </div>
-                    <div className="segmented-control">
-                      <button
-                        type="button"
-                        className={`segmented-btn ${config.auto_overtime_vote_mode === 0 ? "active" : ""}`}
-                        onClick={() => {
-                          updateAndSaveConfig({ auto_overtime_vote_mode: 0 });
-                          addLog("[SETTINGS] Overtime Vote disabled.");
-                        }}
-                      >
-                        Disabled
-                      </button>
-                      <button
-                        type="button"
-                        className={`segmented-btn vote-draw ${config.auto_overtime_vote_mode === 1 ? "active" : ""}`}
-                        onClick={() => {
-                          updateAndSaveConfig({ auto_overtime_vote_mode: 1 });
-                          addLog("[SETTINGS] Overtime Vote set to DRAW (F5).");
-                        }}
-                      >
-                        Vote DRAW (F5)
-                      </button>
-                      <button
-                        type="button"
-                        className={`segmented-btn vote-continue ${config.auto_overtime_vote_mode === 2 ? "active" : ""}`}
-                        onClick={() => {
-                          updateAndSaveConfig({ auto_overtime_vote_mode: 2 });
-                          addLog("[SETTINGS] Overtime Vote set to CONTINUE (F6).");
-                        }}
-                      >
-                        Vote CONTINUE (F6)
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                {/* 3. Auto Initiate Surrender */}
-                <div className="card" style={{ marginTop: "12px" }}>
-                  <div className="between-row">
-                    <div>
-                      <div className="pane-title">Auto Initiate Surrender</div>
-                      <div className="pane-subtitle">
-                        Attempts to initiate Surrender at designated rounds.
-                      </div>
-                    </div>
-                    <label className="switch">
-                      <input
-                        type="checkbox"
-                        checked={config.auto_ff_enabled}
-                        onChange={(e) => {
-                          updateAndSaveConfig({ auto_ff_enabled: e.target.checked });
-                        }}
-                      />
-                      <span className="slider round"></span>
-                    </label>
-                  </div>
-
-                  {/* Subsettings: Rounds */}
-                  <div
-                    style={{
-                      marginTop: "14px",
-                      opacity: config.auto_ff_enabled ? 1 : 0.45,
-                      pointerEvents: config.auto_ff_enabled ? "auto" : "none",
-                      transition: "opacity 0.2s ease",
-                    }}
-                  >
-                    <div className="field-label" style={{ marginBottom: "8px", fontWeight: 600 }}>
-                      Surrender Stages:
-                    </div>
-
-                    <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", marginBottom: "14px" }}>
-                      {/* Round 5 Toggle */}
-                      <label className="checkbox-label" style={{ display: "flex", alignItems: "center", gap: "6px", cursor: "pointer" }}>
-                        <input
-                          type="checkbox"
-                          checked={config.auto_ff_round_5}
-                          onChange={(e) => {
-                            const val = e.target.checked;
-                            const cur = config.auto_ff_custom_rounds || [];
-                            const nextCustom = val ? cur.filter((x) => x < 6 || x > 12) : cur;
-                            updateAndSaveConfig({
-                              auto_ff_round_5: val,
-                              auto_ff_custom_rounds: nextCustom,
-                            });
-                          }}
-                        />
-                        <span style={{ fontSize: "13px", fontWeight: 600 }}>Round 5 (First Half)</span>
-                      </label>
-
-                      {/* Round 13 Toggle */}
-                      <label className="checkbox-label" style={{ display: "flex", alignItems: "center", gap: "6px", cursor: "pointer" }}>
-                        <input
-                          type="checkbox"
-                          checked={config.auto_ff_round_13}
-                          onChange={(e) => {
-                            updateAndSaveConfig({ auto_ff_round_13: e.target.checked });
-                          }}
-                        />
-                        <span style={{ fontSize: "13px", fontWeight: 600 }}>Round 13 (Begin Second Half)</span>
-                      </label>
-
-                      {/* Round 14 Toggle */}
-                      <label className="checkbox-label" style={{ display: "flex", alignItems: "center", gap: "6px", cursor: "pointer" }}>
-                        <input
-                          type="checkbox"
-                          checked={config.auto_ff_round_14}
-                          onChange={(e) => {
-                            const val = e.target.checked;
-                            const cur = config.auto_ff_custom_rounds || [];
-                            const nextCustom = val ? cur.filter((x) => x < 15 || x > 24) : cur;
-                            updateAndSaveConfig({
-                              auto_ff_round_14: val,
-                              auto_ff_custom_rounds: nextCustom,
-                            });
-                          }}
-                        />
-                        <span style={{ fontSize: "13px", fontWeight: 600 }}>Round 14 (Second Half)</span>
-                      </label>
-                    </div>
-
-                    {/* Custom Rounds */}
-                    <div style={{ borderTop: "1px solid rgba(255, 255, 255, 0.08)", paddingTop: "14px" }}>
-                      <div className="pane-subtitle" style={{ fontSize: "12px", fontWeight: 600, color: "#94a3b8", marginBottom: "10px" }}>
-                        Custom Rounds:
-                      </div>
-
-                      <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                        {/* First Half Group */}
-                        {(() => {
-                          const selFirstHalf = (config.auto_ff_custom_rounds || []).find((r) => r >= 6 && r <= 12);
-                          const isLocked = config.auto_ff_round_5;
-                          return (
-                            <div className={`custom-round-group ${isLocked ? "group-locked" : ""}`}>
-                              <div className="custom-round-group-header">
-                                <span className="custom-round-group-title">First Half (R6 – R12)</span>
-                                {isLocked && (
-                                  <span className="custom-round-group-badge">Locked by Round 5</span>
-                                )}
-                              </div>
-                              <div className="custom-round-pills-row">
-                                {[6, 7, 8, 9, 10, 11, 12].map((r) => {
-                                  const isBlocked = isLocked || (selFirstHalf !== undefined && selFirstHalf !== r);
-                                  const isSelected = !isLocked && selFirstHalf === r;
-
-                                  return (
-                                    <button
-                                      key={r}
-                                      type="button"
-                                      onClick={() => {
-                                        if (isBlocked) {
-                                          showToast("You can only surrender once per half");
-                                          return;
-                                        }
-                                        const cur = config.auto_ff_custom_rounds || [];
-                                        if (isSelected) {
-                                          updateAndSaveConfig({
-                                            auto_ff_custom_rounds: cur.filter((x) => x !== r),
-                                          });
-                                        } else {
-                                          const filtered = cur.filter((x) => x < 6 || x > 12);
-                                          updateAndSaveConfig({
-                                            auto_ff_custom_rounds: [...filtered, r].sort((a, b) => a - b),
-                                          });
-                                        }
-                                      }}
-                                      className={`round-pill-btn ${isSelected ? "active" : ""} ${isBlocked ? "blocked" : ""}`}
-                                      data-tooltip={
-                                        isBlocked
-                                          ? "Disabled: You can only surrender once per half"
-                                          : `Toggle surrender at Round ${r}`
-                                      }
-                                    >
-                                      R{r}
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          );
-                        })()}
-
-                        {/* Second Half Group */}
-                        {(() => {
-                          const selSecondHalf = (config.auto_ff_custom_rounds || []).find((r) => r >= 15 && r <= 24);
-                          const isLocked = config.auto_ff_round_14;
-                          return (
-                            <div className={`custom-round-group ${isLocked ? "group-locked" : ""}`}>
-                              <div className="custom-round-group-header">
-                                <span className="custom-round-group-title">Second Half (R15 – R24)</span>
-                                {isLocked && (
-                                  <span className="custom-round-group-badge">Locked by Round 14</span>
-                                )}
-                              </div>
-                              <div className="custom-round-pills-row">
-                                {[15, 16, 17, 18, 19, 20, 21, 22, 23, 24].map((r) => {
-                                  const isBlocked = isLocked || (selSecondHalf !== undefined && selSecondHalf !== r);
-                                  const isSelected = !isLocked && selSecondHalf === r;
-
-                                  return (
-                                    <button
-                                      key={r}
-                                      type="button"
-                                      onClick={() => {
-                                        if (isBlocked) {
-                                          showToast("You can only surrender once per half");
-                                          return;
-                                        }
-                                        const cur = config.auto_ff_custom_rounds || [];
-                                        if (isSelected) {
-                                          updateAndSaveConfig({
-                                            auto_ff_custom_rounds: cur.filter((x) => x !== r),
-                                          });
-                                        } else {
-                                          const filtered = cur.filter((x) => x < 15 || x > 24);
-                                          updateAndSaveConfig({
-                                            auto_ff_custom_rounds: [...filtered, r].sort((a, b) => a - b),
-                                          });
-                                        }
-                                      }}
-                                      className={`round-pill-btn ${isSelected ? "active" : ""} ${isBlocked ? "blocked" : ""}`}
-                                      data-tooltip={
-                                        isBlocked
-                                          ? "Disabled: You can only surrender once per half"
-                                          : `Toggle surrender at Round ${r}`
-                                      }
-                                    >
-                                      R{r}
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          );
-                        })()}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <VotingTab
+                config={config}
+                isRebindingVoteYes={isRebindingVoteYes}
+                isRebindingVoteNo={isRebindingVoteNo}
+                onStartRebindVote={(target) => {
+                  setIsRebindingMain(false);
+                  setIsRebindingAfk(false);
+                  setIsRebindingComms(false);
+                  if (target === "yes") {
+                    setIsRebindingVoteNo(false);
+                    setIsRebindingVoteYes(!isRebindingVoteYes);
+                  } else {
+                    setIsRebindingVoteYes(false);
+                    setIsRebindingVoteNo(!isRebindingVoteNo);
+                  }
+                }}
+                updateAndSaveConfig={updateAndSaveConfig}
+                onLog={addLog}
+                onToast={showToast}
+              />
             )}
 
             {/* TAB 6: MEDIA / MUSIC */}
             {(activeTab === "media" || activeTab === "music") && (
-              <div className="tab-pane">
-                <div className="card music-card">
-                  <div className="music-title">
-                    Moog City x Ordinary x End of Beginning x Back to Friends x Bye Bye Bye x Babydoll x Shape of You x See You Again x Caramelldansen  x Somewhere I Belong x Smells Like Teen Spirit x I Like The Way You Kiss Me x I Thought I Saw Your Face Today
-                  </div>
-
-                  <input
-                    type="range"
-                    className="music-slider"
-                    min="0"
-                    max={musicDuration > 0 ? musicDuration : 100}
-                    step="0.1"
-                    value={musicCurrentTime}
-                    onMouseDown={() => {
-                      isDraggingMusicRef.current = true;
-                    }}
-                    onTouchStart={() => {
-                      isDraggingMusicRef.current = true;
-                    }}
-                    onChange={handleSeekInput}
-                    onMouseUp={handleSeekCommit}
-                    onTouchEnd={handleSeekCommit}
-                  />
-
-                  <div className="music-timestamp">
-                    {formatTime(musicCurrentTime)} / {formatTime(musicDuration)}
-                  </div>
-
-                  <div className="music-play-btn-wrapper">
-                    <button className="music-play-btn" onClick={togglePlayMusic}>
-                      {isPlayingMusic ? (
-                        <div className="pause-bars">
-                          <span></span>
-                          <span></span>
-                        </div>
-                      ) : (
-                        <Play size={20} fill="#8b5cf6" color="#8b5cf6" />
-                      )}
-                    </button>
-                  </div>
-
-                  <div className="volume-control-row">
-                    <span className="volume-label">
-                      Volume: {config.music_volume ?? 80}%
-                    </span>
-                    <input
-                      type="range"
-                      className="vol-slider"
-                      min="0"
-                      max="100"
-                      value={config.music_volume ?? 80}
-                      onChange={handleVolumeChange}
-                    />
-                  </div>
-                </div>
-              </div>
+              <MediaTab
+                musicDuration={musicDuration}
+                musicCurrentTime={musicCurrentTime}
+                isPlayingMusic={isPlayingMusic}
+                musicVolume={config.music_volume ?? 80}
+                isDraggingMusicRef={isDraggingMusicRef}
+                onSeekInput={handleSeekInput}
+                onSeekCommit={handleSeekCommit}
+                onTogglePlayMusic={togglePlayMusic}
+                onVolumeChange={handleVolumeChange}
+                formatTime={formatTime}
+              />
             )}
 
             {/* TAB: MOBILE REMOTE */}
             {activeTab === "remote" && (
-              <div className="tab-pane">
-                <div className="card">
-                  <div className="between-row">
-                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                      <Smartphone size={22} style={{ color: "var(--accent)" }} />
-                      <div>
-                        <div className="pane-title" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                          <span>SageBot Remote Control</span>
-                        </div>
-                        <div className="pane-subtitle" style={{ marginTop: "2px" }}>
-                          Control SageBot and the game from your phone.
-                        </div>
-                      </div>
-                    </div>
-
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                      <span className={`status-pill ${remoteClientConnected ? "active" : ""}`} style={{ fontSize: "12px", display: "inline-flex", alignItems: "center", gap: "5px" }}>
-                        <span style={{ width: 8, height: 8, borderRadius: "50%", background: remoteClientConnected ? "#10b981" : "#64748b" }}></span>
-                        {remoteClientConnected ? "Phone Connected" : "Ready to Pair"}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "24px", marginTop: "20px", alignItems: "center", background: "rgba(0, 0, 0, 0.25)", padding: "20px", borderRadius: "12px", border: "1px solid var(--border-card)" }}>
-                    <div>
-                      <h4 style={{ fontSize: "14px", fontWeight: 700, color: "#ffffff", marginBottom: "6px" }}>
-                        QR Code
-                      </h4>
-                      <p style={{ fontSize: "12px", color: "var(--text-secondary)", lineHeight: 1.5, marginBottom: "14px" }}>
-                        Scan this QR code on your phone to control SageBot and VALORANT.
-                      </p>
-
-                      <div style={{ display: "inline-flex", flexDirection: "column", gap: "4px" }}>
-                        <span style={{ fontSize: "11px", color: "var(--text-tertiary)", fontWeight: 600 }}>OR ENTER 8-CHARACTER CODE</span>
-                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                          <span style={{ fontFamily: "monospace", fontSize: "24px", fontWeight: 800, letterSpacing: "3px", color: "#38bdf8", background: "rgba(56, 189, 248, 0.1)", padding: "6px 14px", borderRadius: "8px", border: "1px solid rgba(56, 189, 248, 0.3)" }}>
-                            {formatCodeDisplay(remoteRoomCode)}
-                          </span>
-                          <button
-                            className="key-badge-btn"
-                            style={{ height: "40px", padding: "0 14px", display: "flex", alignItems: "center", gap: "6px" }}
-                            onClick={() => setShowResetConfirmModal(true)}
-                          >
-                            <RotateCcw size={14} />
-                            <span>Reset Code</span>
-                          </button>
-                        </div>
-                        <div style={{ marginTop: "8px", fontSize: "12px", color: "var(--text-tertiary)" }}>
-                          through the link:{" "}
-                          <a
-                            href="https://sagebot-remote.vercel.app/"
-                            target="_blank"
-                            rel="noreferrer"
-                            style={{ color: "#38bdf8", textDecoration: "underline", fontWeight: 600 }}
-                          >
-                            https://sagebot-remote.vercel.app/
-                          </a>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div style={{ background: "#ffffff", padding: "12px", borderRadius: "12px", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                      <QRCodeSVG
-                        value={`https://sagebot-remote.vercel.app/?room=${remoteRoomCode}&token=${secretToken}`}
-                        size={140}
-                        level="M"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Security & Connected Devices Section */}
-                  <div style={{ marginTop: "20px", paddingTop: "18px", borderTop: "1px solid rgba(255, 255, 255, 0.08)" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
-                      <Shield size={16} style={{ color: "var(--accent)" }} />
-                      <span style={{ fontSize: "14px", fontWeight: 700, color: "#ffffff" }}>Connected Devices</span>
-                    </div>
-                    <div className="pane-subtitle" style={{ marginBottom: "14px" }}>
-                      Manage paired mobile devices authorized to monitor and control SageBot.
-                    </div>
-
-                    {/* Unique Control Toggle */}
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        background: "rgba(0, 0, 0, 0.25)",
-                        border: "1px solid var(--border-card)",
-                        padding: "12px 14px",
-                        borderRadius: "10px",
-                        marginBottom: "12px",
-                      }}
-                    >
-                      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                        <Lock size={16} style={{ color: remoteUniqueControl ? "#10b981" : "var(--text-secondary)" }} />
-                        <div>
-                          <div style={{ fontSize: "13px", fontWeight: 700, color: "#ffffff" }}>
-                            Unique Control
-                          </div>
-                          <div style={{ fontSize: "11px", color: "var(--text-tertiary)", marginTop: "2px" }}>
-                            Allow only one device to pair. Remove the current device or turn this off to pair another.
-                          </div>
-                        </div>
-                      </div>
-                      <label className="switch">
-                        <input
-                          type="checkbox"
-                          checked={remoteUniqueControl}
-                          onChange={handleToggleUniqueControl}
-                        />
-                        <span className="slider round" />
-                      </label>
-                    </div>
-
-                    {pairedDevices.length === 0 ? (
-                      <div style={{ background: "rgba(0, 0, 0, 0.2)", border: "1px dashed rgba(255, 255, 255, 0.1)", padding: "20px", borderRadius: "10px", textAlign: "center" }}>
-                        <span style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
-                          No devices paired yet.
-                        </span>
-                      </div>
-                    ) : (
-                      <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                        {pairedDevices.map((dev) => (
-                          <div
-                            key={dev.id}
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "space-between",
-                              background: "rgba(0, 0, 0, 0.25)",
-                              border: "1px solid var(--border-card)",
-                              padding: "10px 14px",
-                              borderRadius: "10px",
-                            }}
-                          >
-                            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                              <Smartphone size={18} style={{ color: "var(--accent)" }} />
-                              <div>
-                                <span style={{ fontSize: "13px", fontWeight: 700, color: "#ffffff", display: "block" }}>
-                                  {dev.name}
-                                </span>
-                                <span style={{ fontSize: "11px", color: "var(--text-tertiary)" }}>
-                                  Paired at {dev.paired_at}
-                                </span>
-                              </div>
-                            </div>
-                            <button
-                              className="key-badge-btn"
-                              style={{ height: "30px", padding: "0 10px", color: "#f87171", borderColor: "rgba(239, 68, 68, 0.3)", display: "flex", alignItems: "center", gap: "5px" }}
-                              onClick={() => handleRemoveDevice(dev.id)}
-                            >
-                              <Trash2 size={13} />
-                              <span>Remove</span>
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
+              <RemoteTab
+                remoteClientConnected={remoteClientConnected}
+                remoteRoomCode={remoteRoomCode}
+                secretToken={secretToken}
+                remoteUniqueControl={remoteUniqueControl}
+                pairedDevices={pairedDevices}
+                onOpenResetModal={() => setShowResetConfirmModal(true)}
+                onToggleUniqueControl={handleToggleUniqueControl}
+                onRemoveDevice={handleRemoveDevice}
+              />
             )}
 
             {/* TAB: INFO */}
             {(activeTab === "info" || activeTab === "changelog") && (
-              <div className="tab-pane">
-                {/* 1. Header Card */}
-                <div className="card">
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <div>
-                      <div className="pane-title" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                        <span>SageBot</span>
-                        <span className="version-pill" style={{ fontSize: "10px", padding: "1.5px 8px" }}>
-                          v{APP_VERSION}
-                        </span>
-                      </div>
-                      <div className="pane-subtitle" style={{ marginTop: "4px" }}>
-                        SageBot is a multi-functional, external VALORANT utility.
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* How to use SageBot */}
-                <div className="card" style={{ marginTop: "12px", border: "1px solid rgba(56, 189, 248, 0.3)", background: "rgba(14, 165, 233, 0.04)" }}>
-                  <div className="card-header" style={{ color: "#38bdf8", display: "flex", alignItems: "center", gap: "6px" }}>
-                    HOW TO USE SAGEBOT
-                  </div>
-                  <div style={{ marginTop: "10px", display: "flex", flexDirection: "column", gap: "6px", fontSize: "12.5px", color: "#cbd5e1" }}>
-                    <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-                      <span style={{ fontWeight: 700, color: "#38bdf8", minWidth: "18px" }}>1.</span>
-                      <span>Take a look around and explore.</span>
-                    </div>
-                    <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-                      <span style={{ fontWeight: 700, color: "#38bdf8", minWidth: "18px" }}>2.</span>
-                      <span>Hit the hotkey (<strong style={{ color: "#10b981" }}>{config.hotkey}</strong>) to start/stop.</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* 4. What is Risky */}
-                <div className="card" style={{ marginTop: "12px", border: "1px solid rgba(239, 68, 68, 0.35)", background: "rgba(239, 68, 68, 0.04)" }}>
-                  <div className="card-header" style={{ color: "#f87171", display: "flex", alignItems: "center", gap: "8px" }}>
-                    <span>WHAT IS RISKY</span>
-                    <span style={{ fontSize: "10px", color: "#f87171", background: "rgba(239, 68, 68, 0.15)", border: "1px solid rgba(239, 68, 68, 0.3)", padding: "1px 7px", borderRadius: "10px", fontWeight: 700 }}>
-                      RISKY
-                    </span>
-                  </div>
-                  <p style={{ marginTop: "8px", fontSize: "12.5px", lineHeight: "1.6", color: "#cbd5e1" }}>
-                    These functions are a bit edgy. Handle with caution.
-                  </p>
-                </div>
-
-                {/* 6. Changelog */}
-                <div className="card" style={{ marginTop: "12px" }}>
-                  <div className="card-header" style={{ color: "#10b981", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <span>CHANGELOG</span>
-                    <span style={{ fontSize: "11px", color: "#6ee7b7", fontWeight: 600 }}>v{APP_VERSION}</span>
-                  </div>
-                  <div style={{ marginTop: "10px" }}>
-                    <pre className="changelog-pre" style={{ maxHeight: "240px" }}>
-                      {changelogContent || "Loading changelog..."}
-                    </pre>
-                  </div>
-                </div>
-              </div>
+              <InfoTab
+                hotkey={config.hotkey}
+                changelogContent={changelogContent}
+              />
             )}
 
             {/* TAB 9: SETTINGS */}
             {activeTab === "settings" && (
-              <div className="tab-pane">
-                {/* 1. Updates on Top */}
-                <div className="card">
-                  <div className="pane-title">Updates</div>
-                  <div className="pane-subtitle">Current Version: v{updateInfo?.current_version || APP_VERSION}</div>
-
-                  <div style={{ marginTop: "14px" }}>
-                    <button
-                      className="action-btn"
-                      onClick={async () => {
-                        setUpdateStatus("Checking for updates...");
-                        try {
-                          const info = await invoke<UpdateInfo>("check_for_updates");
-                          setUpdateInfo(info);
-                          if (info.available) {
-                            setShowUpdateModal(true);
-                            setUpdateStatus(`A newer version is available: ${info.latest_version}`);
-                          } else {
-                            setUpdateStatus(`You are running the latest version: v${info.current_version}`);
-                            showToast(`You are on the latest version (v${info.current_version})`);
-                          }
-                        } catch (err: any) {
-                          setUpdateStatus(`Update check error: ${err}`);
-                        }
-                      }}
-                    >
-                      Check for Updates
-                    </button>
-                  </div>
-
-                  {updateStatus && (
-                    <div className="status-feedback" style={{ marginTop: "10px" }}>
-                      {updateStatus}
-                    </div>
-                  )}
-                </div>
-
-                {/* 2. Hotkey & Window Behavior */}
-                <div className="card" style={{ marginTop: "12px" }}>
-                  <div className="pane-title">Hotkey &amp; Window</div>
-                  <div className="pane-subtitle">
-                    Global controls and behavior options.
-                  </div>
-
-                  <div className="control-row" style={{ marginTop: "14px" }}>
-                    <div>
-                      <div className="control-title">Toggle Hotkey</div>
-                      <div className="pane-subtitle">Global shortcut to start/stop SageBot.</div>
-                    </div>
-                    <button
-                      className={`key-badge-btn ${isRebindingMain ? "rebinding" : ""}`}
-                      onClick={() => setIsRebindingMain(!isRebindingMain)}
-                    >
-                      {isRebindingMain ? "Press Key..." : config.hotkey}
-                    </button>
-                  </div>
-
-                  <div className="control-row" style={{ marginTop: "14px" }}>
-                    <div>
-                      <div className="control-title">Always on top</div>
-                      <div className="pane-subtitle">
-                        The app stays on top.
-                      </div>
-                    </div>
-                    <label className="switch">
-                      <input
-                        type="checkbox"
-                        checked={config.always_on_top}
-                        onChange={(e) => {
-                          const val = e.target.checked;
-                          updateAndSaveConfig({ always_on_top: val });
-                          invoke("set_always_on_top", { alwaysOnTop: val }).catch(() => { });
-                          addLog(
-                            val
-                              ? "[SETTINGS] Always on top enabled."
-                              : "[SETTINGS] Always on top disabled."
-                          );
-                        }}
-                      />
-                      <span className="slider round"></span>
-                    </label>
-                  </div>
-
-                  <div className="control-row" style={{ marginTop: "14px" }}>
-                    <div>
-                      <div className="control-title">Low Detail Mode</div>
-                      <div className="pane-subtitle">
-                        Reduce GPU works.
-                      </div>
-                    </div>
-                    <label className="switch">
-                      <input
-                        type="checkbox"
-                        checked={config.low_detail ?? false}
-                        onChange={(e) => {
-                          const val = e.target.checked;
-                          updateAndSaveConfig({ low_detail: val });
-                          addLog(
-                            val
-                              ? "[SETTINGS] Low Detail Mode enabled."
-                              : "[SETTINGS] Low Detail Mode disabled."
-                          );
-                        }}
-                      />
-                      <span className="slider round"></span>
-                    </label>
-                  </div>
-                </div>
-              </div>
+              <SettingsTab
+                config={config}
+                updateInfo={updateInfo}
+                updateStatus={updateStatus}
+                isRebindingMain={isRebindingMain}
+                setUpdateInfo={setUpdateInfo}
+                setUpdateStatus={setUpdateStatus}
+                setShowUpdateModal={setShowUpdateModal}
+                setIsRebindingMain={setIsRebindingMain}
+                updateAndSaveConfig={updateAndSaveConfig}
+                onToast={showToast}
+                onLog={addLog}
+              />
             )}
           </div>
         </div>
@@ -7755,117 +6596,6 @@ export default function App() {
         </footer>
       </div>
 
-      {/* Kill VALORANT Confirmation Modal */}
-      {showKillModal && (
-        <div className="modal-backdrop">
-          <div className="modal-card">
-            <div className="modal-header kill-modal-header">
-              <AlertTriangle color="#ef4444" size={20} />
-              <span style={{ color: "#ef4444" }}>Kill VALORANT Confirmation</span>
-            </div>
-            <div className="modal-body">
-              <p style={{ fontWeight: 700, color: "#f87171" }}>
-                ⚠️ FORCE QUIT VALORANT
-              </p>
-              <p style={{ marginTop: "8px" }}>
-                Are you sure you want to close VALORANT? This will immediately terminate all active VALORANT processes (<span className="code-font">VALORANT.exe</span> and <span className="code-font">VALORANT-Win64-Shipping.exe</span>).
-              </p>
-              <p style={{ marginTop: "8px", color: "#94a3b8", fontSize: "12px" }}>
-                Any active match, custom lobby, or agent select will be disconnected immediately.
-              </p>
-            </div>
-            <div className="modal-actions">
-              <button
-                className="modal-btn secondary"
-                onClick={() => setShowKillModal(false)}
-              >
-                Cancel
-              </button>
-              <button
-                className="modal-btn danger"
-                onClick={() => {
-                  suppressDetectionUntilRef.current = Date.now() + 10000;
-                  if (runningRef.current) {
-                    stopSagebot("VALORANT terminated.");
-                  }
-                  setShowKillModal(false);
-                  invoke("kill_valorant").catch(() => { });
-                }}
-              >
-                Kill VALORANT
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* VALORANT Not Detected Launch Modal */}
-      {showLaunchModal && (
-        <div className="modal-backdrop" onClick={() => setShowLaunchModal(false)} style={{ zIndex: 9999 }}>
-          <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 440 }}>
-            <div className="modal-header" style={{ color: "#38bdf8" }}>
-              <AlertTriangle size={20} color="#38bdf8" />
-              <span style={{ fontSize: "15px", fontWeight: 700, color: "#38bdf8" }}>VALORANT is not detected</span>
-            </div>
-            <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <p style={{ margin: 0, fontSize: "13px", color: "#cbd5e1", lineHeight: "1.5" }}>
-                SageBot requires VALORANT to be running. Would you like SageBot to launch it for you?
-              </p>
-              <div
-                style={{
-                  padding: "10px 14px",
-                  background: "rgba(15, 23, 42, 0.6)",
-                  border: "1px solid rgba(56, 189, 248, 0.2)",
-                  borderRadius: "8px",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "10px",
-                }}
-              >
-                <div style={{ width: 8, height: 8, borderRadius: "50%", background: isRiotSignedIn ? "#10b981" : "#f59e0b" }} />
-                <span style={{ fontSize: "12px", color: "#94a3b8" }}>
-                  {isRiotSignedIn
-                    ? "Stay signed in is active. SageBot will launch directly into VALORANT."
-                    : "Not signed in. Riot Client will open for authentication."}
-                </span>
-              </div>
-            </div>
-            <div className="modal-actions" style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 18 }}>
-              <button
-                type="button"
-                className="modal-btn secondary"
-                onClick={() => setShowLaunchModal(false)}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="modal-btn primary"
-                style={{ background: "#0284c7", borderColor: "#38bdf8", color: "#ffffff", fontWeight: 700 }}
-                onClick={() => {
-                  setShowLaunchModal(false);
-                  if (isRiotSignedIn) {
-                    addLog("[LAUNCH] Starting VALORANT via Riot Client...");
-                    showToast("Launching VALORANT...");
-                    invoke("launch_valorant")
-                      .then(() => addLog("[LAUNCH] VALORANT launch command sent successfully."))
-                      .catch((err) => addLog(`[LAUNCH] Failed: ${err}`));
-                  } else {
-                    addLog("[LAUNCH] Opening Riot Client for login...");
-                    showToast("Opening Riot Client for login...");
-                    invoke("launch_riot_client")
-                      .then(() => addLog("[LAUNCH] Riot Client started for login."))
-                      .catch((err) => addLog(`[LAUNCH] Failed: ${err}`));
-                  }
-                }}
-              >
-                {isRiotSignedIn ? "Launch VALORANT" : "Open Riot Client"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Toasts */}
       <div className="toast-container">
         {toasts.map((t) => (
@@ -7875,699 +6605,61 @@ export default function App() {
         ))}
       </div>
 
-      {/* Auto Chat Warning Modal */}
-      {showChatWarningModal && (
-        <div className="modal-backdrop">
-          <div className="modal-card">
-            <div className="modal-header">
-              <AlertTriangle color="#f59e0b" size={20} />
-              <span>Notes</span>
-            </div>
-            <div className="modal-body">
-              <p style={{ fontWeight: 600, color: "#fbbf24" }}>
-                ⚠️ In-Game Chat Warning
-              </p>
-              <p style={{ marginTop: "8px" }}>
-                Spamming chat in VALORANT does not lead to any penalties.
-              </p>
-              <p style={{ marginTop: "8px", color: "#94a3b8", fontSize: "12px" }}>
-                However, consider not spamming something distasteful (racist, sexist, etc.) or admitting you are using tool for spamming.
-              </p>
-              <p style={{ marginTop: "8px" }}>
-                Do you wish to proceed and enable Auto Chat?
-              </p>
-            </div>
-            <div className="modal-actions">
-              <button
-                className="modal-btn secondary"
-                onClick={() => {
-                  setShowChatWarningModal(false);
-                }}
-              >
-                No
-              </button>
-              <button
-                className="modal-btn danger"
-                onClick={() => {
-                  updateAndSaveConfig({ chat_enabled: true });
-                  addLog("[CHAT] Chat automation activated.");
-                  setShowChatWarningModal(false);
-                }}
-              >
-                I know what I'm doing
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Delete Player Record Confirmation Modal */}
-      {playerToDelete && (
-        <div className="modal-backdrop" style={{ zIndex: 9999 }}>
-          <div className="modal-card" style={{ maxWidth: 420 }}>
-            <div className="modal-header kill-modal-header">
-              <AlertTriangle color="#ef4444" size={20} />
-              <span style={{ fontSize: "15px", fontWeight: 700, color: "#ef4444" }}>
-                Delete Player Record?
-              </span>
-            </div>
-            <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <p style={{ margin: 0, fontWeight: 700, color: "#f87171", fontSize: "14px" }}>
-                Are you sure you want to remove this player's record?
-              </p>
-              <p style={{ margin: 0, fontSize: "13px", color: "#cbd5e1", lineHeight: "1.5" }}>
-                This will permanently delete all encounter history, win/loss stats, and saved match references for <strong style={{ color: "#f1f5f9" }}>{playerToDelete.name}{playerToDelete.tag ? ` #${playerToDelete.tag}` : ""}</strong>.
-              </p>
-            </div>
-            <div className="modal-actions" style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 16 }}>
-              <button
-                type="button"
-                className="modal-btn secondary"
-                onClick={() => setPlayerToDelete(null)}
-              >
-                No
-              </button>
-              <button
-                type="button"
-                className="modal-btn danger"
-                onClick={async () => {
-                  const targetPuuid = playerToDelete.puuid;
-                  setPlayerToDelete(null);
-                  await deletePlayerEncounter(targetPuuid);
-                }}
-                style={{ background: "#dc2626", borderColor: "#ef4444", color: "#ffffff", fontWeight: 700 }}
-              >
-                Yes
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Validation Error Modal */}
-      {errorModal && (
-        <div className="modal-backdrop">
-          <div className="modal-card">
-            <div className="modal-header kill-modal-header">
-              <AlertTriangle color="#ef4444" size={20} />
-              <span style={{ color: "#ef4444" }}>{errorModal.title}</span>
-            </div>
-            <div className="modal-body">
-              <p style={{ fontWeight: 600, color: "#f87171" }}>
-                {errorModal.message}
-              </p>
-              {errorModal.submessage && (
-                <p style={{ marginTop: "8px", color: "#94a3b8", fontSize: "13px" }}>
-                  {errorModal.submessage}
-                </p>
-              )}
-            </div>
-            <div className="modal-actions">
-              <button
-                className="modal-btn danger"
-                style={{ minWidth: "90px" }}
-                onClick={() => setErrorModal(null)}
-              >
-                OK
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Auto Update Modal (Darkened background, auto downloads & restarts) */}
-      {showUpdateModal && updateInfo && (
-        <div className="modal-backdrop">
-          <div className="modal-card">
-            <div className="modal-header update-modal-header">
-              <Download color="#10b981" size={20} />
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <span style={{ color: "#10b981" }}>Updating SageBot</span>
-                <span className="version-pill">{updateInfo.latest_version}</span>
-              </div>
-            </div>
-            <div className="modal-body">
-              <p style={{ fontWeight: 600, color: "#f8fafc" }}>
-                {updateError
-                  ? "Update encountered an error"
-                  : updateProgress >= 100
-                    ? "Update complete! Restarting SageBot..."
-                    : "Downloading and installing update..."}
-              </p>
-              <p style={{ marginTop: "4px", color: "var(--text-secondary)", fontSize: "12px" }}>
-                Current: v{updateInfo.current_version} → Latest: {updateInfo.latest_version}
-              </p>
-
-              {!updateError && (
-                <div style={{ marginTop: "16px" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", color: "var(--text-secondary)" }}>
-                    <span>{updateProgress >= 100 ? "Restarting SageBot..." : "Downloading update..."}</span>
-                    <span style={{ fontWeight: 600, color: "#34d399" }}>{updateProgress}%</span>
-                  </div>
-                  <div className="update-progress-bar">
-                    <div
-                      className="update-progress-fill"
-                      style={{ width: `${Math.max(updateProgress, 5)}%` }}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {updateError && (
-                <div style={{ marginTop: "12px", padding: "10px 12px", borderRadius: "6px", background: "rgba(239, 68, 68, 0.1)", border: "1px solid rgba(239, 68, 68, 0.3)" }}>
-                  <p style={{ color: "#f87171", fontSize: "12px", fontWeight: 600 }}>
-                    ❌ {updateError}
-                  </p>
-                  <div style={{ display: "flex", gap: "8px", marginTop: "10px" }}>
-                    <button
-                      className="modal-btn secondary"
-                      style={{ fontSize: "12px", padding: "5px 12px" }}
-                      onClick={() => {
-                        setShowUpdateModal(false);
-                        setUpdateError("");
-                      }}
-                    >
-                      Continue to SageBot
-                    </button>
-                    {updateInfo.download_url && (
-                      <button
-                        className="modal-btn primary update-primary-btn"
-                        style={{ fontSize: "12px", padding: "5px 12px" }}
-                        onClick={() => {
-                          setShowUpdateModal(true);
-                          setUpdateProgress(0);
-                          setUpdateError("");
-                          invoke("apply_update", { downloadUrl: updateInfo.download_url }).catch((err: any) => {
-                            setUpdateError(typeof err === "string" ? err : err?.message || "Failed to download update");
-                          });
-                        }}
-                      >
-                        Retry
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Macro JSON Import Modal */}
-      {showMacroImportModal && (
-        <div
-          className="modal-backdrop"
-          onClick={() => {
-            setShowMacroImportModal(false);
-            setMacroCompilerError("");
-          }}
-        >
-          <div
-            className="modal-card"
-            onClick={(e) => e.stopPropagation()}
-            style={{ width: "520px", maxWidth: "92vw", border: "1px solid rgba(59, 130, 246, 0.4)" }}
-          >
-            <div className="modal-header" style={{ color: "#60a5fa" }}>
-              <FileCode size={18} color="#60a5fa" />
-              <span>Import Macro JSON</span>
-            </div>
-            <div className="modal-body">
-              <p style={{ fontSize: "12px", color: "var(--text-secondary)", marginBottom: "10px" }}>
-                Paste custom macro JSON below or load a file from disk. The compiler will validate syntax, structure, and timing schema before applying.
-              </p>
-
-              <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "8px" }}>
-                <input
-                  type="file"
-                  id="macro-file-input"
-                  accept=".json,.txt"
-                  style={{ display: "none" }}
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) {
-                      const reader = new FileReader();
-                      reader.onload = (event) => {
-                        const content = (event.target?.result as string) || "";
-                        setMacroImportText(content);
-                        setMacroCompilerError("");
-                      };
-                      reader.readAsText(file);
-                    }
-                    e.target.value = "";
-                  }}
-                />
-                <button
-                  type="button"
-                  className="modal-btn secondary"
-                  style={{ fontSize: "11px", padding: "4px 10px", display: "flex", alignItems: "center", gap: "6px" }}
-                  onClick={() => {
-                    document.getElementById("macro-file-input")?.click();
-                  }}
-                >
-                  <Upload size={13} />
-                  <span>Import File</span>
-                </button>
-              </div>
-
-              <textarea
-                value={macroImportText}
-                onChange={(e) => {
-                  setMacroImportText(e.target.value);
-                  if (macroCompilerError) setMacroCompilerError("");
-                }}
-                placeholder={`{\n  "total_loop_ms": 1000,\n  "actions": [\n    { "key": "w", "start_ms": 0, "duration_ms": 200 }\n  ]\n}`}
-                rows={10}
-                style={{
-                  width: "100%",
-                  fontFamily: "Consolas, 'Courier New', monospace",
-                  fontSize: "12px",
-                  background: "rgba(0, 0, 0, 0.5)",
-                  border: macroCompilerError ? "1px solid rgba(239, 68, 68, 0.5)" : "1px solid rgba(255, 255, 255, 0.12)",
-                  borderRadius: "6px",
-                  color: "#f8fafc",
-                  padding: "10px",
-                  boxSizing: "border-box",
-                  outline: "none",
-                  resize: "vertical",
-                }}
-              />
-
-              {macroCompilerError && (
-                <div className="compiler-error-box" style={{ marginTop: "10px" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "6px", fontWeight: 700, color: "#f87171", marginBottom: "4px" }}>
-                    <span>⚠ Compiler Diagnostic Error</span>
-                  </div>
-                  <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: "11px", color: "#fca5a5" }}>
-                    {macroCompilerError}
-                  </pre>
-                </div>
-              )}
-            </div>
-
-            <div className="modal-actions" style={{ marginTop: "14px", display: "flex", justifyContent: "flex-end", gap: "8px" }}>
-              <button
-                type="button"
-                className="modal-btn secondary"
-                onClick={() => {
-                  setShowMacroImportModal(false);
-                  setMacroCompilerError("");
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="modal-btn primary"
-                style={{
-                  background: "linear-gradient(135deg, #3b82f6, #1d4ed8)",
-                  borderColor: "#3b82f6",
-                  color: "#ffffff",
-                }}
-                onClick={handleValidateAndApplyMacro}
-              >
-                Validate & Apply
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Hidden Developer Authentication Modal (Ctrl + Shift + P) */}
-      {showAuthModal && (
-        <div
-          className="modal-backdrop"
-          onClick={() => {
-            setShowAuthModal(false);
-            setAuthInput("");
-          }}
-        >
-          <div
-            className="modal-card"
-            onClick={(e) => e.stopPropagation()}
-            style={{ width: "320px", border: "1px solid rgba(168, 85, 247, 0.35)" }}
-          >
-            <div className="modal-header" style={{ color: "#c084fc" }}>
-              <Lock size={18} color="#c084fc" />
-              <span>Authentication</span>
-            </div>
-            <form onSubmit={handleDevAuthSubmit}>
-              <div className="modal-body">
-                <input
-                  type="password"
-                  autoFocus
-                  placeholder="Passkey"
-                  value={authInput}
-                  onChange={(e) => setAuthInput(e.target.value)}
-                  style={{
-                    width: "100%",
-                    padding: "8px 12px",
-                    background: "rgba(0, 0, 0, 0.45)",
-                    border: "1px solid rgba(168, 85, 247, 0.3)",
-                    borderRadius: "6px",
-                    color: "#f8fafc",
-                    fontSize: "13px",
-                    outline: "none",
-                    marginTop: "6px",
-                    boxSizing: "border-box",
-                  }}
-                />
-              </div>
-              <div className="modal-actions" style={{ marginTop: "16px" }}>
-                <button
-                  type="button"
-                  className="modal-btn secondary"
-                  onClick={() => {
-                    setShowAuthModal(false);
-                    setAuthInput("");
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="modal-btn primary"
-                  style={{
-                    background: "linear-gradient(135deg, #a855f7, #7c3aed)",
-                    borderColor: "#a855f7",
-                    color: "#ffffff",
-                  }}
-                >
-                  Verify
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-      {/* Recent Matches Detailed History Modal */}
-      {selectedPlayerMatches && (
-        <div className="modal-backdrop" onClick={() => setSelectedPlayerMatches(null)}>
-          <div
-            className="modal-card recent-matches-modal-card"
-            onClick={(e) => e.stopPropagation()}
-            style={{ maxWidth: "560px", width: "95%" }}
-          >
-            <div className="modal-header" style={{ alignItems: "center" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                <History size={20} color="#38bdf8" />
-                <div style={{ display: "flex", flexDirection: "column", textAlign: "left" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                    <span style={{ fontSize: "15px", fontWeight: 700, color: "#f8fafc" }}>
-                      {selectedPlayerMatches.player.name}
-                    </span>
-                    {selectedPlayerMatches.player.is_self && (
-                      <span className="tracker-party-badge" style={{ background: "rgba(56, 189, 248, 0.2)", color: "#38bdf8" }}>YOU</span>
-                    )}
-                  </div>
-                  <span style={{ fontSize: "12px", color: "#94a3b8" }}>
-                    {selectedPlayerMatches.player.agent_name || "Unknown Agent"} • {selectedPlayerMatches.player.current_rank_name || "Unranked"} ({selectedPlayerMatches.player.current_rr} RR)
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div className="modal-body" style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: "10px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
-                <span style={{ fontSize: "12px", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-                  Recent Competitive Matches ({selectedPlayerMatches.matches.length})
-                </span>
-              </div>
-
-              {selectedPlayerMatches.matches.length === 0 ? (
-                <div style={{ textAlign: "center", padding: "28px 0", color: "#64748b", fontSize: "13px" }}>
-                  No recent competitive games recorded in the last 20 matches.
-                </div>
-              ) : (
-                <div className="recent-matches-list" style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "430px", overflowY: "auto", paddingRight: "4px" }}>
-                  {selectedPlayerMatches.matches.map((m, idx) => {
-                    const isRankUp = m.is_rank_up;
-                    const isDerank = m.is_derank;
-                    const isWin = m.result === "W";
-                    const isLoss = m.result === "L";
-
-                    const rrColor = isRankUp
-                      ? "#facc15"
-                      : isDerank
-                        ? "#c084fc"
-                        : isWin
-                          ? "#34d399"
-                          : isLoss
-                            ? "#fb7185"
-                            : "#cbd5e1";
-
-                    const rrBg = isRankUp
-                      ? "rgba(234, 179, 8, 0.16)"
-                      : isDerank
-                        ? "rgba(168, 85, 247, 0.16)"
-                        : isWin
-                          ? "rgba(16, 185, 129, 0.12)"
-                          : isLoss
-                            ? "rgba(244, 63, 94, 0.12)"
-                            : "rgba(148, 163, 184, 0.12)";
-
-                    const rrBorder = isRankUp
-                      ? "rgba(234, 179, 8, 0.55)"
-                      : isDerank
-                        ? "rgba(168, 85, 247, 0.55)"
-                        : isWin
-                          ? "rgba(16, 185, 129, 0.3)"
-                          : isLoss
-                            ? "rgba(244, 63, 94, 0.3)"
-                            : "rgba(148, 163, 184, 0.25)";
-
-                    const pillClass = isRankUp
-                      ? "pill-rankup"
-                      : isDerank
-                        ? "pill-derank"
-                        : `pill-${m.result.toLowerCase()}`;
-
-                    const sign = m.rr_change > 0 ? "+" : "";
-
-                    return (
-                      <div
-                        key={m.match_id || idx}
-                        className="recent-match-card"
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          padding: "10px 14px",
-                          borderRadius: "8px",
-                          background: "rgba(255, 255, 255, 0.03)",
-                          border: `1px solid ${rrBorder}`,
-                          boxShadow: "0 2px 6px rgba(0,0,0,0.2)"
-                        }}
-                      >
-                        {/* Result badge + Map name */}
-                        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                          <span
-                            className={`recent-game-pill ${pillClass}`}
-                            style={{ width: "28px", height: "24px", fontSize: "11px", fontWeight: 800 }}
-                          >
-                            {m.result}
-                          </span>
-                          <div style={{ display: "flex", flexDirection: "column" }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                              <span style={{ fontWeight: 700, fontSize: "14px", color: "#f8fafc" }}>
-                                {m.map_name || "Competitive Match"}
-                              </span>
-                              {isRankUp && (
-                                <span
-                                  style={{
-                                    fontSize: "10px",
-                                    fontWeight: 600,
-                                    padding: "2px 7px",
-                                    borderRadius: "3px",
-                                    background: "rgba(234, 179, 8, 0.2)",
-                                    color: "#fef08a",
-                                    border: "1px solid rgba(234, 179, 8, 0.55)",
-                                    letterSpacing: "0.4px"
-                                  }}
-                                >
-                                  ▲ RANK UP
-                                </span>
-                              )}
-                              {isDerank && (
-                                <span
-                                  style={{
-                                    fontSize: "10px",
-                                    fontWeight: 600,
-                                    padding: "2px 7px",
-                                    borderRadius: "3px",
-                                    background: "rgba(168, 85, 247, 0.2)",
-                                    color: "#e9d5ff",
-                                    border: "1px solid rgba(168, 85, 247, 0.55)",
-                                    letterSpacing: "0.4px"
-                                  }}
-                                >
-                                  ▼ DERANK
-                                </span>
-                              )}
-                              {m.performance_bonus > 0 && (
-                                <span
-                                  style={{
-                                    fontSize: "10px",
-                                    fontWeight: 700,
-                                    padding: "1px 5px",
-                                    borderRadius: "3px",
-                                    background: "rgba(234, 179, 8, 0.2)",
-                                    color: "#facc15",
-                                    border: "1px solid rgba(234, 179, 8, 0.4)",
-                                    display: "inline-flex",
-                                    alignItems: "center",
-                                    gap: "3px"
-                                  }}
-                                  title={`Performance Bonus: +${m.performance_bonus} RR`}
-                                >
-                                  ★ +{m.performance_bonus}
-                                </span>
-                              )}
-                            </div>
-                            <span style={{ fontSize: "11px", color: "#94a3b8" }}>
-                              {m.tier_name ? `${m.tier_name} • ${m.rr_after} RR` : `${m.rr_after} RR`}
-                              {m.has_kda && (
-                                <span style={{ color: (m.kd_ratio ?? 0) >= 1.0 ? "#86efac" : "#fca5a5", marginLeft: "4px" }}>
-                                  • {m.kills}/{m.deaths}/{m.assists} • K/D: {(m.kd_ratio ?? 0).toFixed(2)}
-                                </span>
-                              )}
-                              {m.timestamp > 0 && ` • ${formatMatchTime(m.timestamp)}`}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* RR Delta */}
-                        <div
-                          style={{
-                            padding: "4px 10px",
-                            borderRadius: "6px",
-                            background: rrBg,
-                            border: `1px solid ${rrBorder}`,
-                            fontWeight: 800,
-                            fontSize: "13px",
-                            color: rrColor,
-                            letterSpacing: "0.3px",
-                            minWidth: "65px",
-                            textAlign: "center"
-                          }}
-                        >
-                          {sign}{m.rr_change} RR
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            <div className="modal-actions" style={{ padding: "12px 20px" }}>
-              <button
-                className="modal-btn secondary"
-                onClick={() => setSelectedPlayerMatches(null)}
-                style={{ width: "100%" }}
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Device Pairing Approval Modal */}
-      {pendingPairRequest && (
-        <div className="modal-backdrop" style={{ zIndex: 9999 }}>
-          <div className="modal-card" style={{ maxWidth: 440 }}>
-            <div className="modal-header" style={{ color: "#38bdf8" }}>
-              <Smartphone size={20} color="#38bdf8" />
-              <span style={{ fontSize: "15px", fontWeight: 700, color: "#ffffff" }}>Device Pairing Request</span>
-            </div>
-            <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              <p style={{ margin: 0, fontSize: "13px", color: "#cbd5e1" }}>
-                A device is requesting permission to connect to SageBot.
-              </p>
-              {pendingPairRequest.fingerprint && (
-                <div style={{ background: "rgba(56, 189, 248, 0.08)", border: "1px solid rgba(56, 189, 248, 0.25)", borderRadius: 8, padding: "8px 12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                  <span style={{ fontSize: "11px", color: "#94a3b8" }}>Security Verification Key</span>
-                  <span style={{ fontFamily: "monospace", fontSize: "14px", fontWeight: 800, letterSpacing: "2px", color: "#38bdf8" }}>
-                    {pendingPairRequest.fingerprint}
-                  </span>
-                </div>
-              )}
-              <div>
-                <label style={{ fontSize: "12px", color: "#94a3b8", display: "block", marginBottom: 6 }}>
-                  Give this device a nickname:
-                </label>
-                <input
-                  type="text"
-                  value={deviceNicknameInput}
-                  onChange={(e) => setDeviceNicknameInput(e.target.value)}
-                  placeholder="e.g. iPhone Duo, Living Room iPad"
-                  style={{
-                    width: "100%",
-                    boxSizing: "border-box",
-                    padding: "8px 12px",
-                    background: "#0b1120",
-                    border: "1px solid #334155",
-                    borderRadius: 6,
-                    color: "#f8fafc",
-                    fontSize: "13px"
-                  }}
-                  autoFocus
-                />
-              </div>
-            </div>
-            <div className="modal-actions" style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 18 }}>
-              <button
-                className="modal-btn secondary"
-                onClick={handleDenyDevice}
-              >
-                Deny
-              </button>
-              <button
-                className="modal-btn primary"
-                onClick={handleApproveDevice}
-                style={{ background: "#0284c7", borderColor: "#38bdf8", color: "#ffffff", fontWeight: 700 }}
-              >
-                Approve &amp; Pair
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Reset Code Confirmation Modal */}
-      {showResetConfirmModal && (
-        <div className="modal-backdrop" style={{ zIndex: 9999 }}>
-          <div className="modal-card" style={{ maxWidth: 420 }}>
-            <div className="modal-header kill-modal-header">
-              <AlertTriangle size={20} color="#ef4444" />
-              <span style={{ fontSize: "15px", fontWeight: 700, color: "#ef4444" }}>Reset Remote Pairing Code?</span>
-            </div>
-            <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <p style={{ margin: 0, fontSize: "13px", color: "#cbd5e1", lineHeight: "1.5" }}>
-                Resetting your pairing code will <strong>immediately disconnect and log out all connected mobile devices</strong> and generate a fresh 8-character code.
-              </p>
-              <p style={{ margin: 0, fontSize: "12px", color: "#94a3b8" }}>
-                You will need to re-pair any device you wish to use with SageBot.
-              </p>
-            </div>
-            <div className="modal-actions" style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 18 }}>
-              <button
-                className="modal-btn secondary"
-                onClick={() => setShowResetConfirmModal(false)}
-              >
-                Cancel
-              </button>
-              <button
-                className="modal-btn danger"
-                onClick={handleResetRemoteCode}
-                style={{ background: "#dc2626", borderColor: "#ef4444", color: "#ffffff", fontWeight: 700 }}
-              >
-                Reset &amp; Disconnect All
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <AppModals
+        showKillModal={showKillModal}
+        setShowKillModal={setShowKillModal}
+        onConfirmKillValorant={() => {
+          suppressDetectionUntilRef.current = Date.now() + 10000;
+          if (runningRef.current) {
+            stopSagebot("VALORANT terminated.");
+          }
+          setShowKillModal(false);
+          invoke("kill_valorant").catch(() => { });
+        }}
+        showLaunchModal={showLaunchModal}
+        setShowLaunchModal={setShowLaunchModal}
+        isRiotSignedIn={isRiotSignedIn}
+        onLog={addLog}
+        onToast={showToast}
+        showChatWarningModal={showChatWarningModal}
+        setShowChatWarningModal={setShowChatWarningModal}
+        updateAndSaveConfig={updateAndSaveConfig}
+        playerToDelete={playerToDelete}
+        setPlayerToDelete={setPlayerToDelete}
+        deletePlayerEncounter={deletePlayerEncounter}
+        errorModal={errorModal}
+        setErrorModal={setErrorModal}
+        showUpdateModal={showUpdateModal}
+        setShowUpdateModal={setShowUpdateModal}
+        updateInfo={updateInfo}
+        updateProgress={updateProgress}
+        setUpdateProgress={setUpdateProgress}
+        updateError={updateError}
+        setUpdateError={setUpdateError}
+        showMacroImportModal={showMacroImportModal}
+        setShowMacroImportModal={setShowMacroImportModal}
+        macroImportText={macroImportText}
+        setMacroImportText={setMacroImportText}
+        macroCompilerError={macroCompilerError || ""}
+        setMacroCompilerError={setMacroCompilerError}
+        handleValidateAndApplyMacro={handleValidateAndApplyMacro}
+        showAuthModal={showAuthModal}
+        setShowAuthModal={setShowAuthModal}
+        authInput={authInput}
+        setAuthInput={setAuthInput}
+        handleDevAuthSubmit={handleDevAuthSubmit}
+        selectedPlayerMatches={selectedPlayerMatches}
+        setSelectedPlayerMatches={setSelectedPlayerMatches}
+        formatMatchTime={formatMatchTime}
+        pendingPairRequest={pendingPairRequest}
+        deviceNicknameInput={deviceNicknameInput}
+        setDeviceNicknameInput={setDeviceNicknameInput}
+        handleDenyDevice={handleDenyDevice}
+        handleApproveDevice={handleApproveDevice}
+        showResetConfirmModal={showResetConfirmModal}
+        setShowResetConfirmModal={setShowResetConfirmModal}
+        handleResetRemoteCode={handleResetRemoteCode}
+      />
     </div>
   );
 }

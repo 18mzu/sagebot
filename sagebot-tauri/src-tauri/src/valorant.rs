@@ -204,11 +204,32 @@ pub fn is_valorant_process_running() -> bool {
     !get_valorant_pids_fresh().is_empty()
 }
 
+pub const RIOT_CLIENT_PLATFORM: &str = "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=";
+
+pub fn shared_riot_http_client() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .danger_accept_invalid_certs(true)
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    })
+}
+
+pub fn shared_public_http_client() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .user_agent(concat!("SageBot/", env!("CARGO_PKG_VERSION")))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    })
+}
+
 #[derive(Clone)]
 pub struct ValorantClient {
     pub client: reqwest::Client,
     pub glz_client: reqwest::Client,
-    pub lockfile: LockfileData,
     base_url: String,
 }
 
@@ -231,17 +252,12 @@ impl ValorantClient {
             .build()
             .map_err(|e| format!("Failed to initialize HTTP client: {}", e))?;
 
-        let glz_client = reqwest::Client::builder()
-            .danger_accept_invalid_certs(true)
-            .build()
-            .map_err(|e| format!("Failed to initialize GLZ HTTP client: {}", e))?;
-
+        let glz_client = shared_riot_http_client().clone();
         let base_url = format!("https://127.0.0.1:{}", lockfile.port);
 
         Ok(ValorantClient {
             client,
             glz_client,
-            lockfile,
             base_url,
         })
     }
@@ -283,6 +299,32 @@ impl ValorantClient {
         Ok((access_token, token))
     }
 
+    async fn glz_get_json(
+        &self,
+        path: &str,
+        access_token: &str,
+        jwt: &str,
+        glz_host: &str,
+        client_version: &str,
+        label: &str,
+    ) -> Result<serde_json::Value, String> {
+        let url = format!("https://{}{}", glz_host, path);
+        let resp = self.glz_client.get(&url)
+            .header("Authorization", format!("Bearer {}", access_token))
+            .header("X-Riot-Entitlements-JWT", jwt)
+            .header("X-Riot-ClientPlatform", RIOT_CLIENT_PLATFORM)
+            .header("X-Riot-ClientVersion", client_version)
+            .send().await
+            .map_err(|e| e.to_string())?;
+
+        if !resp.status().is_success() {
+            return Err(format!("{} returned HTTP {}", label, resp.status()));
+        }
+
+        resp.json::<serde_json::Value>().await
+            .map_err(|e| e.to_string())
+    }
+
     pub async fn get_pregame_player_glz(
         &self,
         puuid: &str,
@@ -291,21 +333,52 @@ impl ValorantClient {
         glz_host: &str,
         client_version: &str,
     ) -> Result<serde_json::Value, String> {
-        let url = format!("https://{}/pregame/v1/players/{}", glz_host, puuid);
-        let resp = self.glz_client.get(&url)
-            .header("Authorization", format!("Bearer {}", access_token))
-            .header("X-Riot-Entitlements-JWT", jwt)
-            .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
-            .header("X-Riot-ClientVersion", client_version)
-            .send().await
-            .map_err(|e| e.to_string())?;
+        self.glz_get_json(
+            &format!("/pregame/v1/players/{}", puuid),
+            access_token, jwt, glz_host, client_version, "Pregame player request",
+        ).await
+    }
 
-        if !resp.status().is_success() {
-            return Err(format!("Pregame player request returned HTTP {}", resp.status()));
-        }
+    pub async fn get_pregame_match_glz(
+        &self,
+        match_id: &str,
+        access_token: &str,
+        jwt: &str,
+        glz_host: &str,
+        client_version: &str,
+    ) -> Result<serde_json::Value, String> {
+        self.glz_get_json(
+            &format!("/pregame/v1/matches/{}", match_id),
+            access_token, jwt, glz_host, client_version, "Pregame match request",
+        ).await
+    }
 
-        resp.json::<serde_json::Value>().await
-            .map_err(|e| e.to_string())
+    pub async fn get_coregame_player_glz(
+        &self,
+        puuid: &str,
+        access_token: &str,
+        jwt: &str,
+        glz_host: &str,
+        client_version: &str,
+    ) -> Result<serde_json::Value, String> {
+        self.glz_get_json(
+            &format!("/core-game/v1/players/{}", puuid),
+            access_token, jwt, glz_host, client_version, "Coregame player request",
+        ).await
+    }
+
+    pub async fn get_coregame_match_glz(
+        &self,
+        match_id: &str,
+        access_token: &str,
+        jwt: &str,
+        glz_host: &str,
+        client_version: &str,
+    ) -> Result<serde_json::Value, String> {
+        self.glz_get_json(
+            &format!("/core-game/v1/matches/{}", match_id),
+            access_token, jwt, glz_host, client_version, "Coregame match request",
+        ).await
     }
 
     pub async fn select_agent_glz(
@@ -321,7 +394,7 @@ impl ValorantClient {
         let resp = self.glz_client.post(&url)
             .header("Authorization", format!("Bearer {}", access_token))
             .header("X-Riot-Entitlements-JWT", jwt)
-            .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+            .header("X-Riot-ClientPlatform", RIOT_CLIENT_PLATFORM)
             .header("X-Riot-ClientVersion", client_version)
             .header("Content-Length", "0")
             .body("")
@@ -343,7 +416,7 @@ impl ValorantClient {
         let resp = self.glz_client.post(&url)
             .header("Authorization", format!("Bearer {}", access_token))
             .header("X-Riot-Entitlements-JWT", jwt)
-            .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+            .header("X-Riot-ClientPlatform", RIOT_CLIENT_PLATFORM)
             .header("X-Riot-ClientVersion", client_version)
             .header("Content-Length", "0")
             .body("")
@@ -357,85 +430,6 @@ impl ValorantClient {
             let body = resp.text().await.unwrap_or_default();
             Err(format!("HTTP {} ({})", status, body))
         }
-    }
-
-    pub async fn get_pregame_player(&self, puuid: &str) -> Result<serde_json::Value, String> {
-        let url = format!("{}/pregame/v1/players/{}", self.base_url, puuid);
-        let resp = self.client.get(&url).send().await
-            .map_err(|e| e.to_string())?;
-        resp.json::<serde_json::Value>().await
-            .map_err(|e| e.to_string())
-    }
-
-    pub async fn get_coregame_player(&self, puuid: &str) -> Result<serde_json::Value, String> {
-        let url = format!("{}/core-game/v1/players/{}", self.base_url, puuid);
-        let resp = self.client.get(&url).send().await
-            .map_err(|e| e.to_string())?;
-        resp.json::<serde_json::Value>().await
-            .map_err(|e| e.to_string())
-    }
-
-    pub async fn get_pregame_match(&self, match_id: &str) -> Result<serde_json::Value, String> {
-        let url = format!("{}/pregame/v1/matches/{}", self.base_url, match_id);
-        let resp = self.client.get(&url).send().await
-            .map_err(|e| e.to_string())?;
-        resp.json::<serde_json::Value>().await
-            .map_err(|e| e.to_string())
-    }
-
-    pub async fn get_coregame_match(&self, match_id: &str) -> Result<serde_json::Value, String> {
-        let url = format!("{}/core-game/v1/matches/{}", self.base_url, match_id);
-        let resp = self.client.get(&url).send().await
-            .map_err(|e| e.to_string())?;
-        resp.json::<serde_json::Value>().await
-            .map_err(|e| e.to_string())
-    }
-
-    pub async fn select_agent(&self, match_id: &str, agent_id: &str) -> Result<bool, String> {
-        let url = format!("{}/pregame/v1/matches/{}/select/{}", self.base_url, match_id, agent_id);
-        let resp = self.client.post(&url).send().await
-            .map_err(|e| e.to_string())?;
-        Ok(resp.status().is_success())
-    }
-
-    pub async fn lock_agent(&self, match_id: &str, agent_id: &str) -> Result<bool, String> {
-        let url = format!("{}/pregame/v1/matches/{}/lock/{}", self.base_url, match_id, agent_id);
-        let resp = self.client.post(&url).send().await
-            .map_err(|e| e.to_string())?;
-        Ok(resp.status().is_success())
-    }
-
-    pub async fn get_owned_agents(&self, puuid: &str) -> Result<Vec<String>, String> {
-        let agent_type_id = "01d6951d-f167-4da0-8b57-6ded65f95ec4";
-        let url = format!("{}/store/v1/entitlements/{}/{}", self.base_url, puuid, agent_type_id);
-        let resp = self.client.get(&url).send().await
-            .map_err(|e| e.to_string())?;
-        let json: serde_json::Value = resp.json().await
-            .map_err(|e| e.to_string())?;
-
-        let mut owned = Vec::new();
-        // Starter 5 agents are always owned
-        owned.push("41fb69c1-4139-7737-7b81-845e5d63b480".to_string()); // Phoenix
-        owned.push("add6443a-41bd-e414-f6ad-e58d267f4e95".to_string()); // Jett
-        owned.push("ded3520f-4264-bfed-162d-b080e2abccf9".to_string()); // Sova
-        owned.push("569fdd95-4d10-43ab-ca70-79becc718b46".to_string()); // Sage
-        owned.push("9f0d8ba9-42c0-8739-6932-a1630e6072e5".to_string()); // Brimstone
-
-        if let Some(items) = json.get("Entitlements").and_then(|e| e.as_array()) {
-            for item in items {
-                if let Some(item_id) = item.get("ItemID").and_then(|i| i.as_str()) {
-                    let id_str = item_id.to_lowercase();
-                    if !owned.contains(&id_str) {
-                        owned.push(id_str);
-                    }
-                }
-            }
-        }
-        Ok(owned)
-    }
-
-    pub async fn start_competitive_queue(&self) -> Result<bool, String> {
-        self.start_queue("competitive").await
     }
 
     pub async fn start_queue(&self, queue_id: &str) -> Result<bool, String> {
@@ -455,7 +449,7 @@ impl ValorantClient {
         let party_res = self.glz_client.get(&party_player_url)
             .header("Authorization", format!("Bearer {}", access_token))
             .header("X-Riot-Entitlements-JWT", &jwt)
-            .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+            .header("X-Riot-ClientPlatform", RIOT_CLIENT_PLATFORM)
             .header("X-Riot-ClientVersion", &client_version)
             .send().await.map_err(|e| format!("Party player request failed: {}", e))?;
 
@@ -487,7 +481,7 @@ impl ValorantClient {
         let _ = self.glz_client.post(&make_default_url)
             .header("Authorization", format!("Bearer {}", access_token))
             .header("X-Riot-Entitlements-JWT", &jwt)
-            .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+            .header("X-Riot-ClientPlatform", RIOT_CLIENT_PLATFORM)
             .header("X-Riot-ClientVersion", &client_version)
             .header("Content-Length", "0")
             .send().await;
@@ -501,7 +495,7 @@ impl ValorantClient {
         let queue_res = self.glz_client.post(&queue_url)
             .header("Authorization", format!("Bearer {}", access_token))
             .header("X-Riot-Entitlements-JWT", &jwt)
-            .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+            .header("X-Riot-ClientPlatform", RIOT_CLIENT_PLATFORM)
             .header("X-Riot-ClientVersion", &client_version)
             .json(&queue_body)
             .send().await;
@@ -521,7 +515,7 @@ impl ValorantClient {
         let join_res = self.glz_client.post(&join_url)
             .header("Authorization", format!("Bearer {}", access_token))
             .header("X-Riot-Entitlements-JWT", &jwt)
-            .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+            .header("X-Riot-ClientPlatform", RIOT_CLIENT_PLATFORM)
             .header("X-Riot-ClientVersion", &client_version)
             .send().await.map_err(|e| format!("Matchmaking join request failed: {}", e))?;
 
@@ -552,7 +546,7 @@ impl ValorantClient {
         let party_res = self.glz_client.get(&party_player_url)
             .header("Authorization", format!("Bearer {}", access_token))
             .header("X-Riot-Entitlements-JWT", &jwt)
-            .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+            .header("X-Riot-ClientPlatform", RIOT_CLIENT_PLATFORM)
             .header("X-Riot-ClientVersion", &client_version)
             .send().await.map_err(|e| format!("Party lookup failed: {}", e))?;
 
@@ -566,7 +560,7 @@ impl ValorantClient {
         let leave_res = self.glz_client.post(&leave_url)
             .header("Authorization", format!("Bearer {}", access_token))
             .header("X-Riot-Entitlements-JWT", &jwt)
-            .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+            .header("X-Riot-ClientPlatform", RIOT_CLIENT_PLATFORM)
             .header("X-Riot-ClientVersion", &client_version)
             .header("Content-Length", "0")
             .body("")
@@ -584,7 +578,7 @@ impl ValorantClient {
         let resp = self.glz_client.get(&party_player_url)
             .header("Authorization", format!("Bearer {}", access_token))
             .header("X-Riot-Entitlements-JWT", &jwt)
-            .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+            .header("X-Riot-ClientPlatform", RIOT_CLIENT_PLATFORM)
             .header("X-Riot-ClientVersion", &client_version)
             .send().await.map_err(|e| e.to_string())?;
 
@@ -601,7 +595,7 @@ impl ValorantClient {
         let presp = self.glz_client.get(&party_url)
             .header("Authorization", format!("Bearer {}", access_token))
             .header("X-Riot-Entitlements-JWT", &jwt)
-            .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+            .header("X-Riot-ClientPlatform", RIOT_CLIENT_PLATFORM)
             .header("X-Riot-ClientVersion", &client_version)
             .send().await.map_err(|e| e.to_string())?;
 
@@ -953,44 +947,7 @@ pub fn decode_presence_data(presences: &serde_json::Value, target_puuid: &str) -
 }
 
 pub fn resolve_agent_name_by_id(id: &str) -> String {
-    for a in crate::agents_data::get_all_agents() {
-        if a.id.eq_ignore_ascii_case(id) {
-            return a.name;
-        }
-    }
-    let lower = id.to_lowercase();
-    match lower.as_str() {
-        "ded3520f-4264-bfed-162d-b080e2abccf9" => "Sova",
-        "add6443a-41bd-e414-f6ad-e58d267f4e95" => "Jett",
-        "a3bfb854-4376-2d48-8377-93a26e38fb6f" => "Cypher",
-        "a3bfb853-43b2-7238-a4f1-ad90e9e46bcc" => "Reyna",
-        "569fdd95-4d10-43ab-ca70-79becc718b46" => "Sage",
-        "eb9333ab-4054-7ac4-14d0-76ac36ab0ce6" | "eb93336a-449b-9c1b-0a54-a891f7921d69" => "Phoenix",
-        "f94c3b30-42be-e959-889c-5aa313dba261" => "Raze",
-        "22697a3d-45bf-8dd7-4fec-84a9e28c69d7" => "Chamber",
-        "601dbbe7-43ce-be57-2a40-4abd24953621" => "KAY/O",
-        "6f2a04ca-43e0-be17-7f36-b3908627744d" => "Skye",
-        "117ed9e3-49f3-6512-3ccf-0cada7e3823b" => "Cypher",
-        "320b2a48-4d9b-a075-30f1-1f93a9b638fa" => "Sova",
-        "1e58de9c-4950-5125-93e9-a0aee9f98746" => "Killjoy",
-        "707eab51-4836-f488-046a-cda6bf494859" => "Viper",
-        "8e253930-4c05-31dd-16ee-adacb8744f8b" | "8e253930-4c05-31dd-1b6c-968525494517" => "Omen",
-        "b9f36430-4074-b290-eb81-0440ac023b4f" | "41fb69c1-4189-7b37-f117-bcaf1e96f1bf" | "95b78d77-474e-9714-2971-15c32582b04a" => "Astra",
-        "bb2a483e-4654-9406-1218-a616235b0d62" | "bb2a4828-46eb-8cd1-e765-15848195d751" => "Neon",
-        "7f94d92c-4234-0a36-9646-3a87eb8b5c89" => "Yoru",
-        "5f8d3a7f-467b-97f3-062c-13acf203c006" => "Breach",
-        "e370fa57-4757-3604-3648-499e1f642d3f" => "Gekko",
-        "cc8b64d8-4b25-4ff9-6e7f-37b4da43c235" => "Deadlock",
-        "0e38b510-41a8-5780-5e8f-568b2a4f2d6c" => "Iso",
-        "1dbf2edd-4729-0984-3115-ffb5dde52523" | "1dbf2edd-4729-0984-3115-daa5eed44993" => "Clove",
-        "df222b40-4f51-4043-9831-27909339e6a0" | "efba5359-4016-a1e5-7626-b1ae76895940" => "Vyse",
-        "b57f0980-4963-c36b-d8b4-028d7121287e" | "b444168c-4e35-8076-db47-ef9bf368f384" => "Tejo",
-        "ddd5a15c-4fbe-42fa-3789-11a55ca5ee04" => "Hush",
-        "df1cb487-4902-002e-5c17-d28e83e78588" => "Waylay",
-        "92eeef5d-43b5-1d4a-8d03-b3927a09034b" => "Veto",
-        "7c8a4701-4de6-9355-b254-e09bc2a34b72" => "Miks",
-        _ => "Agent",
-    }.to_string()
+    crate::agents_data::resolve_agent_name_by_id(id)
 }
 
 pub fn resolve_map_name(raw: &str) -> String {
@@ -1442,7 +1399,7 @@ pub fn simulate_anti_afk_action(mode: &str) {
     }
 }
 
-pub fn simulate_vote_key(vote_yes: bool) {
+pub fn simulate_vote_key(vote_yes: bool, key_name: Option<&str>) {
     if AUTO_FOCUS_ENABLED.load(std::sync::atomic::Ordering::Relaxed)
         && IS_INGAME_WITH_AGENT.load(std::sync::atomic::Ordering::Relaxed)
     {
@@ -1451,7 +1408,10 @@ pub fn simulate_vote_key(vote_yes: bool) {
     }
     #[cfg(target_os = "windows")]
     unsafe {
-        let vk = if vote_yes { 0x74 } else { 0x75 }; // VK_F5 (0x74), VK_F6 (0x75)
+        let vk = match key_name.map(str::trim).filter(|s| !s.is_empty()) {
+            Some(name) => crate::config::key_name_to_vk(name),
+            None => if vote_yes { 0x74 } else { 0x75 }, // VK_F5 (0x74), VK_F6 (0x75)
+        };
         let scan = MapVirtualKeyW(vk as u32, 0) as u8;
         keybd_event(vk, scan, 0, 0);
         std::thread::sleep(std::time::Duration::from_millis(40));

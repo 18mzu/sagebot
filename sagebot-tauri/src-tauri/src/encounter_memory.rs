@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::{OnceLock, RwLock};
 use crate::career::CareerMatch;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,66 +58,91 @@ pub struct PlayerEncounter {
     pub history: Vec<EncounterMatchHistory>,
 }
 
+static ENCOUNTER_CACHE: OnceLock<RwLock<Option<HashMap<String, PlayerEncounter>>>> = OnceLock::new();
+
+fn encounter_cache() -> &'static RwLock<Option<HashMap<String, PlayerEncounter>>> {
+    ENCOUNTER_CACHE.get_or_init(|| RwLock::new(None))
+}
+
 fn encounters_file_path() -> PathBuf {
     crate::config::AppConfig::data_dir().join("encounters.json")
 }
 
 pub fn load_encounters() -> HashMap<String, PlayerEncounter> {
-    let path = encounters_file_path();
-    if !path.exists() {
-        return HashMap::new();
-    }
-    if let Ok(content) = std::fs::read_to_string(&path) {
-        if let Ok(mut map) = serde_json::from_str::<HashMap<String, PlayerEncounter>>(&content) {
-            let mut modified = false;
-            for enc in map.values_mut() {
-                if enc.last_seen_agent_name.is_empty() || enc.last_seen_agent_name == "Agent" {
-                    let r = crate::valorant::resolve_agent_name_by_id(&enc.last_seen_agent_id);
-                    if !r.is_empty() && r != "Agent" && !r.eq_ignore_ascii_case(&enc.last_seen_agent_id) {
-                        enc.last_seen_agent_name = r;
-                        modified = true;
-                    }
-                }
-                for h in &mut enc.history {
-                    if h.agent_name.is_empty() || h.agent_name == "Agent" {
-                        let r = crate::valorant::resolve_agent_name_by_id(&h.agent_id);
-                        if !r.is_empty() && r != "Agent" && !r.eq_ignore_ascii_case(&h.agent_id) {
-                            h.agent_name = r;
-                            modified = true;
-                        }
-                    }
-                }
-            }
-            if modified {
-                let _ = save_encounters(&map);
-            }
-            return map;
+    if let Ok(r) = encounter_cache().read() {
+        if let Some(ref map) = *r {
+            return map.clone();
         }
     }
-    HashMap::new()
+
+    let path = encounters_file_path();
+    let mut map = if path.exists() {
+        std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|content| serde_json::from_str::<HashMap<String, PlayerEncounter>>(&content).ok())
+            .unwrap_or_default()
+    } else {
+        HashMap::new()
+    };
+
+    let mut modified = false;
+    for enc in map.values_mut() {
+        if enc.last_seen_agent_name.is_empty() || enc.last_seen_agent_name == "Agent" {
+            let r = crate::valorant::resolve_agent_name_by_id(&enc.last_seen_agent_id);
+            if !r.is_empty() && r != "Agent" && !r.eq_ignore_ascii_case(&enc.last_seen_agent_id) {
+                enc.last_seen_agent_name = r;
+                modified = true;
+            }
+        }
+        for h in &mut enc.history {
+            if h.agent_name.is_empty() || h.agent_name == "Agent" {
+                let r = crate::valorant::resolve_agent_name_by_id(&h.agent_id);
+                if !r.is_empty() && r != "Agent" && !r.eq_ignore_ascii_case(&h.agent_id) {
+                    h.agent_name = r;
+                    modified = true;
+                }
+            }
+        }
+    }
+
+    if modified {
+        let _ = write_encounters_file(&map);
+    }
+
+    if let Ok(mut w) = encounter_cache().write() {
+        *w = Some(map.clone());
+    }
+    map
 }
 
-pub fn save_encounters(map: &HashMap<String, PlayerEncounter>) -> Result<(), String> {
+fn write_encounters_file(map: &HashMap<String, PlayerEncounter>) -> Result<(), String> {
     let path = encounters_file_path();
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let json = serde_json::to_string_pretty(map)
+    let json = serde_json::to_string(map)
         .map_err(|e| format!("Failed to serialize encounters: {}", e))?;
     std::fs::write(&path, json)
         .map_err(|e| format!("Failed to write encounters.json: {}", e))?;
     Ok(())
 }
 
-pub fn record_match(_cm: &CareerMatch) {
-    // Rebuilding from career matches guarantees zero duplicate increments and perfect integrity
-    rebuild_from_career();
+pub fn save_encounters(map: &HashMap<String, PlayerEncounter>) -> Result<(), String> {
+    write_encounters_file(map)?;
+    if let Ok(mut w) = encounter_cache().write() {
+        *w = Some(map.clone());
+    }
+    Ok(())
 }
 
 pub fn rebuild_from_career() {
     let matches = crate::career::load_career_matches();
+    let _ = rebuild_from_career_matches(&matches);
+}
+
+pub fn rebuild_from_career_matches(matches: &[CareerMatch]) -> HashMap<String, PlayerEncounter> {
     let mut map: HashMap<String, PlayerEncounter> = HashMap::new();
-    let mut sorted = matches;
+    let mut sorted: Vec<&CareerMatch> = matches.iter().collect();
     sorted.sort_by_key(|m| m.timestamp);
 
     for cm in &sorted {
@@ -244,19 +270,29 @@ pub fn rebuild_from_career() {
     }
 
     let _ = save_encounters(&map);
+    map
 }
 
 pub fn get_encounter(puuid: &str) -> Option<PlayerEncounter> {
     if puuid.is_empty() {
         return None;
     }
-    let map = load_encounters();
-    map.get(&puuid.to_lowercase()).cloned()
+    let key = puuid.to_lowercase();
+    if let Ok(r) = encounter_cache().read() {
+        if let Some(ref map) = *r {
+            return map.get(&key).cloned();
+        }
+    }
+    load_encounters().get(&key).cloned()
 }
 
 pub fn get_all_visible_encounters() -> Vec<PlayerEncounter> {
     let map = load_encounters();
-    let mut list: Vec<_> = map.into_values().filter(|e| !e.is_hidden).collect();
+    visible_sorted_from_map(&map)
+}
+
+fn visible_sorted_from_map(map: &HashMap<String, PlayerEncounter>) -> Vec<PlayerEncounter> {
+    let mut list: Vec<_> = map.values().filter(|e| !e.is_hidden).cloned().collect();
     list.sort_by(|a, b| b.last_seen_timestamp.cmp(&a.last_seen_timestamp));
     list
 }
@@ -265,5 +301,6 @@ pub fn delete_encounter(puuid: &str) -> Result<Vec<PlayerEncounter>, String> {
     let mut map = load_encounters();
     map.remove(&puuid.to_lowercase());
     save_encounters(&map)?;
-    Ok(get_all_visible_encounters())
+    crate::career::invalidate_career_cache();
+    Ok(visible_sorted_from_map(&map))
 }

@@ -5,8 +5,12 @@ use std::path::PathBuf;
 #[serde(default)]
 pub struct AppConfig {
     pub hotkey: String,
-    pub auto_vote_mode: u32,          // 0 = Disabled, 1 = Vote YES (F5), 2 = Vote NO (F6)
-    pub auto_overtime_vote_mode: u32, // 0 = Disabled, 1 = Vote DRAW (F5), 2 = Vote CONTINUE (F6)
+    pub auto_vote_mode: u32,          // 0 = Disabled, 1 = Vote YES, 2 = Vote NO
+    pub auto_overtime_vote_mode: u32, // 0 = Disabled, 1 = Vote DRAW, 2 = Vote CONTINUE
+    #[serde(default = "default_vote_yes_key")]
+    pub vote_yes_key: String,         // Default "F5"
+    #[serde(default = "default_vote_no_key")]
+    pub vote_no_key: String,          // Default "F6"
     pub auto_ff_enabled: bool,
     pub auto_ff_round_5: bool,
     pub auto_ff_round_13: bool,
@@ -17,7 +21,7 @@ pub struct AppConfig {
     pub anti_afk_slow_mode: bool,     // 3.7s - 4.2s vs 900ms - 1300ms
     pub chat_enabled: bool,
     pub chat_target: u32,             // 0 = Team Chat, 1 = All Chat (/all)
-    pub chat_interval: u64,           // Default 180 seconds
+    pub chat_interval: u64,           // Default 3 seconds
     pub chat_text: String,            // Default "With great Power comes great Responsibility"
     pub webhook_enabled: bool,        // Default true
     pub webhook_url: String,
@@ -31,8 +35,18 @@ pub struct AppConfig {
     pub webhook_notify_rank_change: bool,
     pub agents_enabled: bool,         // Master toggle for Agents Selection
     pub instalock_enabled: bool,
-    pub lock_delay: u64,              // In seconds (5 to 70)
+    pub lock_delay: u64,              // In seconds (5 to 75)
     pub lock_random_agent: bool,
+    #[serde(default = "default_agent_lock_mode")]
+    pub agent_lock_mode: String,      // "linear" | "random" | "fill"
+    #[serde(default)]
+    pub fill_roles: Vec<String>,      // Priority order of roles to fill: Controller, Initiator, Sentinel, Duelist
+    #[serde(default = "default_fill_fallback_mode")]
+    pub fill_fallback_mode: String,   // "priority" | "random"
+    #[serde(default = "default_fill_timing_mode")]
+    pub fill_timing_mode: String,     // "last" | "delayed"
+    #[serde(default = "default_fill_delay")]
+    pub fill_delay: u64,              // In seconds (max 75) for delayed fill
     pub selected_agents: Vec<String>,
     pub music_volume: u32,            // 0 - 100
     pub auto_focus_game: bool,
@@ -55,12 +69,38 @@ fn default_true() -> bool {
     true
 }
 
+fn default_vote_yes_key() -> String {
+    "F5".to_string()
+}
+
+fn default_vote_no_key() -> String {
+    "F6".to_string()
+}
+
+fn default_agent_lock_mode() -> String {
+    "linear".to_string()
+}
+
+fn default_fill_fallback_mode() -> String {
+    "priority".to_string()
+}
+
+fn default_fill_timing_mode() -> String {
+    "last".to_string()
+}
+
+fn default_fill_delay() -> u64 {
+    20
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
             hotkey: "F9".to_string(),
             auto_vote_mode: 0,
             auto_overtime_vote_mode: 0,
+            vote_yes_key: default_vote_yes_key(),
+            vote_no_key: default_vote_no_key(),
             auto_ff_enabled: false,
             auto_ff_round_5: false,
             auto_ff_round_13: false,
@@ -71,7 +111,7 @@ impl Default for AppConfig {
             anti_afk_slow_mode: false,
             chat_enabled: false,
             chat_target: 0,
-            chat_interval: 180,
+            chat_interval: 3,
             chat_text: "With great Power comes great Responsibility".to_string(),
             webhook_enabled: true,
             webhook_url: String::new(),
@@ -82,10 +122,15 @@ impl Default for AppConfig {
             webhook_notify_match_start: true,
             webhook_notify_match_concludes: true,
             webhook_notify_rank_change: true,
-            agents_enabled: true,
+            agents_enabled: false,
             instalock_enabled: false,
             lock_delay: 20,
             lock_random_agent: false,
+            agent_lock_mode: default_agent_lock_mode(),
+            fill_roles: Vec::new(),
+            fill_fallback_mode: default_fill_fallback_mode(),
+            fill_timing_mode: default_fill_timing_mode(),
+            fill_delay: default_fill_delay(),
             selected_agents: Vec::new(),
             music_volume: 80,
             auto_focus_game: false,
@@ -100,7 +145,7 @@ impl Default for AppConfig {
             comms_first_num: 3,
             comms_second_num: 6,
             comms_random: false,
-            comms_delay: 5,
+            comms_delay: 3,
             custom_macro_json: String::new(),
         }
     }
@@ -246,192 +291,174 @@ impl AppConfig {
         if let Ok(content) = std::fs::read_to_string(&path) {
             if let Ok(json_cfg) = serde_json::from_str::<AppConfig>(&content) {
                 cfg = json_cfg;
+                if !content.contains("\"agent_lock_mode\"") && cfg.lock_random_agent {
+                    cfg.agent_lock_mode = "random".to_string();
+                }
             }
-        }
-
-        // 2. Secondary: If config.ini exists, overlay C legacy values. If neither exists, create default.
-        let ini_p = Self::ini_path();
-        if !ini_p.exists() {
-            let _ = cfg.save();
         } else {
-            if let Ok(content) = std::fs::read_to_string(&ini_p) {
-                let mut current_section = String::new();
-                for line in content.lines() {
-                    let trimmed = line.trim();
-                    if trimmed.starts_with('[') && trimmed.ends_with(']') {
-                        current_section = trimmed[1..trimmed.len() - 1].to_lowercase();
-                        continue;
-                    }
-                    if let Some((k, v)) = trimmed.split_once('=') {
-                        let key = k.trim().to_lowercase();
-                        let val = v.trim();
-                        match (current_section.as_str(), key.as_str()) {
-                            ("settings", "playpause") => {
-                                if let Ok(vk) = val.parse::<u8>() {
-                                    cfg.hotkey = vk_to_key_name(vk);
+            // 2. Legacy one-time migration from config.ini if config.json does not exist yet
+            let ini_p = Self::ini_path();
+            if ini_p.exists() {
+                if let Ok(content) = std::fs::read_to_string(&ini_p) {
+                    let mut current_section = String::new();
+                    for line in content.lines() {
+                        let trimmed = line.trim();
+                        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+                            current_section = trimmed[1..trimmed.len() - 1].to_lowercase();
+                            continue;
+                        }
+                        if let Some((k, v)) = trimmed.split_once('=') {
+                            let key = k.trim().to_lowercase();
+                            let val = v.trim();
+                            match (current_section.as_str(), key.as_str()) {
+                                ("settings", "playpause") => {
+                                    if let Ok(vk) = val.parse::<u8>() {
+                                        cfg.hotkey = vk_to_key_name(vk);
+                                    }
                                 }
-                            }
-                            ("settings", "autovote") => {
-                                if let Ok(m) = val.parse::<u32>() {
-                                    cfg.auto_vote_mode = m;
+                                ("settings", "autovote") => {
+                                    if let Ok(m) = val.parse::<u32>() {
+                                        cfg.auto_vote_mode = m;
+                                    }
                                 }
-                            }
-                            ("settings", "lowdetail") => {
-                                cfg.low_detail = val == "1" || val.eq_ignore_ascii_case("true");
-                            }
-                            ("antiafk", "method") => {
-                                if let Ok(m) = val.parse::<u32>() {
-                                    cfg.anti_afk_mode = m;
+                                ("settings", "voteyeskey") => {
+                                    if !val.is_empty() {
+                                        cfg.vote_yes_key = val.to_string();
+                                    }
                                 }
-                            }
-                            ("antiafk", "key") => {
-                                if let Ok(vk) = val.parse::<u8>() {
-                                    cfg.anti_afk_key = vk_to_key_name(vk);
-                                } else {
-                                    cfg.anti_afk_key = val.to_string();
+                                ("settings", "votenokey") => {
+                                    if !val.is_empty() {
+                                        cfg.vote_no_key = val.to_string();
+                                    }
                                 }
-                            }
-                            ("antiafk", "slowmode") => {
-                                cfg.anti_afk_slow_mode = val == "1";
-                            }
-                            ("antiafk", "commshotkey") => {
-                                if !val.is_empty() {
-                                    cfg.comms_hotkey = val.to_string();
+                                ("settings", "lowdetail") => {
+                                    cfg.low_detail = val == "1" || val.eq_ignore_ascii_case("true");
                                 }
-                            }
-                            ("antiafk", "commsfirstnum") => {
-                                if let Ok(n) = val.parse::<u32>() {
-                                    cfg.comms_first_num = n;
+                                ("antiafk", "method") => {
+                                    if let Ok(m) = val.parse::<u32>() {
+                                        cfg.anti_afk_mode = m;
+                                    }
                                 }
-                            }
-                            ("antiafk", "commssecondnum") => {
-                                if let Ok(n) = val.parse::<u32>() {
-                                    cfg.comms_second_num = n;
+                                ("antiafk", "key") => {
+                                    if let Ok(vk) = val.parse::<u8>() {
+                                        cfg.anti_afk_key = vk_to_key_name(vk);
+                                    } else {
+                                        cfg.anti_afk_key = val.to_string();
+                                    }
                                 }
-                            }
-                            ("antiafk", "commsrandom") => {
-                                cfg.comms_random = val == "1";
-                            }
-                            ("antiafk", "commsdelay") => {
-                                if let Ok(d) = val.parse::<u64>() {
-                                    cfg.comms_delay = d;
+                                ("antiafk", "slowmode") => {
+                                    cfg.anti_afk_slow_mode = val == "1";
                                 }
-                            }
-                            ("chat", "enabled") => {
-                                cfg.chat_enabled = val == "1";
-                            }
-                            ("chat", "target") => {
-                                if let Ok(t) = val.parse::<u32>() {
-                                    cfg.chat_target = t;
+                                ("antiafk", "commshotkey") => {
+                                    if !val.is_empty() {
+                                        cfg.comms_hotkey = val.to_string();
+                                    }
                                 }
-                            }
-                            ("chat", "interval") => {
-                                if let Ok(sec) = val.parse::<u64>() {
-                                    cfg.chat_interval = sec;
+                                ("antiafk", "commsfirstnum") => {
+                                    if let Ok(n) = val.parse::<u32>() {
+                                        cfg.comms_first_num = n;
+                                    }
                                 }
-                            }
-                            ("chat", "text") => {
-                                if !val.is_empty() {
-                                    cfg.chat_text = val.to_string();
+                                ("antiafk", "commssecondnum") => {
+                                    if let Ok(n) = val.parse::<u32>() {
+                                        cfg.comms_second_num = n;
+                                    }
                                 }
-                            }
-                            ("agents", "enabled") => {
-                                cfg.agents_enabled = val == "1";
-                            }
-                            ("agents", "instalock") => {
-                                cfg.instalock_enabled = val == "1";
-                            }
-                            ("agents", "lockdelay") => {
-                                if let Ok(d) = val.parse::<u64>() {
-                                    cfg.lock_delay = d;
+                                ("antiafk", "commsrandom") => {
+                                    cfg.comms_random = val == "1";
                                 }
+                                ("antiafk", "commsdelay") => {
+                                    if let Ok(d) = val.parse::<u64>() {
+                                        cfg.comms_delay = d;
+                                    }
+                                }
+                                ("chat", "enabled") => {
+                                    cfg.chat_enabled = val == "1";
+                                }
+                                ("chat", "target") => {
+                                    if let Ok(t) = val.parse::<u32>() {
+                                        cfg.chat_target = t;
+                                    }
+                                }
+                                ("chat", "interval") => {
+                                    if let Ok(sec) = val.parse::<u64>() {
+                                        cfg.chat_interval = sec;
+                                    }
+                                }
+                                ("chat", "text") => {
+                                    if !val.is_empty() {
+                                        cfg.chat_text = val.to_string();
+                                    }
+                                }
+                                ("agents", "enabled") => {
+                                    cfg.agents_enabled = val == "1";
+                                }
+                                ("agents", "instalock") => {
+                                    cfg.instalock_enabled = val == "1";
+                                }
+                                ("agents", "lockdelay") => {
+                                    if let Ok(d) = val.parse::<u64>() {
+                                        cfg.lock_delay = d;
+                                    }
+                                }
+                                ("agents", "selectedagents") => {
+                                    cfg.selected_agents = val
+                                        .split(',')
+                                        .map(|s| s.trim().to_string())
+                                        .filter(|s| !s.is_empty())
+                                        .collect();
+                                }
+                                _ => {}
                             }
-                            ("agents", "selectedagents") => {
-                                cfg.selected_agents = val.split(',')
-                                    .map(|s| s.trim().to_string())
-                                    .filter(|s| !s.is_empty())
-                                    .collect();
-                            }
-                            _ => {}
                         }
                     }
                 }
             }
+            cfg.validate_agent_lock();
+            let _ = cfg.save();
+            return cfg;
         }
 
+        cfg.validate_agent_lock();
         cfg
     }
 
+    pub fn validate_agent_lock(&mut self) {
+        self.fill_delay = self.fill_delay.clamp(1, 75);
+        self.lock_delay = self.lock_delay.clamp(5, 75);
+        if self.selected_agents.is_empty() {
+            self.agents_enabled = false;
+            return;
+        }
+        if self.agent_lock_mode == "fill" {
+            if self.fill_roles.is_empty() {
+                self.agents_enabled = false;
+                return;
+            }
+            let all_agents = crate::agents_data::get_all_agents();
+            let all_roles_satisfied = self.fill_roles.iter().all(|role| {
+                self.selected_agents.iter().any(|id| {
+                    all_agents
+                        .iter()
+                        .find(|a| a.id == id.as_str())
+                        .map(|a| a.role.eq_ignore_ascii_case(role))
+                        .unwrap_or(false)
+                })
+            });
+            if !all_roles_satisfied {
+                self.agents_enabled = false;
+            }
+        }
+    }
+
     pub fn save(&self) -> Result<(), String> {
-        // 1. Write config.json
         let path = Self::config_path();
         let json = serde_json::to_string_pretty(self)
             .map_err(|e| format!("Serialization error: {}", e))?;
-        let _ = std::fs::write(&path, json);
-
-        // 2. Write config.ini in exact C structure (with comms settings)
-        let ini_p = Self::ini_path();
-        let hotkey_vk = key_name_to_vk(&self.hotkey);
-        let afk_vk = key_name_to_vk(&self.anti_afk_key);
-        let agents_str = self.selected_agents.join(",");
-
-        let ini_content = format!(
-            "[Settings]\r\n\
-            PlayPause={}\r\n\
-            AutoVote={}\r\n\
-            LowDetail={}\r\n\
-            \r\n\
-            [Chat]\r\n\
-            Enabled={}\r\n\
-            Target={}\r\n\
-            Interval={}\r\n\
-            Text={}\r\n\
-            \r\n\
-            [AntiAFK]\r\n\
-            Method={}\r\n\
-            Key={}\r\n\
-            SlowMode={}\r\n\
-            CommsHotkey={}\r\n\
-            CommsFirstNum={}\r\n\
-            CommsSecondNum={}\r\n\
-            CommsRandom={}\r\n\
-            CommsDelay={}\r\n\
-            \r\n\
-            [Agents]\r\n\
-            Enabled={}\r\n\
-            Instalock={}\r\n\
-            LockDelay={}\r\n\
-            SelectedAgents={}\r\n",
-            hotkey_vk,
-            self.auto_vote_mode,
-            if self.low_detail { 1 } else { 0 },
-            if self.chat_enabled { 1 } else { 0 },
-            self.chat_target,
-            self.chat_interval,
-            self.chat_text,
-            self.anti_afk_mode,
-            afk_vk,
-            if self.anti_afk_slow_mode { 1 } else { 0 },
-            self.comms_hotkey,
-            self.comms_first_num,
-            self.comms_second_num,
-            if self.comms_random { 1 } else { 0 },
-            self.comms_delay,
-            if self.agents_enabled { 1 } else { 0 },
-            if self.instalock_enabled { 1 } else { 0 },
-            self.lock_delay,
-            agents_str
-        );
-
-        let _ = std::fs::write(&ini_p, ini_content);
-        Ok(())
+        std::fs::write(&path, json).map_err(|e| format!("Failed to write config: {}", e))
     }
 }
 
 pub fn data_dir() -> PathBuf {
     AppConfig::data_dir()
-}
-
-pub fn career_json_path() -> PathBuf {
-    AppConfig::career_json_path()
 }

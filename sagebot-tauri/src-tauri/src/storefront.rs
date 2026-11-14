@@ -222,7 +222,7 @@ pub async fn fetch_storefront_internal() -> Result<StorefrontData, String> {
     }
 
     let lockfile = LockfileData::read_from_disk().map_err(|e| e.to_string())?;
-    let client = reqwest::Client::builder().danger_accept_invalid_certs(true).build().map_err(|e| e.to_string())?;
+    let client = crate::valorant::shared_riot_http_client();
     let auth = base64::engine::general_purpose::STANDARD.encode(format!("riot:{}", lockfile.password));
     let token_resp = client.get(format!("https://127.0.0.1:{}/entitlements/v1/token", lockfile.port))
         .header("Authorization", format!("Basic {}", auth))
@@ -242,7 +242,7 @@ pub async fn fetch_storefront_internal() -> Result<StorefrontData, String> {
     let store_req = client.post(&store_url)
         .header("Authorization", format!("Bearer {}", access_token))
         .header("X-Riot-Entitlements-JWT", jwt)
-        .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+        .header("X-Riot-ClientPlatform", crate::valorant::RIOT_CLIENT_PLATFORM)
         .header("X-Riot-ClientVersion", client_version)
         .header("Content-Type", "application/json")
         .body("{}")

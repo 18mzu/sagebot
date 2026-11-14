@@ -59,7 +59,7 @@ pub async fn get_cached_or_fetch_wallet(puuid: &str) -> Option<WalletBalances> {
     }
 
     let lockfile = crate::valorant::LockfileData::read_from_disk().ok()?;
-    let client = reqwest::Client::builder().danger_accept_invalid_certs(true).build().ok()?;
+    let client = crate::valorant::shared_riot_http_client();
     use base64::Engine;
     let auth = base64::engine::general_purpose::STANDARD.encode(format!("riot:{}", lockfile.password));
     let token_resp = client.get(format!("https://127.0.0.1:{}/entitlements/v1/token", lockfile.port))
@@ -79,7 +79,7 @@ pub async fn get_cached_or_fetch_wallet(puuid: &str) -> Option<WalletBalances> {
     let req = client.get(&url)
         .header("Authorization", format!("Bearer {}", access_token))
         .header("X-Riot-Entitlements-JWT", jwt)
-        .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+        .header("X-Riot-ClientPlatform", crate::valorant::RIOT_CLIENT_PLATFORM)
         .header("X-Riot-ClientVersion", client_version)
         .send().await.ok()?;
 
@@ -118,7 +118,7 @@ pub async fn get_cached_or_fetch_player_rr(puuid: &str) -> Option<i64> {
     }
 
     let lockfile = crate::valorant::LockfileData::read_from_disk().ok()?;
-    let client = reqwest::Client::builder().danger_accept_invalid_certs(true).build().ok()?;
+    let client = crate::valorant::shared_riot_http_client();
     use base64::Engine;
     let auth = base64::engine::general_purpose::STANDARD.encode(format!("riot:{}", lockfile.password));
     let token_resp = client.get(format!("https://127.0.0.1:{}/entitlements/v1/token", lockfile.port))
@@ -138,7 +138,7 @@ pub async fn get_cached_or_fetch_player_rr(puuid: &str) -> Option<i64> {
     let req = client.get(&mmr_url)
         .header("Authorization", format!("Bearer {}", access_token))
         .header("X-Riot-Entitlements-JWT", jwt)
-        .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+        .header("X-Riot-ClientPlatform", crate::valorant::RIOT_CLIENT_PLATFORM)
         .header("X-Riot-ClientVersion", client_version)
         .header("User-Agent", "ShooterGame/22 Windows/10.0.19042.1.256.64bit")
         .send().await.ok()?;
@@ -592,7 +592,7 @@ pub async fn fetch_match_kda(
         let resp = client.get(&match_url)
             .header("Authorization", format!("Bearer {}", access_token))
             .header("X-Riot-Entitlements-JWT", jwt)
-            .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+            .header("X-Riot-ClientPlatform", crate::valorant::RIOT_CLIENT_PLATFORM)
             .header("X-Riot-ClientVersion", client_version)
             .send().await.ok()?;
 
@@ -722,7 +722,7 @@ async fn fetch_player_full_stats(
         if let Ok(hist_resp) = client.get(&hist_url)
             .header("Authorization", format!("Bearer {}", access_token))
             .header("X-Riot-Entitlements-JWT", jwt)
-            .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+            .header("X-Riot-ClientPlatform", crate::valorant::RIOT_CLIENT_PLATFORM)
             .header("X-Riot-ClientVersion", client_version)
             .send().await {
             if let Ok(hist_json) = hist_resp.json::<serde_json::Value>().await {
@@ -739,7 +739,7 @@ async fn fetch_player_full_stats(
                             if let Ok(match_resp) = client.get(&match_url)
                                 .header("Authorization", format!("Bearer {}", access_token))
                                 .header("X-Riot-Entitlements-JWT", jwt)
-                                .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+                                .header("X-Riot-ClientPlatform", crate::valorant::RIOT_CLIENT_PLATFORM)
                                 .header("X-Riot-ClientVersion", client_version)
                                 .send().await {
                                 if let Ok(m_json) = match_resp.json::<serde_json::Value>().await {
@@ -771,7 +771,7 @@ async fn fetch_player_full_stats(
     let mut mmr_req = client.get(&mmr_url)
         .header("Authorization", format!("Bearer {}", access_token))
         .header("X-Riot-Entitlements-JWT", jwt)
-        .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+        .header("X-Riot-ClientPlatform", crate::valorant::RIOT_CLIENT_PLATFORM)
         .header("X-Riot-ClientVersion", client_version)
         .send().await;
 
@@ -781,7 +781,7 @@ async fn fetch_player_full_stats(
             mmr_req = client.get(&mmr_url)
                 .header("Authorization", format!("Bearer {}", access_token))
                 .header("X-Riot-Entitlements-JWT", jwt)
-                .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+                .header("X-Riot-ClientPlatform", crate::valorant::RIOT_CLIENT_PLATFORM)
                 .header("X-Riot-ClientVersion", client_version)
                 .send().await;
         }
@@ -908,7 +908,7 @@ async fn fetch_player_full_stats(
     let mut comp_req = client.get(&comp_url)
         .header("Authorization", format!("Bearer {}", access_token))
         .header("X-Riot-Entitlements-JWT", jwt)
-        .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+        .header("X-Riot-ClientPlatform", crate::valorant::RIOT_CLIENT_PLATFORM)
         .header("X-Riot-ClientVersion", client_version)
         .send().await;
 
@@ -918,7 +918,7 @@ async fn fetch_player_full_stats(
             comp_req = client.get(&comp_url)
                 .header("Authorization", format!("Bearer {}", access_token))
                 .header("X-Riot-Entitlements-JWT", jwt)
-                .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+                .header("X-Riot-ClientPlatform", crate::valorant::RIOT_CLIENT_PLATFORM)
                 .header("X-Riot-ClientVersion", client_version)
                 .send().await;
         }
@@ -1085,7 +1085,7 @@ pub(crate) async fn fetch_unmasked_names(
     let req = client.put(&url)
         .header("Authorization", format!("Bearer {}", access_token))
         .header("X-Riot-Entitlements-JWT", jwt)
-        .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+        .header("X-Riot-ClientPlatform", crate::valorant::RIOT_CLIENT_PLATFORM)
         .header("X-Riot-ClientVersion", client_version)
         .header("Content-Type", "application/json")
         .body(body)
@@ -1358,7 +1358,7 @@ async fn fetch_glz_party_members(
     let Ok(resp) = client.get(&party_player_url)
         .header("Authorization", format!("Bearer {}", access_token))
         .header("X-Riot-Entitlements-JWT", jwt)
-        .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+        .header("X-Riot-ClientPlatform", crate::valorant::RIOT_CLIENT_PLATFORM)
         .header("X-Riot-ClientVersion", client_version)
         .send().await else {
         return Vec::new();
@@ -1380,7 +1380,7 @@ async fn fetch_glz_party_members(
     let Ok(party_resp) = client.get(&party_url)
         .header("Authorization", format!("Bearer {}", access_token))
         .header("X-Riot-Entitlements-JWT", jwt)
-        .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+        .header("X-Riot-ClientPlatform", crate::valorant::RIOT_CLIENT_PLATFORM)
         .header("X-Riot-ClientVersion", client_version)
         .send().await else {
         return Vec::new();
@@ -1432,7 +1432,7 @@ pub async fn get_live_match_roster_internal(
     let core_check = client.get(&coregame_url)
         .header("Authorization", format!("Bearer {}", access_token))
         .header("X-Riot-Entitlements-JWT", jwt)
-        .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+        .header("X-Riot-ClientPlatform", crate::valorant::RIOT_CLIENT_PLATFORM)
         .header("X-Riot-ClientVersion", client_version)
         .send().await;
 
@@ -1462,7 +1462,7 @@ pub async fn get_live_match_roster_internal(
     let pregame_check = client.get(&pregame_url)
         .header("Authorization", format!("Bearer {}", access_token))
         .header("X-Riot-Entitlements-JWT", jwt)
-        .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+        .header("X-Riot-ClientPlatform", crate::valorant::RIOT_CLIENT_PLATFORM)
         .header("X-Riot-ClientVersion", client_version)
         .send().await;
 
@@ -1691,7 +1691,7 @@ pub async fn get_cached_or_fetch_lobby_server(
     if let Ok(resp) = client.get(&party_player_url)
         .header("Authorization", format!("Bearer {}", access_token))
         .header("X-Riot-Entitlements-JWT", jwt)
-        .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+        .header("X-Riot-ClientPlatform", crate::valorant::RIOT_CLIENT_PLATFORM)
         .header("X-Riot-ClientVersion", client_version)
         .send().await {
         if let Ok(json) = resp.json::<serde_json::Value>().await {
@@ -1700,7 +1700,7 @@ pub async fn get_cached_or_fetch_lobby_server(
                 if let Ok(presp) = client.get(&party_url)
                     .header("Authorization", format!("Bearer {}", access_token))
                     .header("X-Riot-Entitlements-JWT", jwt)
-                    .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+                    .header("X-Riot-ClientPlatform", crate::valorant::RIOT_CLIENT_PLATFORM)
                     .header("X-Riot-ClientVersion", client_version)
                     .send().await {
                     if let Ok(pjson) = presp.json::<serde_json::Value>().await {
@@ -1748,7 +1748,7 @@ async fn parse_coregame_roster(
     let match_resp = client.get(&match_url)
         .header("Authorization", format!("Bearer {}", access_token))
         .header("X-Riot-Entitlements-JWT", jwt)
-        .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+        .header("X-Riot-ClientPlatform", crate::valorant::RIOT_CLIENT_PLATFORM)
         .header("X-Riot-ClientVersion", client_version)
         .send().await
         .map_err(|e| format!("Failed to fetch coregame match: {}", e))?;
@@ -1777,7 +1777,7 @@ async fn parse_coregame_roster(
     if let Ok(lresp) = client.get(&loadouts_url)
         .header("Authorization", format!("Bearer {}", access_token))
         .header("X-Riot-Entitlements-JWT", jwt)
-        .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+        .header("X-Riot-ClientPlatform", crate::valorant::RIOT_CLIENT_PLATFORM)
         .header("X-Riot-ClientVersion", client_version)
         .send().await {
         if let Ok(ljson) = lresp.json::<serde_json::Value>().await {
@@ -2095,7 +2095,7 @@ async fn parse_pregame_roster(
     let match_resp = client.get(&match_url)
         .header("Authorization", format!("Bearer {}", access_token))
         .header("X-Riot-Entitlements-JWT", jwt)
-        .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+        .header("X-Riot-ClientPlatform", crate::valorant::RIOT_CLIENT_PLATFORM)
         .header("X-Riot-ClientVersion", client_version)
         .send().await
         .map_err(|e| format!("Failed to fetch pregame match: {}", e))?;
@@ -2126,7 +2126,7 @@ async fn parse_pregame_roster(
     if let Ok(lresp) = client.get(&loadouts_url)
         .header("Authorization", format!("Bearer {}", access_token))
         .header("X-Riot-Entitlements-JWT", jwt)
-        .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+        .header("X-Riot-ClientPlatform", crate::valorant::RIOT_CLIENT_PLATFORM)
         .header("X-Riot-ClientVersion", client_version)
         .send().await {
         if let Ok(ljson) = lresp.json::<serde_json::Value>().await {
@@ -2424,7 +2424,7 @@ pub async fn fetch_latest_completed_match_internal(
     let hist_resp = client.get(&hist_url)
         .header("Authorization", format!("Bearer {}", access_token))
         .header("X-Riot-Entitlements-JWT", jwt)
-        .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+        .header("X-Riot-ClientPlatform", crate::valorant::RIOT_CLIENT_PLATFORM)
         .header("X-Riot-ClientVersion", client_version)
         .send().await
         .map_err(|e| format!("Failed to fetch match history: {}", e))?;
@@ -2445,7 +2445,7 @@ pub async fn fetch_latest_completed_match_internal(
     let match_resp = client.get(&match_url)
         .header("Authorization", format!("Bearer {}", access_token))
         .header("X-Riot-Entitlements-JWT", jwt)
-        .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+        .header("X-Riot-ClientPlatform", crate::valorant::RIOT_CLIENT_PLATFORM)
         .header("X-Riot-ClientVersion", client_version)
         .send().await
         .map_err(|e| format!("Failed to fetch match details: {}", e))?;
@@ -2529,7 +2529,7 @@ pub async fn fetch_latest_completed_match_internal(
         if let Ok(c_resp) = client.get(&comp_url)
             .header("Authorization", format!("Bearer {}", access_token))
             .header("X-Riot-Entitlements-JWT", jwt)
-            .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+            .header("X-Riot-ClientPlatform", crate::valorant::RIOT_CLIENT_PLATFORM)
             .header("X-Riot-ClientVersion", client_version)
             .send().await
         {

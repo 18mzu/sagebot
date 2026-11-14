@@ -27,7 +27,7 @@ pub struct CareerPlayer {
     pub plants: u32,
     pub defuses: u32,
     pub trades: u32,
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub encounter: Option<crate::encounter_memory::PlayerEncounter>,
 }
 
@@ -127,13 +127,45 @@ pub struct CareerMatch {
     pub round_results: Vec<CareerRoundResult>,
 }
 
+static CAREER_CACHE: std::sync::OnceLock<std::sync::RwLock<Option<Vec<CareerMatch>>>> =
+    std::sync::OnceLock::new();
+
+fn career_cache() -> &'static std::sync::RwLock<Option<Vec<CareerMatch>>> {
+    CAREER_CACHE.get_or_init(|| std::sync::RwLock::new(None))
+}
+
+pub fn invalidate_career_cache() {
+    if let Ok(mut w) = career_cache().write() {
+        *w = None;
+    }
+}
+
+fn attach_encounters(matches: &mut [CareerMatch], enc_map: &HashMap<String, crate::encounter_memory::PlayerEncounter>) {
+    for m in matches {
+        for p in &mut m.players {
+            if !p.puuid.is_empty() && !p.is_self {
+                p.encounter = enc_map.get(&p.puuid.to_lowercase()).cloned();
+            }
+        }
+    }
+}
+
 fn career_file_path() -> PathBuf {
     crate::config::AppConfig::career_json_path()
 }
 
 pub fn load_career_matches() -> Vec<CareerMatch> {
+    if let Ok(r) = career_cache().read() {
+        if let Some(ref matches) = *r {
+            return matches.clone();
+        }
+    }
+
     let path = career_file_path();
     if !path.exists() {
+        if let Ok(mut w) = career_cache().write() {
+            *w = Some(Vec::new());
+        }
         return Vec::new();
     }
     if let Ok(content) = std::fs::read_to_string(&path) {
@@ -277,9 +309,12 @@ pub fn load_career_matches() -> Vec<CareerMatch> {
                 }
             }
             if modified_fb {
-                if let Ok(json) = serde_json::to_string_pretty(&matches) {
+                if let Ok(json) = serde_json::to_string(&matches) {
                     let _ = std::fs::write(&path, json);
                 }
+            }
+            if let Ok(mut w) = career_cache().write() {
+                *w = Some(matches.clone());
             }
             return matches;
         }
@@ -287,10 +322,13 @@ pub fn load_career_matches() -> Vec<CareerMatch> {
     Vec::new()
 }
 
-pub fn delete_match_by_id(match_id: &str) -> Result<Vec<CareerMatch>, String> {
-    let mut matches = load_career_matches();
-    matches.retain(|m| m.match_id != match_id);
-    let json = serde_json::to_string_pretty(&matches)
+fn persist_career_matches(matches: &mut Vec<CareerMatch>) -> Result<(), String> {
+    matches.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    if matches.len() > 1000 {
+        matches.truncate(1000);
+    }
+
+    let json = serde_json::to_string(matches)
         .map_err(|e| format!("Failed to serialize career matches: {}", e))?;
     let path = career_file_path();
     if let Some(parent) = path.parent() {
@@ -299,32 +337,27 @@ pub fn delete_match_by_id(match_id: &str) -> Result<Vec<CareerMatch>, String> {
     std::fs::write(&path, json)
         .map_err(|e| format!("Failed to write career.json: {}", e))?;
 
-    // Rebuild encounter memory from remaining matches
-    crate::encounter_memory::rebuild_from_career();
-    Ok(load_career_matches())
+    let enc_map = crate::encounter_memory::rebuild_from_career_matches(matches);
+    attach_encounters(matches, &enc_map);
+
+    if let Ok(mut w) = career_cache().write() {
+        *w = Some(matches.clone());
+    }
+    Ok(())
+}
+
+pub fn delete_match_by_id(match_id: &str) -> Result<Vec<CareerMatch>, String> {
+    let mut matches = load_career_matches();
+    matches.retain(|m| m.match_id != match_id);
+    persist_career_matches(&mut matches)?;
+    Ok(matches)
 }
 
 pub fn save_career_match(m: CareerMatch) -> Result<(), String> {
     let mut matches = load_career_matches();
     matches.retain(|existing| existing.match_id != m.match_id);
     matches.insert(0, m);
-    matches.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-    if matches.len() > 1000 {
-        matches.truncate(1000);
-    }
-
-    let json = serde_json::to_string_pretty(&matches)
-        .map_err(|e| format!("Failed to serialize career matches: {}", e))?;
-    let path = career_file_path();
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    std::fs::write(&path, json)
-        .map_err(|e| format!("Failed to write career.json: {}", e))?;
-
-    // Rebuild encounter memory from career matches
-    crate::encounter_memory::rebuild_from_career();
-    Ok(())
+    persist_career_matches(&mut matches)
 }
 
 pub fn save_career_matches(batch: &[CareerMatch]) -> Result<(), String> {
@@ -333,30 +366,7 @@ pub fn save_career_matches(batch: &[CareerMatch]) -> Result<(), String> {
         matches.retain(|existing| existing.match_id != m.match_id);
         matches.push(m.clone());
     }
-    matches.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-    if matches.len() > 1000 {
-        matches.truncate(1000);
-    }
-    let json = serde_json::to_string_pretty(&matches)
-        .map_err(|e| format!("Failed to serialize career matches: {}", e))?;
-    let path = career_file_path();
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    std::fs::write(&path, json)
-        .map_err(|e| format!("Failed to write career.json: {}", e))?;
-
-    crate::encounter_memory::rebuild_from_career();
-    Ok(())
-}
-
-/// Parses a Riot match-details JSON into a CareerMatch
-pub fn parse_match_details(
-    m_json: &serde_json::Value,
-    my_puuid: &str,
-    live_roster: Option<&crate::tracker::LiveMatchRoster>,
-) -> Option<CareerMatch> {
-    parse_match_details_with_names(m_json, my_puuid, live_roster, &HashMap::new())
+    persist_career_matches(&mut matches)
 }
 
 pub fn parse_match_details_with_names(
@@ -1178,7 +1188,7 @@ pub async fn sync_career_matches_internal(
     let hist_resp = client.get(&hist_url)
         .header("Authorization", format!("Bearer {}", access_token))
         .header("X-Riot-Entitlements-JWT", jwt)
-        .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+        .header("X-Riot-ClientPlatform", crate::valorant::RIOT_CLIENT_PLATFORM)
         .header("X-Riot-ClientVersion", client_version)
         .send().await
         .map_err(|e| format!("Failed to fetch match history: {}", e))?;
@@ -1196,7 +1206,7 @@ pub async fn sync_career_matches_internal(
     if let Ok(c_resp) = client.get(&comp_url)
         .header("Authorization", format!("Bearer {}", access_token))
         .header("X-Riot-Entitlements-JWT", jwt)
-        .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+        .header("X-Riot-ClientPlatform", crate::valorant::RIOT_CLIENT_PLATFORM)
         .header("X-Riot-ClientVersion", client_version)
         .send().await
     {
@@ -1294,7 +1304,7 @@ pub async fn sync_career_matches_internal(
         let match_resp = match client.get(&match_url)
             .header("Authorization", format!("Bearer {}", access_token))
             .header("X-Riot-Entitlements-JWT", jwt)
-            .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
+            .header("X-Riot-ClientPlatform", crate::valorant::RIOT_CLIENT_PLATFORM)
             .header("X-Riot-ClientVersion", client_version)
             .send().await {
                 Ok(r) => r,

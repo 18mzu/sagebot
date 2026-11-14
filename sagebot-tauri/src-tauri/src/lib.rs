@@ -82,7 +82,8 @@ fn get_config(state: State<'_, AppState>) -> Result<AppConfig, String> {
 }
 
 #[tauri::command]
-fn save_config(new_config: AppConfig, state: State<'_, AppState>) -> Result<bool, String> {
+fn save_config(mut new_config: AppConfig, state: State<'_, AppState>) -> Result<bool, String> {
+    new_config.validate_agent_lock();
     new_config.save()?;
     let mut cfg = state.config.lock().map_err(|e| e.to_string())?;
     *cfg = new_config;
@@ -90,7 +91,7 @@ fn save_config(new_config: AppConfig, state: State<'_, AppState>) -> Result<bool
 }
 
 #[tauri::command]
-fn get_agents() -> Vec<AgentInfo> {
+fn get_agents() -> &'static [AgentInfo] {
     get_all_agents()
 }
 
@@ -146,14 +147,22 @@ async fn get_client_status() -> Result<StatusResponse, String> {
                         }
                     }
 
+                    let riot_tokens = if puuid_val.is_some() {
+                        client.get_riot_tokens().await.ok()
+                    } else {
+                        None
+                    };
+                    let glz_host = valorant::discover_glz_host();
+                    let client_version = valorant::discover_client_version();
+
                     // 3. Check pregame player state if PUUID available
-                    if let Some(ref p) = puuid_val {
-                        if let Ok(pregame) = client.get_pregame_player(p).await {
+                    if let (Some(ref p), Some((ref access_token, ref jwt))) = (&puuid_val, &riot_tokens) {
+                        if let Ok(pregame) = client.get_pregame_player_glz(p, access_token, jwt, &glz_host, &client_version).await {
                             if let Some(mid) = pregame.get("MatchID").and_then(|v| v.as_str()) {
                                 if !mid.is_empty() {
                                     current_match_id = Some(mid.to_string());
                                     match_state = "Agent Select".to_string();
-                                    if let Ok(pmatch) = client.get_pregame_match(mid).await {
+                                    if let Ok(pmatch) = client.get_pregame_match_glz(mid, access_token, jwt, &glz_host, &client_version).await {
                                         if let Some(raw_map) = pmatch.get("MapID").and_then(|v| v.as_str()) {
                                             let resolved = valorant::resolve_map_name(raw_map);
                                             if resolved != "-" {
@@ -245,12 +254,12 @@ async fn get_client_status() -> Result<StatusResponse, String> {
 
                     // 5. If match_id not yet resolved, check core-game player
                     if current_match_id.is_none() {
-                        if let Some(ref p) = puuid_val {
-                            if let Ok(coregame) = client.get_coregame_player(p).await {
+                        if let (Some(ref p), Some((ref access_token, ref jwt))) = (&puuid_val, &riot_tokens) {
+                            if let Ok(coregame) = client.get_coregame_player_glz(p, access_token, jwt, &glz_host, &client_version).await {
                                 if let Some(mid) = coregame.get("MatchID").and_then(|v| v.as_str()) {
                                     if !mid.is_empty() {
                                         current_match_id = Some(mid.to_string());
-                                        if let Ok(cmatch) = client.get_coregame_match(mid).await {
+                                        if let Ok(cmatch) = client.get_coregame_match_glz(mid, access_token, jwt, &glz_host, &client_version).await {
                                             if let Some(pod) = cmatch.get("GamePodID").and_then(|v| v.as_str()) {
                                                 let s = tracker::parse_gamepod_to_server_name(pod);
                                                 if !s.is_empty() {
@@ -274,21 +283,16 @@ async fn get_client_status() -> Result<StatusResponse, String> {
                     };
 
                     if server_name.is_empty() {
-                        if let Some(ref p) = puuid_val {
-                            if let Ok((access_token, jwt)) = client.get_riot_tokens().await {
-                                let glz_host = valorant::discover_glz_host();
-                                let client_version = valorant::discover_client_version();
-                                if let Ok(req_client) = reqwest::Client::builder().danger_accept_invalid_certs(true).build() {
-                                    server_name = tracker::get_cached_or_fetch_lobby_server(
-                                        &req_client,
-                                        &access_token,
-                                        &jwt,
-                                        p,
-                                        &glz_host,
-                                        &client_version,
-                                    ).await;
-                                }
-                            }
+                        if let (Some(ref p), Some((ref access_token, ref jwt))) = (&puuid_val, &riot_tokens) {
+                            let req_client = valorant::shared_riot_http_client();
+                            server_name = tracker::get_cached_or_fetch_lobby_server(
+                                req_client,
+                                access_token,
+                                jwt,
+                                p,
+                                &glz_host,
+                                &client_version,
+                            ).await;
                         }
                     }
 
@@ -348,22 +352,6 @@ async fn get_client_status() -> Result<StatusResponse, String> {
 }
 
 #[tauri::command]
-async fn fetch_owned_agents() -> Result<Vec<String>, String> {
-    let lockfile = LockfileData::read_from_disk()?;
-    let client = ValorantClient::new(lockfile)?;
-    let session = client.get_session().await?;
-    let puuid = session.get("puuid").and_then(|v| v.as_str())
-        .ok_or_else(|| "Failed to get local PUUID from session".to_string())?;
-
-    client.get_owned_agents(puuid).await
-}
-
-#[tauri::command]
-async fn test_discord_webhook(url: String, user_id: String, bot_token: Option<String>) -> Result<String, String> {
-    webhook::send_discord_test(&url, bot_token.as_deref().unwrap_or(""), &user_id).await
-}
-
-#[tauri::command]
 async fn send_webhook_event(
     message: Option<String>,
     title: Option<String>,
@@ -392,8 +380,8 @@ async fn send_webhook_event(
 }
 
 #[tauri::command]
-async fn lock_agent_now(agent_id: Option<String>, agentId: Option<String>) -> Result<String, String> {
-    let target_agent_id = agent_id.or(agentId).ok_or_else(|| "Missing agent parameter".to_string())?;
+async fn lock_agent_now(agent_id: String) -> Result<String, String> {
+    let target_agent_id = agent_id;
     let lockfile = LockfileData::read_from_disk()?;
     let client = ValorantClient::new(lockfile)?;
     let session = client.get_session().await?;
@@ -461,18 +449,7 @@ async fn get_pregame_state() -> Result<Option<PregameState>, String> {
         _ => return Ok(None),
     };
 
-    let match_url = format!("https://{}/pregame/v1/matches/{}", glz_host, match_id);
-    let match_resp = match client.glz_client.get(&match_url)
-        .header("Authorization", format!("Bearer {}", access_token))
-        .header("X-Riot-Entitlements-JWT", &jwt)
-        .header("X-Riot-ClientPlatform", "ewogICJwbGF0Zm9ybVR5cGUiOiAiUEMiLAogICJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLAogICJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwKICAicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iCn0=")
-        .header("X-Riot-ClientVersion", &client_version)
-        .send().await {
-        Ok(r) => r,
-        Err(_) => return Ok(None),
-    };
-
-    let pmatch: serde_json::Value = match match_resp.json().await {
+    let pmatch = match client.get_pregame_match_glz(&match_id, &access_token, &jwt, &glz_host, &client_version).await {
         Ok(j) => j,
         Err(_) => return Ok(None),
     };
@@ -484,9 +461,9 @@ async fn get_pregame_state() -> Result<Option<PregameState>, String> {
 
     let all_agents = agents_data::get_all_agents();
     let find_role = |char_id: &str| -> String {
-        for a in &all_agents {
+        for a in all_agents {
             if a.id.eq_ignore_ascii_case(char_id) {
-                return a.role.clone();
+                return a.role.to_string();
             }
         }
         "".to_string()
@@ -622,11 +599,16 @@ fn trigger_anti_afk_action(mode: String) {
 }
 
 #[tauri::command]
-fn trigger_vote(vote_yes: bool) {
+fn trigger_vote(vote_yes: bool, vote_key: Option<String>, state: State<'_, AppState>) {
     if !IS_BOT_RUNNING.load(Ordering::Relaxed) { return; }
     if !valorant::IS_INGAME_WITH_AGENT.load(Ordering::Relaxed) { return; }
     if !valorant::is_valorant_focused() { return; }
-    simulate_vote_key(vote_yes);
+    let resolved_key = vote_key.filter(|k| !k.trim().is_empty()).or_else(|| {
+        state.config.lock().ok().map(|c| {
+            if vote_yes { c.vote_yes_key.clone() } else { c.vote_no_key.clone() }
+        })
+    });
+    simulate_vote_key(vote_yes, resolved_key.as_deref());
 }
 
 #[tauri::command]
@@ -675,12 +657,6 @@ fn trigger_comms_sequence(hotkey: String, first_num: u32, second_num: u32) {
     std::thread::spawn(move || {
         valorant::send_comms_sequence(hotkey_vk, first_vk, second_vk);
     });
-}
-
-#[tauri::command]
-fn check_hotkey_pressed(key: String) -> bool {
-    let vk = config::key_name_to_vk(&key);
-    valorant::is_key_pressed(vk)
 }
 
 fn start_global_hotkey_listener(config_state: Arc<Mutex<AppConfig>>) {
@@ -786,13 +762,11 @@ async fn check_for_updates() -> Result<UpdateInfo, String> {
     // makes every install think the latest release is newer and re-update forever).
     const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-    let client = reqwest::Client::builder()
-        .user_agent(format!("SageBot/{}", CURRENT_VERSION))
-        .build()
-        .map_err(|e| e.to_string())?;
+    let client = valorant::shared_public_http_client();
 
     let resp = client
         .get("https://api.github.com/repos/18mzu/sagebot/releases/latest")
+        .header("User-Agent", format!("SageBot/{}", CURRENT_VERSION))
         .send()
         .await
         .map_err(|e| e.to_string())?;
@@ -869,12 +843,14 @@ async fn apply_update(app: tauri::AppHandle, download_url: String) -> Result<(),
     // Record the attempt so a failed/stale update can't trigger an endless auto-update loop.
     let _ = std::fs::write(update_marker_path(), format!("{}|{}", now_secs(), download_url));
 
-    let client = reqwest::Client::builder()
-        .user_agent("SageBot-Updater")
-        .build()
-        .map_err(|e| e.to_string())?;
+    let client = valorant::shared_public_http_client();
 
-    let mut resp = client.get(&download_url).send().await.map_err(|e| e.to_string())?;
+    let mut resp = client
+        .get(&download_url)
+        .header("User-Agent", "SageBot-Updater")
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
 
     if !resp.status().is_success() {
         return Err(format!("Download failed with HTTP status: {}", resp.status()));
@@ -999,102 +975,6 @@ fn kill_valorant() -> Result<bool, String> {
     valorant::terminate_valorant_processes()
 }
 
-#[cfg(target_os = "windows")]
-unsafe fn send_unicode_char(c: u16) {
-    use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
-    let mut inputs = [
-        INPUT {
-            r#type: INPUT_KEYBOARD,
-            Anonymous: INPUT_0 {
-                ki: KEYBDINPUT {
-                    wVk: 0,
-                    wScan: c,
-                    dwFlags: KEYEVENTF_UNICODE,
-                    time: 0,
-                    dwExtraInfo: 0,
-                },
-            },
-        },
-        INPUT {
-            r#type: INPUT_KEYBOARD,
-            Anonymous: INPUT_0 {
-                ki: KEYBDINPUT {
-                    wVk: 0,
-                    wScan: c,
-                    dwFlags: KEYEVENTF_UNICODE | KEYEVENTF_KEYUP,
-                    time: 0,
-                    dwExtraInfo: 0,
-                },
-            },
-        },
-    ];
-    SendInput(inputs.len() as u32, inputs.as_mut_ptr(), std::mem::size_of::<INPUT>() as i32);
-}
-
-#[cfg(target_os = "windows")]
-unsafe fn send_key(vk: u16) {
-    use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
-    let mut inputs = [
-        INPUT {
-            r#type: INPUT_KEYBOARD,
-            Anonymous: INPUT_0 {
-                ki: KEYBDINPUT {
-                    wVk: vk,
-                    wScan: 0,
-                    dwFlags: 0,
-                    time: 0,
-                    dwExtraInfo: 0,
-                },
-            },
-        },
-        INPUT {
-            r#type: INPUT_KEYBOARD,
-            Anonymous: INPUT_0 {
-                ki: KEYBDINPUT {
-                    wVk: vk,
-                    wScan: 0,
-                    dwFlags: KEYEVENTF_KEYUP,
-                    time: 0,
-                    dwExtraInfo: 0,
-                },
-            },
-        },
-    ];
-    SendInput(inputs.len() as u32, inputs.as_mut_ptr(), std::mem::size_of::<INPUT>() as i32);
-}
-
-#[cfg(target_os = "windows")]
-unsafe fn send_ctrl_a() {
-    use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
-    let mut inputs = [
-        INPUT {
-            r#type: INPUT_KEYBOARD,
-            Anonymous: INPUT_0 {
-                ki: KEYBDINPUT { wVk: VK_CONTROL, wScan: 0, dwFlags: 0, time: 0, dwExtraInfo: 0 },
-            },
-        },
-        INPUT {
-            r#type: INPUT_KEYBOARD,
-            Anonymous: INPUT_0 {
-                ki: KEYBDINPUT { wVk: 'A' as u16, wScan: 0, dwFlags: 0, time: 0, dwExtraInfo: 0 },
-            },
-        },
-        INPUT {
-            r#type: INPUT_KEYBOARD,
-            Anonymous: INPUT_0 {
-                ki: KEYBDINPUT { wVk: 'A' as u16, wScan: 0, dwFlags: KEYEVENTF_KEYUP, time: 0, dwExtraInfo: 0 },
-            },
-        },
-        INPUT {
-            r#type: INPUT_KEYBOARD,
-            Anonymous: INPUT_0 {
-                ki: KEYBDINPUT { wVk: VK_CONTROL, wScan: 0, dwFlags: KEYEVENTF_KEYUP, time: 0, dwExtraInfo: 0 },
-            },
-        },
-    ];
-    SendInput(inputs.len() as u32, inputs.as_mut_ptr(), std::mem::size_of::<INPUT>() as i32);
-}
-
 #[tauri::command]
 async fn launch_valorant() -> Result<bool, String> {
     // Used by Auto Reconnect. Works with any install location (see paths.rs).
@@ -1121,197 +1001,8 @@ fn is_riot_signed_in() -> bool {
 }
 
 #[tauri::command]
-async fn login_riot_account(username: String, password: Option<String>) -> Result<bool, String> {
-    // 0. Safeguard: if VALORANT is running, do not attempt account switch
-    if valorant::is_valorant_process_running() {
-        return Err("VALORANT is currently running. Please exit VALORANT before switching accounts.".to_string());
-    }
-
-    // 1. Terminate existing Riot Client processes to ensure fresh login state
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        let _ = std::process::Command::new("taskkill")
-            .args(["/F", "/IM", "Riot Client.exe"])
-            .creation_flags(CREATE_NO_WINDOW)
-            .status();
-        let _ = std::process::Command::new("taskkill")
-            .args(["/F", "/IM", "RiotClientUx.exe"])
-            .creation_flags(CREATE_NO_WINDOW)
-            .status();
-        let _ = std::process::Command::new("taskkill")
-            .args(["/F", "/IM", "RiotClientServices.exe"])
-            .creation_flags(CREATE_NO_WINDOW)
-            .status();
-    }
-    tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
-
-    // 2. Discover Riot Client executable path (running process, installs json, registry, drive scan)
-    let rc_exe = paths::find_riot_client_services()
-        .map(|p| p.to_string_lossy().to_string())
-        .ok_or_else(|| "Could not locate RiotClientServices.exe on system".to_string())?;
-
-    // 3. Launch Riot Client into VALORANT
-    #[cfg(target_os = "windows")]
-    {
-        let rc_dir = std::path::Path::new(&rc_exe)
-            .parent()
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| std::path::PathBuf::from("."));
-        let mut cmd = std::process::Command::new(&rc_exe);
-        cmd.args(["--launch-product=valorant", "--launch-patchline=live"])
-            .current_dir(&rc_dir);
-        cmd.spawn().map_err(|e| format!("Failed to spawn Riot Client: {}", e))?;
-    }
-
-    // 4. Poll for Riot Client window & perform native keystrokes in blocking worker
-    #[cfg(target_os = "windows")]
-    {
-        tokio::task::spawn_blocking(move || -> Result<(), String> {
-            use windows_sys::Win32::UI::WindowsAndMessaging::*;
-            use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
-
-            unsafe extern "system" fn enum_riot_window(
-                hwnd: windows_sys::Win32::Foundation::HWND,
-                lparam: windows_sys::Win32::Foundation::LPARAM,
-            ) -> windows_sys::Win32::Foundation::BOOL {
-                if IsWindowVisible(hwnd) == 0 {
-                    return 1;
-                }
-                let mut buf = [0u16; 512];
-                let len = GetWindowTextW(hwnd, buf.as_mut_ptr(), 512);
-                if len > 0 {
-                    let title = String::from_utf16_lossy(&buf[..len as usize]);
-                    if title == "Riot Client" || title.contains("Riot Client") {
-                        let mut rect = windows_sys::Win32::Foundation::RECT { left: 0, top: 0, right: 0, bottom: 0 };
-                        GetWindowRect(hwnd, &mut rect);
-                        let width = rect.right - rect.left;
-                        let height = rect.bottom - rect.top;
-                        if width > 350 && height > 350 {
-                            let out = lparam as *mut windows_sys::Win32::Foundation::HWND;
-                            *out = hwnd;
-                            return 0; // stop enumeration
-                        }
-                    }
-                }
-                1
-            }
-
-            let mut target_hwnd: windows_sys::Win32::Foundation::HWND = std::ptr::null_mut();
-            for _ in 0..60 {
-                std::thread::sleep(std::time::Duration::from_millis(500));
-                unsafe {
-                    EnumWindows(Some(enum_riot_window), &mut target_hwnd as *mut _ as isize);
-                }
-                if !target_hwnd.is_null() {
-                    break;
-                }
-            }
-
-            if target_hwnd.is_null() {
-                return Err("Timed out waiting for Riot Client window to open".to_string());
-            }
-
-            // Riot Client starts with a blank CEF window while web assets and auth initialize.
-            // Give CEF 6.0 seconds to finish loading and rendering the login form.
-            std::thread::sleep(std::time::Duration::from_millis(6000));
-
-            unsafe {
-                ShowWindow(target_hwnd, SW_RESTORE);
-                BringWindowToTop(target_hwnd);
-                SetForegroundWindow(target_hwnd);
-            }
-
-            std::thread::sleep(std::time::Duration::from_millis(600));
-
-            unsafe {
-                // Focus username field in Riot Client (left column)
-                let mut rect = windows_sys::Win32::Foundation::RECT { left: 0, top: 0, right: 0, bottom: 0 };
-                GetWindowRect(target_hwnd, &mut rect);
-                let width = rect.right - rect.left;
-                let height = rect.bottom - rect.top;
-                let click_x = rect.left + (width as f32 * 0.16) as i32;
-                let click_y = rect.top + (height as f32 * 0.38) as i32;
-
-                SetCursorPos(click_x, click_y);
-                std::thread::sleep(std::time::Duration::from_millis(150));
-                mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
-                std::thread::sleep(std::time::Duration::from_millis(50));
-                mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
-                std::thread::sleep(std::time::Duration::from_millis(150));
-
-                // Click again to ensure focus on the text field
-                mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
-                std::thread::sleep(std::time::Duration::from_millis(50));
-                mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
-                std::thread::sleep(std::time::Duration::from_millis(300));
-
-                // Clear username field
-                send_ctrl_a();
-                std::thread::sleep(std::time::Duration::from_millis(80));
-                send_key(VK_BACK);
-                std::thread::sleep(std::time::Duration::from_millis(100));
-
-                // Type username with natural cadence
-                for ch in username.encode_utf16() {
-                    send_unicode_char(ch);
-                    std::thread::sleep(std::time::Duration::from_millis(30));
-                }
-
-                // Tab to password
-                std::thread::sleep(std::time::Duration::from_millis(250));
-                send_key(VK_TAB);
-                std::thread::sleep(std::time::Duration::from_millis(250));
-
-                if let Some(pass) = password {
-                    if !pass.is_empty() {
-                        send_ctrl_a();
-                        std::thread::sleep(std::time::Duration::from_millis(80));
-                        send_key(VK_BACK);
-                        std::thread::sleep(std::time::Duration::from_millis(100));
-
-                        // Type password with natural cadence
-                        for ch in pass.encode_utf16() {
-                            send_unicode_char(ch);
-                            std::thread::sleep(std::time::Duration::from_millis(30));
-                        }
-
-                        std::thread::sleep(std::time::Duration::from_millis(400));
-                        send_key(VK_RETURN);
-                    }
-                }
-            }
-
-            Ok(())
-        })
-        .await
-        .map_err(|e| format!("Task panicked: {}", e))??;
-    }
-
-    Ok(true)
-}
-
-#[tauri::command]
-async fn resize_to_gate(window: tauri::Window) {
-    let _ = window.set_min_size(Some(tauri::Size::Logical(tauri::LogicalSize { width: 380.0, height: 440.0 })));
-    let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize { width: 440.0, height: 510.0 }));
-    let _ = window.center();
-}
-
-#[tauri::command]
-async fn resize_to_dashboard(window: tauri::Window) {
-    let _ = window.set_min_size(Some(tauri::Size::Logical(tauri::LogicalSize { width: 920.0, height: 620.0 })));
-    let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize { width: 1020.0, height: 700.0 }));
-    let _ = window.center();
-}
-
-#[tauri::command]
-async fn start_matchmaking_queue(
-    queue_mode: Option<String>,
-    #[allow(non_snake_case)] queueMode: Option<String>,
-) -> Result<bool, String> {
-    let mode = queue_mode.or(queueMode).unwrap_or_else(|| "competitive".to_string());
+async fn start_matchmaking_queue(queue_mode: Option<String>) -> Result<bool, String> {
+    let mode = queue_mode.unwrap_or_else(|| "competitive".to_string());
     println!("[Matchmaking] start_matchmaking_queue called with mode: {}", mode);
     if let Ok(lockfile) = LockfileData::read_from_disk() {
         if let Ok(client) = ValorantClient::new(lockfile) {
@@ -1329,11 +1020,6 @@ async fn cancel_matchmaking_queue() -> Result<bool, String> {
         }
     }
     Err("VALORANT client not available".to_string())
-}
-
-#[tauri::command]
-async fn start_competitive_queue() -> Result<bool, String> {
-    start_matchmaking_queue(Some("competitive".to_string()), None).await
 }
 
 #[tauri::command]
@@ -1361,13 +1047,10 @@ async fn get_live_match_roster() -> Result<tracker::LiveMatchRoster, String> {
 
     let presences = client.get_presences().await.ok();
 
-    let http_client = reqwest::Client::builder()
-        .danger_accept_invalid_certs(true)
-        .build()
-        .map_err(|e| e.to_string())?;
+    let http_client = valorant::shared_riot_http_client();
 
     tracker::get_live_match_roster_internal(
-        &http_client,
+        http_client,
         &access_token,
         &jwt,
         puuid,
@@ -1390,13 +1073,10 @@ async fn get_latest_completed_match_score() -> Result<tracker::LatestMatchResult
     let glz_host = valorant::discover_glz_host();
     let client_version = valorant::discover_client_version();
 
-    let http_client = reqwest::Client::builder()
-        .danger_accept_invalid_certs(true)
-        .build()
-        .map_err(|e| e.to_string())?;
+    let http_client = valorant::shared_riot_http_client();
 
     tracker::fetch_latest_completed_match_internal(
-        &http_client,
+        http_client,
         &access_token,
         &jwt,
         puuid,
@@ -1413,13 +1093,10 @@ async fn fetch_player_match_kdas(matches: Vec<tracker::RecentMatchDetail>, puuid
     let glz_host = valorant::discover_glz_host();
     let client_version = valorant::discover_client_version();
 
-    let http_client = reqwest::Client::builder()
-        .danger_accept_invalid_certs(true)
-        .build()
-        .map_err(|e| e.to_string())?;
+    let http_client = valorant::shared_riot_http_client();
 
     tracker::fetch_matches_kda_internal(
-        &http_client,
+        http_client,
         &access_token,
         &jwt,
         &puuid,
@@ -1447,13 +1124,10 @@ async fn sync_career_matches() -> Result<Vec<career::CareerMatch>, String> {
     let glz_host = valorant::discover_glz_host();
     let client_version = valorant::discover_client_version();
 
-    let http_client = reqwest::Client::builder()
-        .danger_accept_invalid_certs(true)
-        .build()
-        .map_err(|e| e.to_string())?;
+    let http_client = valorant::shared_riot_http_client();
 
     career::sync_career_matches_internal(
-        &http_client,
+        http_client,
         &access_token,
         &jwt,
         puuid,
@@ -1570,8 +1244,6 @@ pub fn run() {
             save_config,
             get_agents,
             get_client_status,
-            fetch_owned_agents,
-            test_discord_webhook,
             set_bot_running,
             set_ingame_focus_state,
             lock_agent_now,
@@ -1582,7 +1254,6 @@ pub fn run() {
             trigger_key_down,
             trigger_key_up,
             trigger_chat_send,
-            check_hotkey_pressed,
             get_changelog,
             check_for_updates,
             apply_update,
@@ -1593,14 +1264,10 @@ pub fn run() {
             launch_valorant,
             launch_riot_client,
             is_riot_signed_in,
-            login_riot_account,
-            resize_to_gate,
-            resize_to_dashboard,
             set_always_on_top,
             focus_valorant_window,
             check_valorant_focused,
             trigger_comms_sequence,
-            start_competitive_queue,
             start_matchmaking_queue,
             cancel_matchmaking_queue,
             send_webhook_event,
