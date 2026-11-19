@@ -1,3 +1,12 @@
+[v4.3]
+- Redesigned Remote Control: single paired device mode, 3-minute pairing window, DPAPI-encrypted secret storage on PC, non-extractable WebCrypto keys in IndexedDB on phone, automatic challenge-response reconnect across Wi-Fi/5G switches
+- Fixed Remote Agent Select teammate name overflow with clean truncation
+- Improved Remote Game Screen capture: non-intrusive downscaled JPEG capture, minimized/black-screen diagnostics, paced chunking, and 12s timeout recovery
+- Fixed Tracker Competitive 4-stack party bug by locking GLZ party members and requiring consecutive same-team matches for heuristics
+- Removed Macros Anti-AFK method cleanly (auto-migrates existing configs)
+- Replaced hardcoded Chat presets with customizable Saved Messages (up to 30, default Gordon Ramsay's Grilled Cheese), removed Chat warning popup
+- Added Map multi-select, Date range, and Victory/Defeat/Draw filters to Career and Players tabs
+
 [v4.2]
 - updated new Music
 - added Custom keybinds for Voting

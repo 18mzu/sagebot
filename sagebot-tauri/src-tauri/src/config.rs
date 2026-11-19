@@ -1,29 +1,42 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+pub const DEFAULT_CHAT_MESSAGE: &str = "Gordon Ramsay's Ultimate Grilled Cheese Sandwich | Ramsay Around the World: https://www.youtube.com/watch?v=8E4cQHejFq0";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CustomChatMessage {
+    pub id: String,
+    pub name: String,
+    pub text: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppConfig {
     pub hotkey: String,
-    pub auto_vote_mode: u32,          // 0 = Disabled, 1 = Vote YES, 2 = Vote NO
+    pub auto_vote_mode: u32, // 0 = Disabled, 1 = Vote YES, 2 = Vote NO
     pub auto_overtime_vote_mode: u32, // 0 = Disabled, 1 = Vote DRAW, 2 = Vote CONTINUE
     #[serde(default = "default_vote_yes_key")]
-    pub vote_yes_key: String,         // Default "F5"
+    pub vote_yes_key: String, // Default "F5"
     #[serde(default = "default_vote_no_key")]
-    pub vote_no_key: String,          // Default "F6"
+    pub vote_no_key: String, // Default "F6"
     pub auto_ff_enabled: bool,
     pub auto_ff_round_5: bool,
     pub auto_ff_round_13: bool,
     pub auto_ff_round_14: bool,
     pub auto_ff_custom_rounds: Vec<u32>,
-    pub anti_afk_mode: u32,           // 0 = Click Mode, 1 = Hold Mode
-    pub anti_afk_key: String,         // Default "Tab" for Click Mode, "W" for Hold Mode
-    pub anti_afk_slow_mode: bool,     // 3.7s - 4.2s vs 900ms - 1300ms
+    pub anti_afk_mode: u32,       // 0 = Click Mode, 1 = Hold Mode, 2 = Comms Mode
+    pub anti_afk_key: String,     // Default "Tab" for Click Mode, "W" for Hold Mode
+    pub anti_afk_slow_mode: bool, // 3.7s - 4.2s vs 900ms - 1300ms
     pub chat_enabled: bool,
-    pub chat_target: u32,             // 0 = Team Chat, 1 = All Chat (/all)
-    pub chat_interval: u64,           // Default 3 seconds
-    pub chat_text: String,            // Default "With great Power comes great Responsibility"
-    pub webhook_enabled: bool,        // Default true
+    pub chat_target: u32,      // 0 = Team Chat, 1 = All Chat (/all)
+    pub chat_interval: u64,    // Default 3 seconds
+    pub chat_text: String,     // Default Grilled Cheese preset
+    #[serde(default)]
+    pub custom_chat_messages: Vec<CustomChatMessage>,
+    #[serde(default)]
+    pub custom_chat_seeded: bool,
+    pub webhook_enabled: bool, // Default true
     pub webhook_url: String,
     pub webhook_user_id: String,
     pub webhook_notify_disconnect: bool,
@@ -33,22 +46,22 @@ pub struct AppConfig {
     pub webhook_notify_match_concludes: bool,
     #[serde(default = "default_true")]
     pub webhook_notify_rank_change: bool,
-    pub agents_enabled: bool,         // Master toggle for Agents Selection
+    pub agents_enabled: bool, // Master toggle for Agents Selection
     pub instalock_enabled: bool,
-    pub lock_delay: u64,              // In seconds (5 to 75)
+    pub lock_delay: u64, // In seconds (5 to 75)
     pub lock_random_agent: bool,
     #[serde(default = "default_agent_lock_mode")]
-    pub agent_lock_mode: String,      // "linear" | "random" | "fill"
+    pub agent_lock_mode: String, // "linear" | "random" | "fill"
     #[serde(default)]
-    pub fill_roles: Vec<String>,      // Priority order of roles to fill: Controller, Initiator, Sentinel, Duelist
+    pub fill_roles: Vec<String>, // Priority order of roles to fill: Controller, Initiator, Sentinel, Duelist
     #[serde(default = "default_fill_fallback_mode")]
-    pub fill_fallback_mode: String,   // "priority" | "random"
+    pub fill_fallback_mode: String, // "priority" | "random"
     #[serde(default = "default_fill_timing_mode")]
-    pub fill_timing_mode: String,     // "last" | "delayed"
+    pub fill_timing_mode: String, // "last" | "delayed"
     #[serde(default = "default_fill_delay")]
-    pub fill_delay: u64,              // In seconds (max 75) for delayed fill
+    pub fill_delay: u64, // In seconds (max 75) for delayed fill
     pub selected_agents: Vec<String>,
-    pub music_volume: u32,            // 0 - 100
+    pub music_volume: u32, // 0 - 100
     pub auto_focus_game: bool,
     pub always_on_top: bool,
     pub auto_derank_enabled: bool,
@@ -56,13 +69,12 @@ pub struct AppConfig {
     pub auto_derank_match_limit: u32, // 0 = unlimited
     pub low_detail: bool,             // Low Detail Mode (performance / minimal GPU)
     pub auto_queue_enabled: bool,
-    pub auto_queue_mode: String,      // competitive, unrated, swiftplay, spikerush, deathmatch, hurm, ggteam
+    pub auto_queue_mode: String, // competitive, unrated, swiftplay, spikerush, deathmatch, hurm, ggteam
     pub comms_hotkey: String,
     pub comms_first_num: u32,
     pub comms_second_num: u32,
     pub comms_random: bool,
     pub comms_delay: u64,
-    pub custom_macro_json: String,
 }
 
 fn default_true() -> bool {
@@ -112,7 +124,9 @@ impl Default for AppConfig {
             chat_enabled: false,
             chat_target: 0,
             chat_interval: 3,
-            chat_text: "With great Power comes great Responsibility".to_string(),
+            chat_text: DEFAULT_CHAT_MESSAGE.to_string(),
+            custom_chat_messages: Vec::new(),
+            custom_chat_seeded: false,
             webhook_enabled: true,
             webhook_url: String::new(),
             webhook_user_id: String::new(),
@@ -146,7 +160,6 @@ impl Default for AppConfig {
             comms_second_num: 6,
             comms_random: false,
             comms_delay: 3,
-            custom_macro_json: String::new(),
         }
     }
 }
@@ -232,17 +245,14 @@ pub fn vk_to_key_name(vk: u8) -> String {
         0x10 => "Shift".to_string(),
         0x11 => "Ctrl".to_string(),
         0x12 => "Alt".to_string(),
-        b if (b >= b'A' && b <= b'Z') || (b >= b'0' && b <= b'9') => {
-            (b as char).to_string()
-        }
+        b if (b >= b'A' && b <= b'Z') || (b >= b'0' && b <= b'9') => (b as char).to_string(),
         _ => format!("Key-{}", vk),
     }
 }
 
 impl AppConfig {
     pub fn config_path() -> PathBuf {
-        let base = std::env::var("APPDATA")
-            .unwrap_or_else(|_| ".".to_string());
+        let base = std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string());
         let dir = PathBuf::from(base).join("SageBot");
         let _ = std::fs::create_dir_all(&dir);
         dir.join("config.json")
@@ -263,7 +273,9 @@ impl AppConfig {
         if !data_path.exists() {
             // Auto-migration: if config.ini exists in root or exe dir, move it to data/config.ini
             let candidates = [
-                std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.join("config.ini"))),
+                std::env::current_exe()
+                    .ok()
+                    .and_then(|p| p.parent().map(|p| p.join("config.ini"))),
                 std::env::current_dir().ok().map(|p| p.join("config.ini")),
                 Some(PathBuf::from("config.ini")),
             ];
@@ -286,15 +298,39 @@ impl AppConfig {
     pub fn load() -> Self {
         let mut cfg = Self::default();
 
-        // 1. Primary: Read modern config.json (preserves all settings including comms, macros, autofocus)
+        // 1. Primary: Read modern config.json (preserves all settings including comms, custom chats, autofocus)
         let path = Self::config_path();
         if let Ok(content) = std::fs::read_to_string(&path) {
+            let mut needs_save = false;
             if let Ok(json_cfg) = serde_json::from_str::<AppConfig>(&content) {
                 cfg = json_cfg;
                 if !content.contains("\"agent_lock_mode\"") && cfg.lock_random_agent {
                     cfg.agent_lock_mode = "random".to_string();
                 }
+                if cfg.anti_afk_mode >= 3 {
+                    cfg.anti_afk_mode = 2; // Migrate legacy Macros mode to Comms
+                    needs_save = true;
+                }
             }
+            if !cfg.custom_chat_seeded {
+                if cfg.custom_chat_messages.is_empty() {
+                    cfg.custom_chat_messages.push(CustomChatMessage {
+                        id: "default-grilled-cheese".to_string(),
+                        name: "Gordon Ramsay".to_string(),
+                        text: DEFAULT_CHAT_MESSAGE.to_string(),
+                    });
+                }
+                if cfg.chat_text.trim().is_empty() || cfg.chat_text == "sagebot is God" {
+                    cfg.chat_text = DEFAULT_CHAT_MESSAGE.to_string();
+                }
+                cfg.custom_chat_seeded = true;
+                needs_save = true;
+            }
+            cfg.validate_agent_lock();
+            if needs_save {
+                let _ = cfg.save();
+            }
+            return cfg;
         } else {
             // 2. Legacy one-time migration from config.ini if config.json does not exist yet
             let ini_p = Self::ini_path();
@@ -414,13 +450,23 @@ impl AppConfig {
                     }
                 }
             }
+            if !cfg.custom_chat_seeded {
+                if cfg.custom_chat_messages.is_empty() {
+                    cfg.custom_chat_messages.push(CustomChatMessage {
+                        id: "default-grilled-cheese".to_string(),
+                        name: "Gordon Ramsay".to_string(),
+                        text: DEFAULT_CHAT_MESSAGE.to_string(),
+                    });
+                }
+                if cfg.chat_text.trim().is_empty() || cfg.chat_text == "sagebot is God" {
+                    cfg.chat_text = DEFAULT_CHAT_MESSAGE.to_string();
+                }
+                cfg.custom_chat_seeded = true;
+            }
             cfg.validate_agent_lock();
             let _ = cfg.save();
             return cfg;
         }
-
-        cfg.validate_agent_lock();
-        cfg
     }
 
     pub fn validate_agent_lock(&mut self) {

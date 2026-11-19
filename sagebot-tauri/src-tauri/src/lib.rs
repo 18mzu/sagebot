@@ -8,6 +8,7 @@ mod storefront;
 mod paths;
 mod career;
 pub mod encounter_memory;
+mod remote_store;
 
 use config::AppConfig;
 use valorant::{
@@ -949,10 +950,23 @@ fn normalize_windows_path(p: &std::path::Path) -> String {
 
 #[tauri::command]
 async fn capture_screen_base64() -> Result<String, String> {
-    let bytes = valorant::capture_valorant_screenshot()?;
+    let bytes = tauri::async_runtime::spawn_blocking(valorant::capture_valorant_screenshot)
+        .await
+        .map_err(|e| format!("Screenshot worker failed: {}", e))??;
     use base64::Engine;
     let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
     Ok(format!("data:image/jpeg;base64,{}", b64))
+}
+
+#[tauri::command]
+fn load_remote_state() -> Result<Option<remote_store::PersistedRemoteState>, String> {
+    remote_store::load_state()
+}
+
+#[tauri::command]
+fn save_remote_state(state: remote_store::PersistedRemoteState) -> Result<bool, String> {
+    remote_store::save_state(&state)?;
+    Ok(true)
 }
 
 #[tauri::command]
@@ -1276,6 +1290,8 @@ pub fn run() {
             fetch_player_match_kdas,
             storefront::get_storefront,
             capture_screen_base64,
+            load_remote_state,
+            save_remote_state,
             get_career_matches,
             sync_career_matches,
             delete_career_match,

@@ -1,188 +1,366 @@
 import React from "react";
-import { Lock, RotateCcw, Shield, Smartphone, Trash2 } from "lucide-react";
+import { Clock, Link2Off, QrCode, RefreshCw, Shield, Smartphone, X } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { formatCodeDisplay } from "../secureChannel";
 import type { PairedDevice } from "../types/sagebot";
 
 interface RemoteTabProps {
   remoteClientConnected: boolean;
-  remoteRoomCode: string;
-  secretToken: string;
-  remoteUniqueControl: boolean;
-  pairedDevices: PairedDevice[];
-  onOpenResetModal: () => void;
-  onToggleUniqueControl: () => void;
-  onRemoveDevice: (devId: string) => void;
+  pairedDevice: PairedDevice | null;
+  pairingWindowSecondsLeft: number;
+  pairingCode: string;
+  pairingQrToken: string;
+  onStartPairingWindow: () => void;
+  onClosePairingWindow: () => void;
+  onOpenUnpairModal: () => void;
 }
+
+const formatCountdown = (secs: number): string => {
+  const m = Math.floor(Math.max(0, secs) / 60);
+  const s = Math.max(0, secs) % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+};
+
+const formatLastSeen = (ms?: number): string => {
+  if (!ms) return "Recently";
+  const diffSec = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+  if (diffSec < 60) return "Just now";
+  const mins = Math.floor(diffSec / 60);
+  if (mins < 60) return `${mins} min${mins === 1 ? "" : "s"} ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs} hr${hrs === 1 ? "" : "s"} ago`;
+  return new Date(ms).toLocaleDateString();
+};
 
 export const RemoteTab: React.FC<RemoteTabProps> = ({
   remoteClientConnected,
-  remoteRoomCode,
-  secretToken,
-  remoteUniqueControl,
-  pairedDevices,
-  onOpenResetModal,
-  onToggleUniqueControl,
-  onRemoveDevice,
-}) => (
-  <div className="tab-pane">
-    <div className="card">
-      <div className="between-row">
-        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-          <Smartphone size={22} style={{ color: "var(--accent)" }} />
-          <div>
-            <div className="pane-title" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <span>SageBot Remote Control</span>
-            </div>
-            <div className="pane-subtitle" style={{ marginTop: "2px" }}>
-              Control SageBot and the game from your phone.
-            </div>
-          </div>
-        </div>
+  pairedDevice,
+  pairingWindowSecondsLeft,
+  pairingCode,
+  pairingQrToken,
+  onStartPairingWindow,
+  onClosePairingWindow,
+  onOpenUnpairModal,
+}) => {
+  const isWindowOpen = pairingWindowSecondsLeft > 0;
+  const statusLabel = remoteClientConnected
+    ? "Phone Connected"
+    : pairedDevice
+      ? "Paired (Offline)"
+      : isWindowOpen
+        ? "Pairing Open"
+        : "Not Paired";
 
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <span className={`status-pill ${remoteClientConnected ? "active" : ""}`} style={{ fontSize: "12px", display: "inline-flex", alignItems: "center", gap: "5px" }}>
-            <span style={{ width: 8, height: 8, borderRadius: "50%", background: remoteClientConnected ? "#10b981" : "#64748b" }}></span>
-            {remoteClientConnected ? "Phone Connected" : "Ready to Pair"}
-          </span>
-        </div>
-      </div>
+  const statusDotColor = remoteClientConnected
+    ? "#10b981"
+    : pairedDevice
+      ? "#38bdf8"
+      : isWindowOpen
+        ? "#f59e0b"
+        : "#64748b";
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "24px", marginTop: "20px", alignItems: "center", background: "rgba(0, 0, 0, 0.25)", padding: "20px", borderRadius: "12px", border: "1px solid var(--border-card)" }}>
-        <div>
-          <h4 style={{ fontSize: "14px", fontWeight: 700, color: "#ffffff", marginBottom: "6px" }}>
-            QR Code
-          </h4>
-          <p style={{ fontSize: "12px", color: "var(--text-secondary)", lineHeight: 1.5, marginBottom: "14px" }}>
-            Scan this QR code on your phone to control SageBot and VALORANT.
-          </p>
-
-          <div style={{ display: "inline-flex", flexDirection: "column", gap: "4px" }}>
-            <span style={{ fontSize: "11px", color: "var(--text-tertiary)", fontWeight: 600 }}>OR ENTER 8-CHARACTER CODE</span>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <span style={{ fontFamily: "monospace", fontSize: "24px", fontWeight: 800, letterSpacing: "3px", color: "#38bdf8", background: "rgba(56, 189, 248, 0.1)", padding: "6px 14px", borderRadius: "8px", border: "1px solid rgba(56, 189, 248, 0.3)" }}>
-                {formatCodeDisplay(remoteRoomCode)}
-              </span>
-              <button
-                className="key-badge-btn"
-                style={{ height: "40px", padding: "0 14px", display: "flex", alignItems: "center", gap: "6px" }}
-                onClick={onOpenResetModal}
-              >
-                <RotateCcw size={14} />
-                <span>Reset Code</span>
-              </button>
-            </div>
-            <div style={{ marginTop: "8px", fontSize: "12px", color: "var(--text-tertiary)" }}>
-              through the link:{" "}
-              <a
-                href="https://sagebot-remote.vercel.app/"
-                target="_blank"
-                rel="noreferrer"
-                style={{ color: "#38bdf8", textDecoration: "underline", fontWeight: 600 }}
-              >
-                https://sagebot-remote.vercel.app/
-              </a>
-            </div>
-          </div>
-        </div>
-
-        <div style={{ background: "#ffffff", padding: "12px", borderRadius: "12px", display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <QRCodeSVG
-            value={`https://sagebot-remote.vercel.app/?room=${remoteRoomCode}&token=${secretToken}`}
-            size={140}
-            level="M"
-          />
-        </div>
-      </div>
-
-      {/* Security & Connected Devices Section */}
-      <div style={{ marginTop: "20px", paddingTop: "18px", borderTop: "1px solid rgba(255, 255, 255, 0.08)" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
-          <Shield size={16} style={{ color: "var(--accent)" }} />
-          <span style={{ fontSize: "14px", fontWeight: 700, color: "#ffffff" }}>Connected Devices</span>
-        </div>
-        <div className="pane-subtitle" style={{ marginBottom: "14px" }}>
-          Manage paired mobile devices authorized to monitor and control SageBot.
-        </div>
-
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            background: "rgba(0, 0, 0, 0.25)",
-            border: "1px solid var(--border-card)",
-            padding: "12px 14px",
-            borderRadius: "10px",
-            marginBottom: "12px",
-          }}
-        >
+  return (
+    <div className="tab-pane">
+      <div className="card">
+        <div className="between-row">
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <Lock size={16} style={{ color: remoteUniqueControl ? "#10b981" : "var(--text-secondary)" }} />
+            <Smartphone size={22} style={{ color: "var(--accent)" }} />
             <div>
-              <div style={{ fontSize: "13px", fontWeight: 700, color: "#ffffff" }}>
-                Unique Control
+              <div className="pane-title" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <span>SageBot Remote Control</span>
               </div>
-              <div style={{ fontSize: "11px", color: "var(--text-tertiary)", marginTop: "2px" }}>
-                Allow only one device to pair. Remove the current device or turn this off to pair another.
+              <div className="pane-subtitle" style={{ marginTop: "2px" }}>
+                Control SageBot and VALORANT from a single paired mobile device.
               </div>
             </div>
           </div>
-          <label className="switch">
-            <input
-              type="checkbox"
-              checked={remoteUniqueControl}
-              onChange={onToggleUniqueControl}
-            />
-            <span className="slider round" />
-          </label>
-        </div>
 
-        {pairedDevices.length === 0 ? (
-          <div style={{ background: "rgba(0, 0, 0, 0.2)", border: "1px dashed rgba(255, 255, 255, 0.1)", padding: "20px", borderRadius: "10px", textAlign: "center" }}>
-            <span style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
-              No devices paired yet.
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <span
+              className={`status-pill ${remoteClientConnected ? "active" : ""}`}
+              style={{ fontSize: "12px", display: "inline-flex", alignItems: "center", gap: "5px" }}
+            >
+              <span style={{ width: 8, height: 8, borderRadius: "50%", background: statusDotColor }}></span>
+              {statusLabel}
             </span>
           </div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-            {pairedDevices.map((dev) => (
-              <div
-                key={dev.id}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  background: "rgba(0, 0, 0, 0.25)",
-                  border: "1px solid var(--border-card)",
-                  padding: "10px 14px",
-                  borderRadius: "10px",
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                  <Smartphone size={18} style={{ color: "var(--accent)" }} />
-                  <div>
-                    <span style={{ fontSize: "13px", fontWeight: 700, color: "#ffffff", display: "block" }}>
-                      {dev.name}
+        </div>
+
+        {/* Paired Device Card */}
+        <div style={{ marginTop: "18px", paddingTop: "16px", borderTop: "1px solid rgba(255, 255, 255, 0.08)" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "10px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <Shield size={16} style={{ color: "var(--accent)" }} />
+              <span style={{ fontSize: "14px", fontWeight: 700, color: "#ffffff" }}>Paired Device</span>
+            </div>
+            <span style={{ fontSize: "11px", color: "var(--text-tertiary)" }}>
+              Single-device mode · Encrypted via DPAPI
+            </span>
+          </div>
+
+          {pairedDevice ? (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "12px",
+                background: "rgba(0, 0, 0, 0.28)",
+                border: remoteClientConnected
+                  ? "1px solid rgba(16, 185, 129, 0.35)"
+                  : "1px solid var(--border-card)",
+                padding: "14px 16px",
+                borderRadius: "10px",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: 0 }}>
+                <div
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: "9px",
+                    background: remoteClientConnected ? "rgba(16, 185, 129, 0.14)" : "rgba(56, 189, 248, 0.1)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                  }}
+                >
+                  <Smartphone size={18} style={{ color: remoteClientConnected ? "#10b981" : "#38bdf8" }} />
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <span
+                      style={{
+                        fontSize: "13.5px",
+                        fontWeight: 700,
+                        color: "#ffffff",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {pairedDevice.name}
                     </span>
-                    <span style={{ fontSize: "11px", color: "var(--text-tertiary)" }}>
-                      Paired at {dev.paired_at}
+                    <span
+                      style={{
+                        fontSize: "10px",
+                        fontWeight: 700,
+                        padding: "2px 6px",
+                        borderRadius: "4px",
+                        background: remoteClientConnected ? "rgba(16, 185, 129, 0.2)" : "rgba(148, 163, 184, 0.15)",
+                        color: remoteClientConnected ? "#34d399" : "#94a3b8",
+                      }}
+                    >
+                      {remoteClientConnected ? "Online" : `Last seen ${formatLastSeen(pairedDevice.last_seen_ms)}`}
                     </span>
                   </div>
+                  <span style={{ fontSize: "11px", color: "var(--text-tertiary)", display: "block", marginTop: "2px" }}>
+                    Paired at {pairedDevice.paired_at} · Reconnects automatically across Wi-Fi / 5G switches
+                  </span>
                 </div>
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 }}>
                 <button
+                  type="button"
                   className="key-badge-btn"
-                  style={{ height: "30px", padding: "0 10px", color: "#f87171", borderColor: "rgba(239, 68, 68, 0.3)", display: "flex", alignItems: "center", gap: "5px" }}
-                  onClick={() => onRemoveDevice(dev.id)}
+                  style={{ height: "32px", padding: "0 12px", display: "flex", alignItems: "center", gap: "6px" }}
+                  onClick={onStartPairingWindow}
                 >
-                  <Trash2 size={13} />
-                  <span>Remove</span>
+                  <RefreshCw size={13} />
+                  <span>{isWindowOpen ? "New Code" : "Replace Device"}</span>
+                </button>
+                <button
+                  type="button"
+                  className="key-badge-btn"
+                  style={{
+                    height: "32px",
+                    padding: "0 12px",
+                    color: "#f87171",
+                    borderColor: "rgba(239, 68, 68, 0.35)",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "5px",
+                  }}
+                  onClick={onOpenUnpairModal}
+                >
+                  <Link2Off size={13} />
+                  <span>Unpair</span>
                 </button>
               </div>
-            ))}
+            </div>
+          ) : (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "12px",
+                background: "rgba(0, 0, 0, 0.2)",
+                border: "1px dashed rgba(255, 255, 255, 0.14)",
+                padding: "16px 18px",
+                borderRadius: "10px",
+              }}
+            >
+              <div>
+                <div style={{ fontSize: "13px", fontWeight: 700, color: "#e2e8f0" }}>No device paired yet</div>
+                <div style={{ fontSize: "11.5px", color: "var(--text-tertiary)", marginTop: "2px" }}>
+                  Pair your phone once with QR or code. After pairing, it reconnects automatically without extra approvals.
+                </div>
+              </div>
+              {!isWindowOpen && (
+                <button
+                  type="button"
+                  className="key-badge-btn"
+                  style={{
+                    height: "34px",
+                    padding: "0 14px",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "7px",
+                    background: "rgba(56, 189, 248, 0.14)",
+                    borderColor: "rgba(56, 189, 248, 0.45)",
+                    color: "#38bdf8",
+                    flexShrink: 0,
+                  }}
+                  onClick={onStartPairingWindow}
+                >
+                  <QrCode size={14} />
+                  <span>Pair Device</span>
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Active 3-minute Pairing Window Panel */}
+        {isWindowOpen && (
+          <div
+            style={{
+              marginTop: "16px",
+              background: "rgba(0, 0, 0, 0.28)",
+              padding: "18px 20px",
+              borderRadius: "12px",
+              border: "1px solid rgba(56, 189, 248, 0.3)",
+            }}
+          >
+            {pairedDevice && (
+              <div
+                style={{
+                  marginBottom: "14px",
+                  padding: "8px 12px",
+                  borderRadius: "8px",
+                  background: "rgba(245, 158, 11, 0.12)",
+                  border: "1px solid rgba(245, 158, 11, 0.35)",
+                  fontSize: "12px",
+                  color: "#fbbf24",
+                }}
+              >
+                Replacing current device — pairing a new phone will disconnect <strong>{pairedDevice.name}</strong>.
+              </div>
+            )}
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "24px", alignItems: "center" }}>
+              <div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
+                  <h4 style={{ fontSize: "14px", fontWeight: 700, color: "#ffffff", margin: 0 }}>
+                    Pairing Window Open
+                  </h4>
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "5px",
+                      fontSize: "11.5px",
+                      fontWeight: 700,
+                      color: pairingWindowSecondsLeft <= 30 ? "#f87171" : "#38bdf8",
+                      background: pairingWindowSecondsLeft <= 30 ? "rgba(239, 68, 68, 0.15)" : "rgba(56, 189, 248, 0.12)",
+                      padding: "3px 9px",
+                      borderRadius: "6px",
+                      fontFamily: "monospace",
+                    }}
+                  >
+                    <Clock size={12} />
+                    Expires in {formatCountdown(pairingWindowSecondsLeft)}
+                  </span>
+                </div>
+
+                <p style={{ fontSize: "12px", color: "var(--text-secondary)", lineHeight: 1.5, marginBottom: "12px" }}>
+                  Scanning the QR pairs automatically. Typing the code requires one confirmation on PC.
+                </p>
+
+                <div style={{ display: "inline-flex", flexDirection: "column", gap: "4px" }}>
+                  <span style={{ fontSize: "11px", color: "var(--text-tertiary)", fontWeight: 600 }}>
+                    8-CHARACTER PAIRING CODE
+                  </span>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                    <span
+                      style={{
+                        fontFamily: "monospace",
+                        fontSize: "22px",
+                        fontWeight: 800,
+                        letterSpacing: "3px",
+                        color: "#38bdf8",
+                        background: "rgba(56, 189, 248, 0.1)",
+                        padding: "6px 14px",
+                        borderRadius: "8px",
+                        border: "1px solid rgba(56, 189, 248, 0.3)",
+                      }}
+                    >
+                      {formatCodeDisplay(pairingCode)}
+                    </span>
+                    <button
+                      type="button"
+                      className="key-badge-btn"
+                      style={{ height: "38px", padding: "0 12px", display: "flex", alignItems: "center", gap: "5px" }}
+                      onClick={onStartPairingWindow}
+                    >
+                      <RefreshCw size={13} />
+                      <span>New Code</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="key-badge-btn"
+                      style={{
+                        height: "38px",
+                        padding: "0 12px",
+                        color: "#94a3b8",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "5px",
+                      }}
+                      onClick={onClosePairingWindow}
+                    >
+                      <X size={13} />
+                      <span>Close</span>
+                    </button>
+                  </div>
+                  <div style={{ marginTop: "8px", fontSize: "12px", color: "var(--text-tertiary)" }}>
+                    through the link:{" "}
+                    <a
+                      href="https://sagebot-remote.vercel.app/"
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ color: "#38bdf8", textDecoration: "underline", fontWeight: 600 }}
+                    >
+                      https://sagebot-remote.vercel.app/
+                    </a>
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ background: "#ffffff", padding: "12px", borderRadius: "12px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <QRCodeSVG
+                  value={`https://sagebot-remote.vercel.app/?room=${pairingCode}&token=${pairingQrToken}`}
+                  size={140}
+                  level="M"
+                />
+              </div>
+            </div>
           </div>
         )}
       </div>
     </div>
-  </div>
-);
+  );
+};

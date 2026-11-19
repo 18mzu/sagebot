@@ -3,14 +3,11 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   AlertTriangle,
   Download,
-  FileCode,
   History,
   Lock,
   Smartphone,
-  Upload,
 } from "lucide-react";
 import type {
-  AppConfig,
   PlayerEncounter,
   RecentMatchDetail,
   TrackedPlayer,
@@ -29,10 +26,6 @@ interface AppModalsProps {
   onLog: (msg: string) => void;
   onToast: (msg: string) => void;
 
-  showChatWarningModal: boolean;
-  setShowChatWarningModal: (v: boolean) => void;
-  updateAndSaveConfig: (patch: Partial<AppConfig>) => void;
-
   playerToDelete: PlayerEncounter | null;
   setPlayerToDelete: (p: PlayerEncounter | null) => void;
   deletePlayerEncounter: (puuid: string) => Promise<void>;
@@ -47,14 +40,6 @@ interface AppModalsProps {
   setUpdateProgress: (v: number) => void;
   updateError: string;
   setUpdateError: (v: string) => void;
-
-  showMacroImportModal: boolean;
-  setShowMacroImportModal: (v: boolean) => void;
-  macroImportText: string;
-  setMacroImportText: (v: string) => void;
-  macroCompilerError: string;
-  setMacroCompilerError: (v: string) => void;
-  handleValidateAndApplyMacro: () => void;
 
   showAuthModal: boolean;
   setShowAuthModal: (v: boolean) => void;
@@ -72,9 +57,9 @@ interface AppModalsProps {
   handleDenyDevice: () => void;
   handleApproveDevice: () => void;
 
-  showResetConfirmModal: boolean;
-  setShowResetConfirmModal: (v: boolean) => void;
-  handleResetRemoteCode: () => void;
+  showUnpairConfirmModal: boolean;
+  setShowUnpairConfirmModal: (v: boolean) => void;
+  handleUnpairRemoteDevice: () => void;
 }
 
 export const AppModals: React.FC<AppModalsProps> = ({
@@ -86,9 +71,6 @@ export const AppModals: React.FC<AppModalsProps> = ({
   isRiotSignedIn,
   onLog,
   onToast,
-  showChatWarningModal,
-  setShowChatWarningModal,
-  updateAndSaveConfig,
   playerToDelete,
   setPlayerToDelete,
   deletePlayerEncounter,
@@ -101,13 +83,6 @@ export const AppModals: React.FC<AppModalsProps> = ({
   setUpdateProgress,
   updateError,
   setUpdateError,
-  showMacroImportModal,
-  setShowMacroImportModal,
-  macroImportText,
-  setMacroImportText,
-  macroCompilerError,
-  setMacroCompilerError,
-  handleValidateAndApplyMacro,
   showAuthModal,
   setShowAuthModal,
   authInput,
@@ -121,9 +96,9 @@ export const AppModals: React.FC<AppModalsProps> = ({
   setDeviceNicknameInput,
   handleDenyDevice,
   handleApproveDevice,
-  showResetConfirmModal,
-  setShowResetConfirmModal,
-  handleResetRemoteCode,
+  showUnpairConfirmModal,
+  setShowUnpairConfirmModal,
+  handleUnpairRemoteDevice,
 }) => (
   <>
     {/* Kill VALORANT Confirmation Modal */}
@@ -224,50 +199,6 @@ export const AppModals: React.FC<AppModalsProps> = ({
               }}
             >
               {isRiotSignedIn ? "Launch VALORANT" : "Open Riot Client"}
-            </button>
-          </div>
-        </div>
-      </div>
-    )}
-
-    {/* Auto Chat Warning Modal */}
-    {showChatWarningModal && (
-      <div className="modal-backdrop">
-        <div className="modal-card">
-          <div className="modal-header">
-            <AlertTriangle color="#f59e0b" size={20} />
-            <span>Notes</span>
-          </div>
-          <div className="modal-body">
-            <p style={{ fontWeight: 600, color: "#fbbf24" }}>
-              ⚠️ In-Game Chat Warning
-            </p>
-            <p style={{ marginTop: "8px" }}>
-              Spamming chat in VALORANT does not lead to any penalties.
-            </p>
-            <p style={{ marginTop: "8px", color: "#94a3b8", fontSize: "12px" }}>
-              However, consider not spamming something distasteful (racist, sexist, etc.) or admitting you are using tool for spamming.
-            </p>
-            <p style={{ marginTop: "8px" }}>
-              Do you wish to proceed and enable Auto Chat?
-            </p>
-          </div>
-          <div className="modal-actions">
-            <button
-              className="modal-btn secondary"
-              onClick={() => setShowChatWarningModal(false)}
-            >
-              No
-            </button>
-            <button
-              className="modal-btn danger"
-              onClick={() => {
-                updateAndSaveConfig({ chat_enabled: true });
-                onLog("[CHAT] Chat automation activated.");
-                setShowChatWarningModal(false);
-              }}
-            >
-              I know what I'm doing
             </button>
           </div>
         </div>
@@ -421,123 +352,6 @@ export const AppModals: React.FC<AppModalsProps> = ({
                 </div>
               </div>
             )}
-          </div>
-        </div>
-      </div>
-    )}
-
-    {/* Macro JSON Import Modal */}
-    {showMacroImportModal && (
-      <div
-        className="modal-backdrop"
-        onClick={() => {
-          setShowMacroImportModal(false);
-          setMacroCompilerError("");
-        }}
-      >
-        <div
-          className="modal-card"
-          onClick={(e) => e.stopPropagation()}
-          style={{ width: "520px", maxWidth: "92vw", border: "1px solid rgba(59, 130, 246, 0.4)" }}
-        >
-          <div className="modal-header" style={{ color: "#60a5fa" }}>
-            <FileCode size={18} color="#60a5fa" />
-            <span>Import Macro JSON</span>
-          </div>
-          <div className="modal-body">
-            <p style={{ fontSize: "12px", color: "var(--text-secondary)", marginBottom: "10px" }}>
-              Paste custom macro JSON below or load a file from disk. The compiler will validate syntax, structure, and timing schema before applying.
-            </p>
-
-            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "8px" }}>
-              <input
-                type="file"
-                id="macro-file-input"
-                accept=".json,.txt"
-                style={{ display: "none" }}
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) {
-                    const reader = new FileReader();
-                    reader.onload = (event) => {
-                      const content = (event.target?.result as string) || "";
-                      setMacroImportText(content);
-                      setMacroCompilerError("");
-                    };
-                    reader.readAsText(file);
-                  }
-                  e.target.value = "";
-                }}
-              />
-              <button
-                type="button"
-                className="modal-btn secondary"
-                style={{ fontSize: "11px", padding: "4px 10px", display: "flex", alignItems: "center", gap: "6px" }}
-                onClick={() => document.getElementById("macro-file-input")?.click()}
-              >
-                <Upload size={13} />
-                <span>Import File</span>
-              </button>
-            </div>
-
-            <textarea
-              value={macroImportText}
-              onChange={(e) => {
-                setMacroImportText(e.target.value);
-                if (macroCompilerError) setMacroCompilerError("");
-              }}
-              placeholder={`{\n  "total_loop_ms": 1000,\n  "actions": [\n    { "key": "w", "start_ms": 0, "duration_ms": 200 }\n  ]\n}`}
-              rows={10}
-              style={{
-                width: "100%",
-                fontFamily: "Consolas, 'Courier New', monospace",
-                fontSize: "12px",
-                background: "rgba(0, 0, 0, 0.5)",
-                border: macroCompilerError ? "1px solid rgba(239, 68, 68, 0.5)" : "1px solid rgba(255, 255, 255, 0.12)",
-                borderRadius: "6px",
-                color: "#f8fafc",
-                padding: "10px",
-                boxSizing: "border-box",
-                outline: "none",
-                resize: "vertical",
-              }}
-            />
-
-            {macroCompilerError && (
-              <div className="compiler-error-box" style={{ marginTop: "10px" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "6px", fontWeight: 700, color: "#f87171", marginBottom: "4px" }}>
-                  <span>⚠ Compiler Diagnostic Error</span>
-                </div>
-                <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: "11px", color: "#fca5a5" }}>
-                  {macroCompilerError}
-                </pre>
-              </div>
-            )}
-          </div>
-
-          <div className="modal-actions" style={{ marginTop: "14px", display: "flex", justifyContent: "flex-end", gap: "8px" }}>
-            <button
-              type="button"
-              className="modal-btn secondary"
-              onClick={() => {
-                setShowMacroImportModal(false);
-                setMacroCompilerError("");
-              }}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="modal-btn primary"
-              style={{
-                background: "linear-gradient(135deg, #3b82f6, #1d4ed8)",
-                borderColor: "#3b82f6",
-                color: "#ffffff",
-              }}
-              onClick={handleValidateAndApplyMacro}
-            >
-              Validate & Apply
-            </button>
           </div>
         </div>
       </div>
@@ -832,8 +646,13 @@ export const AppModals: React.FC<AppModalsProps> = ({
           </div>
           <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <p style={{ margin: 0, fontSize: "13px", color: "#cbd5e1" }}>
-              A device is requesting permission to connect to SageBot.
+              A device entered the pairing code and is requesting access to SageBot.
             </p>
+            {pendingPairRequest.is_replacing && (
+              <div style={{ background: "rgba(245, 158, 11, 0.12)", border: "1px solid rgba(245, 158, 11, 0.35)", borderRadius: 8, padding: "8px 12px", fontSize: "12px", color: "#fbbf24" }}>
+                Approving will disconnect your currently paired device.
+              </div>
+            )}
             {pendingPairRequest.fingerprint && (
               <div style={{ background: "rgba(56, 189, 248, 0.08)", border: "1px solid rgba(56, 189, 248, 0.25)", borderRadius: 8, padding: "8px 12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <span style={{ fontSize: "11px", color: "#94a3b8" }}>Security Verification Key</span>
@@ -881,35 +700,35 @@ export const AppModals: React.FC<AppModalsProps> = ({
       </div>
     )}
 
-    {/* Reset Code Confirmation Modal */}
-    {showResetConfirmModal && (
+    {/* Unpair Remote Device Confirmation Modal */}
+    {showUnpairConfirmModal && (
       <div className="modal-backdrop" style={{ zIndex: 9999 }}>
         <div className="modal-card" style={{ maxWidth: 420 }}>
           <div className="modal-header kill-modal-header">
             <AlertTriangle size={20} color="#ef4444" />
-            <span style={{ fontSize: "15px", fontWeight: 700, color: "#ef4444" }}>Reset Remote Pairing Code?</span>
+            <span style={{ fontSize: "15px", fontWeight: 700, color: "#ef4444" }}>Unpair Remote Device?</span>
           </div>
           <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <p style={{ margin: 0, fontSize: "13px", color: "#cbd5e1", lineHeight: "1.5" }}>
-              Resetting your pairing code will <strong>immediately disconnect and log out all connected mobile devices</strong> and generate a fresh 8-character code.
+              Unpairing will <strong>disconnect your phone, wipe its stored access key, and rotate the private remote channel</strong>.
             </p>
             <p style={{ margin: 0, fontSize: "12px", color: "#94a3b8" }}>
-              You will need to re-pair any device you wish to use with SageBot.
+              You will need to pair again using a QR code or 8-character pairing code.
             </p>
           </div>
           <div className="modal-actions" style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 18 }}>
             <button
               className="modal-btn secondary"
-              onClick={() => setShowResetConfirmModal(false)}
+              onClick={() => setShowUnpairConfirmModal(false)}
             >
               Cancel
             </button>
             <button
               className="modal-btn danger"
-              onClick={handleResetRemoteCode}
+              onClick={handleUnpairRemoteDevice}
               style={{ background: "#dc2626", borderColor: "#ef4444", color: "#ffffff", fontWeight: 700 }}
             >
-              Reset &amp; Disconnect All
+              Unpair &amp; Disconnect
             </button>
           </div>
         </div>

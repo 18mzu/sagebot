@@ -1,12 +1,7 @@
-export interface MacroAction {
-  key: string;
-  start_ms: number;
-  duration_ms: number;
-}
-
-export interface MacroData {
-  total_loop_ms: number;
-  actions: MacroAction[];
+export interface CustomChatMessage {
+  id: string;
+  name: string;
+  text: string;
 }
 
 export interface UpdateInfo {
@@ -45,6 +40,8 @@ export interface AppConfig {
   chat_target: number;
   chat_interval: number;
   chat_text: string;
+  custom_chat_messages?: CustomChatMessage[];
+  custom_chat_seeded?: boolean;
   webhook_enabled: boolean;
   webhook_url: string;
   webhook_user_id: string;
@@ -82,7 +79,6 @@ export interface AppConfig {
   comms_second_num?: number;
   comms_random?: boolean;
   comms_delay?: number;
-  custom_macro_json?: string;
 }
 
 export interface StatusResponse {
@@ -428,6 +424,12 @@ export interface PairedDevice {
   id: string;
   name: string;
   paired_at: string;
-  /** Per-device AES-256 session key (base64). Deleting it revokes the device. */
   key: string;
+  last_seen_ms?: number;
+}
+
+export interface PersistedRemoteState {
+  code: string;
+  channel_id: string;
+  paired_device: PairedDevice | null;
 }

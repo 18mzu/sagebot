@@ -1170,96 +1170,119 @@ fn find_root(parent: &mut [usize], mut i: usize) -> usize {
     i
 }
 
-// Detect if two players share 2+ games in a row with the SAME TIME (timestamp) and same map
-fn has_consecutive_same_time_and_map_matches(p1: &TrackedPlayer, p2: &TrackedPlayer) -> bool {
-    let m1 = &p1.recent_matches;
-    let m2 = &p2.recent_matches;
-    if m1.len() < 2 || m2.len() < 2 {
+// Detect if two players share 2+ consecutive same-team matches
+fn shares_consecutive_same_team_matches(
+    p1: &TrackedPlayer,
+    p2: &TrackedPlayer,
+    m1_ids: &[String],
+    m2_ids: &[String],
+    current_match_id: &str,
+) -> bool {
+    let rm1 = &p1.recent_matches;
+    let rm2 = &p2.recent_matches;
+
+    // Primary path: competitive updates with match_id/timestamp, map, and result (same W/L = same team)
+    if !rm1.is_empty() && !rm2.is_empty() {
+        let mut consecutive = 0;
+        for match1 in rm1 {
+            if !match1.match_id.is_empty() && match1.match_id == current_match_id {
+                continue;
+            }
+            if match1.match_id.is_empty() && (match1.timestamp == 0 || match1.map_name.is_empty()) {
+                consecutive = 0;
+                continue;
+            }
+
+            let match_found = rm2.iter().any(|match2| {
+                if !match2.match_id.is_empty() && match2.match_id == current_match_id {
+                    return false;
+                }
+                let same_match = if !match1.match_id.is_empty() && !match2.match_id.is_empty() {
+                    match1.match_id == match2.match_id
+                } else {
+                    match1.timestamp > 0
+                        && match2.timestamp > 0
+                        && (match1.timestamp as i64 - match2.timestamp as i64).abs() <= 5000
+                        && !match1.map_name.is_empty()
+                        && match1.map_name.eq_ignore_ascii_case(&match2.map_name)
+                };
+                same_match && match1.result == match2.result
+            });
+
+            if match_found {
+                consecutive += 1;
+                if consecutive >= 2 {
+                    return true;
+                }
+            } else {
+                consecutive = 0;
+            }
+        }
         return false;
     }
 
-    let mut consecutive = 0;
-    for match1 in m1 {
-        if match1.timestamp == 0 || match1.map_name.is_empty() {
-            consecutive = 0;
-            continue;
-        }
+    // Fallback path (non-competitive modes): require 2 consecutive shared match IDs at adjacent positions
+    let clean1: Vec<&str> = m1_ids
+        .iter()
+        .map(String::as_str)
+        .filter(|m| !m.is_empty() && *m != current_match_id)
+        .collect();
+    let clean2: Vec<&str> = m2_ids
+        .iter()
+        .map(String::as_str)
+        .filter(|m| !m.is_empty() && *m != current_match_id)
+        .collect();
 
-        let match_found = m2.iter().any(|match2| {
-            if match2.timestamp == 0 || match2.map_name.is_empty() {
-                return false;
-            }
-            let time_diff = (match1.timestamp as i64 - match2.timestamp as i64).abs();
-            time_diff <= 5000 && match1.map_name.eq_ignore_ascii_case(&match2.map_name)
-        });
+    if clean1.len() < 2 || clean2.len() < 2 {
+        return false;
+    }
 
-        if match_found {
-            consecutive += 1;
-            if consecutive >= 2 {
-                return true;
+    for k in 0..(clean1.len() - 1) {
+        if let Some(pos_a) = clean2.iter().position(|id| *id == clean1[k]) {
+            if let Some(pos_b) = clean2.iter().position(|id| *id == clean1[k + 1]) {
+                if pos_a.abs_diff(pos_b) == 1 {
+                    return true;
+                }
             }
-        } else {
-            consecutive = 0;
         }
     }
+
     false
 }
 
-// Detect parties by cross-referencing recent match history (duos/trios/stacks)
+// Detect parties for non-authoritative players from consecutive shared match history
 fn detect_parties_from_histories(
     team: &mut [TrackedPlayer],
     player_matches: &HashMap<String, Vec<String>>,
     current_match_id: &str,
     next_party_id: &mut usize,
+    locked_puuids: &std::collections::HashSet<String>,
+    is_competitive: bool,
 ) {
     let n = team.len();
     if n < 2 {
         return;
     }
 
+    let locked_flags: Vec<bool> = team
+        .iter()
+        .map(|p| p.is_self || locked_puuids.contains(&p.puuid))
+        .collect();
+
     let mut parent: Vec<usize> = (0..n).collect();
 
-    // 1. Inverted index: match_id -> player indices
-    // If 3 or more players in the current team share ANY previous match, they are unambiguously a party (trio/full stack)
-    let mut match_to_players: HashMap<String, Vec<usize>> = HashMap::new();
+    // Pairwise check on unlocked players only (GLZ authoritative party members are never merged)
     for i in 0..n {
-        if team[i].is_self {
+        if locked_flags[i] {
             continue;
         }
-        if let Some(matches) = player_matches.get(&team[i].puuid) {
-            for m in matches {
-                if !m.is_empty() && m != current_match_id {
-                    match_to_players.entry(m.clone()).or_default().push(i);
-                }
-            }
-        }
-    }
-
-    for (_m, players) in &match_to_players {
-        if players.len() >= 3 {
-            let first = players[0];
-            for &p in &players[1..] {
-                let r1 = find_root(&mut parent, first);
-                let r2 = find_root(&mut parent, p);
-                if r1 != r2 {
-                    parent[r1] = r2;
-                }
-            }
-        }
-    }
-
-    // 2. Pairwise check:
-    for i in 0..n {
-        if team[i].is_self {
-            continue;
-        }
-
         let matches_i = match player_matches.get(&team[i].puuid) {
             Some(m) => m,
             None => continue,
         };
+
         for j in (i + 1)..n {
-            if team[j].is_self {
+            if locked_flags[j] {
                 continue;
             }
 
@@ -1273,21 +1296,9 @@ fn detect_parties_from_histories(
                 None => continue,
             };
 
-            let shared_count = matches_i.iter().filter(|m1| {
-                !m1.is_empty() && *m1 != current_match_id && matches_j.iter().any(|m2| *m1 == m2)
-            }).count();
-
-            let consecutive_time_map = has_consecutive_same_time_and_map_matches(&team[i], &team[j]);
-
-            let root_i = find_root(&mut parent, i);
-            let root_j = find_root(&mut parent, j);
-            let already_grouped = root_i != i || root_j != j || !team[i].party_tag.is_empty() || !team[j].party_tag.is_empty();
-
-            // Link if:
-            // - Shared >= 2 matches in common
-            // - OR Shared >= 1 match and at least one is already part of a detected party (extending duo to trio)
-            // - OR 2+ games in a row with SAME TIME and same map
-            if shared_count >= 2 || (shared_count >= 1 && already_grouped) || consecutive_time_map {
+            if shares_consecutive_same_team_matches(&team[i], &team[j], matches_i, matches_j, current_match_id) {
+                let root_i = find_root(&mut parent, i);
+                let root_j = find_root(&mut parent, j);
                 if root_i != root_j {
                     parent[root_i] = root_j;
                 }
@@ -1295,51 +1306,55 @@ fn detect_parties_from_histories(
         }
     }
 
-    // Group players by root
+    // Group unlocked players by root
     let mut groups: HashMap<usize, Vec<usize>> = HashMap::new();
     for i in 0..n {
-        if team[i].is_self {
+        if locked_flags[i] {
             continue;
         }
         let root = find_root(&mut parent, i);
         groups.entry(root).or_default().push(i);
     }
 
+    let reserve_party_1 = locked_puuids.len() >= 2;
+    if reserve_party_1 && *next_party_id <= 1 {
+        *next_party_id = 2;
+    }
+
     for (_root, members) in groups {
-        if members.len() >= 2 {
-            // In VALORANT Competitive, 4-stacks are strictly forbidden by matchmaking rules.
-            // If 4 players are connected, it represents 2 separate duos with a transitive overlap.
-            // Split into two distinct 2-player parties with different IDs and colors.
-            let sub_parties: Vec<Vec<usize>> = if members.len() == 4 {
-                vec![vec![members[0], members[1]], vec![members[2], members[3]]]
+        if members.len() < 2 {
+            continue;
+        }
+
+        // In VALORANT Competitive, 4-stacks are impossible; drop any illegal 4-player guess rather than mislabeling.
+        if is_competitive && members.len() == 4 {
+            continue;
+        }
+
+        let existing_tag = members.iter().find_map(|&idx| {
+            let t = &team[idx].party_tag;
+            if !t.is_empty() && !(reserve_party_1 && t == "Party 1") {
+                Some(t.clone())
             } else {
-                vec![members]
-            };
+                None
+            }
+        });
 
-            for sub_group in sub_parties {
-                let existing_tag = sub_group.iter()
-                    .find_map(|&idx| {
-                        if !team[idx].party_tag.is_empty() {
-                            Some(team[idx].party_tag.clone())
-                        } else {
-                            None
-                        }
-                    });
-
-                let party_tag = match existing_tag {
-                    Some(tag) => tag,
-                    None => {
-                        let tag = format!("Party {}", *next_party_id);
-                        *next_party_id += 1;
-                        tag
-                    }
-                };
-
-                for idx in sub_group {
-                    if !team[idx].is_self {
-                        team[idx].party_tag = party_tag.clone();
-                    }
+        let party_tag = match existing_tag {
+            Some(tag) => tag,
+            None => {
+                if reserve_party_1 && *next_party_id <= 1 {
+                    *next_party_id = 2;
                 }
+                let tag = format!("Party {}", *next_party_id);
+                *next_party_id += 1;
+                tag
+            }
+        };
+
+        for idx in members {
+            if !locked_flags[idx] {
+                team[idx].party_tag = party_tag.clone();
             }
         }
     }
@@ -1874,7 +1889,18 @@ async fn parse_coregame_roster(
         let party_tag = if is_my_party {
             "Party 1".to_string()
         } else {
-            party_map.get(&puuid).cloned().unwrap_or_default()
+            let ptag = party_map.get(&puuid).cloned().unwrap_or_default();
+            let shift_party = glz_party.len() >= 2
+                && party_map.iter().any(|(k, v)| v == "Party 1" && !glz_party.contains(k));
+            if shift_party {
+                if let Some(num) = ptag.strip_prefix("Party ").and_then(|s| s.trim().parse::<usize>().ok()) {
+                    format!("Party {}", num + 1)
+                } else {
+                    ptag
+                }
+            } else {
+                ptag
+            }
         };
 
         // Skins items for this player
@@ -1895,7 +1921,17 @@ async fn parse_coregame_roster(
                 cp.agent_name = agent_name.clone();
             }
             cp.team = team_id.clone();
-            if !party_tag.is_empty() {
+            if !glz_party.is_empty() {
+                cp.party_tag = if is_my_party {
+                    "Party 1".to_string()
+                } else if !party_tag.is_empty() {
+                    party_tag.clone()
+                } else if cp.party_tag == "Party 1" {
+                    String::new()
+                } else {
+                    cp.party_tag
+                };
+            } else if !party_tag.is_empty() {
                 cp.party_tag = party_tag.clone();
             }
             if !player_name.starts_with("Player#") && !player_name.starts_with("Player ") {
@@ -2030,15 +2066,21 @@ async fn parse_coregame_roster(
         (!ally_team[0].party_tag.is_empty() && ally_team.iter().all(|p| p.party_tag == ally_team[0].party_tag))
     );
 
+    let mut ally_locked: std::collections::HashSet<String> = glz_party.iter().cloned().collect();
+    if !my_puuid.is_empty() {
+        ally_locked.insert(my_puuid.to_string());
+    }
+    let empty_locked: std::collections::HashSet<String> = std::collections::HashSet::new();
+
     if ally_is_authoritative_5_stack {
         for p in &mut ally_team {
             p.party_tag = "Party 1".to_string();
         }
     } else {
-        detect_parties_from_histories(&mut ally_team, &ally_matches, match_id, &mut next_party_id);
+        detect_parties_from_histories(&mut ally_team, &ally_matches, match_id, &mut next_party_id, &ally_locked, is_competitive);
     }
 
-    detect_parties_from_histories(&mut enemy_team, &enemy_matches, match_id, &mut next_party_id);
+    detect_parties_from_histories(&mut enemy_team, &enemy_matches, match_id, &mut next_party_id, &empty_locked, is_competitive);
 
     // If Competitive and ally team is strictly a 5-stack, enemy team MUST be a 5-stack as well
     if is_competitive && ally_team.len() == 5 && enemy_team.len() == 5 {
@@ -2239,7 +2281,18 @@ async fn parse_pregame_roster(
         let party_tag = if is_my_party {
             "Party 1".to_string()
         } else {
-            party_map.get(&puuid).cloned().unwrap_or_default()
+            let ptag = party_map.get(&puuid).cloned().unwrap_or_default();
+            let shift_party = glz_party.len() >= 2
+                && party_map.iter().any(|(k, v)| v == "Party 1" && !glz_party.contains(k));
+            if shift_party {
+                if let Some(num) = ptag.strip_prefix("Party ").and_then(|s| s.trim().parse::<usize>().ok()) {
+                    format!("Party {}", num + 1)
+                } else {
+                    ptag
+                }
+            } else {
+                ptag
+            }
         };
 
         let _loadout_items = loadouts_by_sub.get(&puuid)
@@ -2341,15 +2394,21 @@ async fn parse_pregame_roster(
         (!ally_team[0].party_tag.is_empty() && ally_team.iter().all(|p| p.party_tag == ally_team[0].party_tag))
     );
 
+    let mut ally_locked: std::collections::HashSet<String> = glz_party.iter().cloned().collect();
+    if !my_puuid.is_empty() {
+        ally_locked.insert(my_puuid.to_string());
+    }
+    let empty_locked: std::collections::HashSet<String> = std::collections::HashSet::new();
+
     if ally_is_authoritative_5_stack {
         for p in &mut ally_team {
             p.party_tag = "Party 1".to_string();
         }
     } else {
-        detect_parties_from_histories(&mut ally_team, &ally_matches, match_id, &mut next_party_id);
+        detect_parties_from_histories(&mut ally_team, &ally_matches, match_id, &mut next_party_id, &ally_locked, is_competitive);
     }
 
-    detect_parties_from_histories(&mut enemy_team, &enemy_matches, match_id, &mut next_party_id);
+    detect_parties_from_histories(&mut enemy_team, &enemy_matches, match_id, &mut next_party_id, &empty_locked, is_competitive);
 
     // If Competitive and ally team is strictly a 5-stack, enemy team MUST be a 5-stack as well
     if is_competitive && ally_team.len() == 5 && enemy_team.len() == 5 {

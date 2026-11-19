@@ -1615,11 +1615,8 @@ pub fn start_focus_monitor() {
     });
 }
 
-// Win32 GDI Screenshot of VALORANT window
+// Win32 GDI Screenshot of VALORANT window (non-intrusive, downscaled JPEG)
 pub fn capture_valorant_screenshot() -> Result<Vec<u8>, String> {
-    focus_valorant_window();
-    std::thread::sleep(std::time::Duration::from_millis(350));
-
     unsafe {
         use windows_sys::Win32::Foundation::RECT;
         use windows_sys::Win32::Graphics::Gdi::*;
@@ -1638,13 +1635,37 @@ pub fn capture_valorant_screenshot() -> Result<Vec<u8>, String> {
         };
 
         let mut rect = RECT { left: 0, top: 0, right: 0, bottom: 0 };
-        if hwnd != std::ptr::null_mut() && GetWindowRect(hwnd, &mut rect) != 0 && rect.right > rect.left && rect.bottom > rect.top {
-            // Found VALORANT window bounds
+        if hwnd != std::ptr::null_mut() {
+            if IsIconic(hwnd) != 0 {
+                return Err("VALORANT is minimized. Restore the game window to capture.".to_string());
+            }
+            if GetWindowRect(hwnd, &mut rect) != 0 && rect.right > rect.left && rect.bottom > rect.top {
+                if rect.left <= -10000 || rect.top <= -10000 {
+                    return Err("VALORANT is minimized. Restore the game window to capture.".to_string());
+                }
+            } else {
+                rect.left = 0;
+                rect.top = 0;
+                rect.right = GetSystemMetrics(SM_CXSCREEN);
+                rect.bottom = GetSystemMetrics(SM_CYSCREEN);
+            }
         } else {
             rect.left = 0;
             rect.top = 0;
             rect.right = GetSystemMetrics(SM_CXSCREEN);
             rect.bottom = GetSystemMetrics(SM_CYSCREEN);
+        }
+
+        // Clamp capture bounds to the virtual desktop so off-screen edges don't fail BitBlt
+        let vx = GetSystemMetrics(SM_XVIRTUALSCREEN);
+        let vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+        let vw = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+        let vh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+        if vw > 0 && vh > 0 {
+            rect.left = rect.left.max(vx);
+            rect.top = rect.top.max(vy);
+            rect.right = rect.right.min(vx + vw);
+            rect.bottom = rect.bottom.min(vy + vh);
         }
 
         let width = rect.right - rect.left;
@@ -1661,10 +1682,16 @@ pub fn capture_valorant_screenshot() -> Result<Vec<u8>, String> {
 
         let hdc_mem = CreateCompatibleDC(hdc_screen);
         let hbm = CreateCompatibleBitmap(hdc_screen, width, height);
+        if hdc_mem == std::ptr::null_mut() || hbm == std::ptr::null_mut() {
+            if hbm != std::ptr::null_mut() { DeleteObject(hbm); }
+            if hdc_mem != std::ptr::null_mut() { DeleteDC(hdc_mem); }
+            ReleaseDC(std::ptr::null_mut(), hdc_screen);
+            return Err("Failed to allocate GDI capture buffer".to_string());
+        }
         let old_obj = SelectObject(hdc_mem, hbm);
 
         let rop = SRCCOPY | 0x40000000;
-        BitBlt(hdc_mem, 0, 0, width, height, hdc_screen, rect.left, rect.top, rop);
+        let blt_ok = BitBlt(hdc_mem, 0, 0, width, height, hdc_screen, rect.left, rect.top, rop);
 
         let mut bi = BITMAPINFO {
             bmiHeader: BITMAPINFOHEADER {
@@ -1684,7 +1711,7 @@ pub fn capture_valorant_screenshot() -> Result<Vec<u8>, String> {
         };
 
         let mut bgra = vec![0u8; (width * height * 4) as usize];
-        GetDIBits(
+        let scan_lines = GetDIBits(
             hdc_mem,
             hbm,
             0,
@@ -1699,19 +1726,46 @@ pub fn capture_valorant_screenshot() -> Result<Vec<u8>, String> {
         DeleteDC(hdc_mem);
         ReleaseDC(std::ptr::null_mut(), hdc_screen);
 
+        if blt_ok == 0 || scan_lines == 0 {
+            return Err("Screen capture failed (PC may be locked or UAC prompt active).".to_string());
+        }
+
         let mut rgb = Vec::with_capacity((width * height * 3) as usize);
-        for pixel in bgra.chunks_exact(4) {
+        let mut sampled_total = 0u64;
+        let mut sampled_black = 0u64;
+        for (idx, pixel) in bgra.chunks_exact(4).enumerate() {
             let b = pixel[0];
             let g = pixel[1];
             let r = pixel[2];
+            if idx % 16 == 0 {
+                sampled_total += 1;
+                if r < 4 && g < 4 && b < 4 {
+                    sampled_black += 1;
+                }
+            }
             rgb.push(r);
             rgb.push(g);
             rgb.push(b);
         }
 
+        if sampled_total > 0 && sampled_black * 100 >= sampled_total * 99 {
+            return Err("Captured a black screen. Use Windowed Fullscreen (or unlock your PC).".to_string());
+        }
+
+        let img = image::RgbImage::from_raw(width as u32, height as u32, rgb)
+            .ok_or_else(|| "Failed to build RGB screenshot buffer".to_string())?;
+
+        let (out_img, out_w, out_h) = if width > 960 {
+            let new_h = ((height as f64) * (960.0 / width as f64)).round().max(1.0) as u32;
+            let resized = image::imageops::resize(&img, 960, new_h, image::imageops::FilterType::Triangle);
+            (resized, 960u32, new_h)
+        } else {
+            (img, width as u32, height as u32)
+        };
+
         let mut jpeg_buf = Vec::new();
-        let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg_buf, 80);
-        encoder.encode(&rgb, width as u32, height as u32, image::ExtendedColorType::Rgb8)
+        let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg_buf, 65);
+        encoder.encode(out_img.as_raw(), out_w, out_h, image::ExtendedColorType::Rgb8)
             .map_err(|e| format!("Failed to encode JPEG screenshot: {}", e))?;
 
         Ok(jpeg_buf)

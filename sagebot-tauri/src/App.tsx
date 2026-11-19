@@ -1,18 +1,15 @@
-import { useState, useEffect, useLayoutEffect, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   Play,
-  Square,
   Minus,
   X,
   Settings as SettingsIcon,
   RefreshCw,
   XOctagon,
   RotateCcw,
-  Upload,
-  Copy,
   Trash2,
   Wrench,
   Users,
@@ -31,6 +28,15 @@ import {
 import { RemoteHost, type PairRequest } from "./remoteHost";
 import { generatePairCode, randomHex } from "./secureChannel";
 import { AppModals } from "./modals/AppModals";
+import {
+  MatchFilterBar,
+  DEFAULT_MATCH_FILTERS,
+  hasActiveFilters,
+  loadSavedFilters,
+  matchesFilterCriteria,
+  saveFilters,
+  type MatchFilters,
+} from "./components/MatchFilterBar";
 import { MainTab } from "./tabs/MainTab";
 import { ShopTab } from "./tabs/ShopTab";
 import { ChatTab } from "./tabs/ChatTab";
@@ -44,10 +50,10 @@ import type {
   AgentInfo,
   AppConfig,
   CareerMatch,
+  EncounterMatchHistory,
   LiveMatchRoster,
-  MacroAction,
-  MacroData,
   PairedDevice,
+  PersistedRemoteState,
   PlayerEncounter,
   RecentMatchDetail,
   StatusResponse,
@@ -66,67 +72,57 @@ import {
   resolveAgentName,
 } from "./constants/valorant";
 
-const loadOrCreate = (storageKey: string, isValid: (v: string) => boolean, create: () => string): string => {
-  const saved = localStorage.getItem(storageKey);
-  if (saved && isValid(saved)) return saved;
-  const generated = create();
-  localStorage.setItem(storageKey, generated);
-  return generated;
-};
+const DEFAULT_GRILLED_CHEESE_CHAT =
+  "Gordon Ramsay's Ultimate Grilled Cheese Sandwich | Ramsay Around the World: https://www.youtube.com/watch?v=8E4cQHejFq0";
+const PAIRING_WINDOW_SECONDS = 180;
 
 export default function App() {
-  // Remote: 8-character code (pairing address), QR token (skips approval) and this PC's private channel id
-  const [remoteRoomCode, setRemoteRoomCode] = useState<string>(() =>
-    loadOrCreate("sagebot_remote_code", (v) => v.length === 8, generatePairCode)
-  );
+  // Remote Control state (single paired device, DPAPI-encrypted persistence via Rust, 3-minute pairing window)
+  const [remoteStateLoaded, setRemoteStateLoaded] = useState<boolean>(false);
+  const [remoteChannelId, setRemoteChannelId] = useState<string>("");
+  const [pairedDevice, setPairedDevice] = useState<PairedDevice | null>(null);
 
-  const [secretToken, setSecretToken] = useState<string>(() =>
-    loadOrCreate("sagebot_remote_secret", (v) => v.length >= 32, () => randomHex(32))
-  );
-
-  const [remoteChannelId, setRemoteChannelId] = useState<string>(() =>
-    loadOrCreate("sagebot_remote_channel", (v) => v.length === 32, () => randomHex(16))
-  );
-
-  const [pairedDevices, setPairedDevices] = useState<PairedDevice[]>(() => {
-    try {
-      const saved = localStorage.getItem("sagebot_paired_devices");
-      const list: PairedDevice[] = saved ? JSON.parse(saved) : [];
-      // Devices paired with the old insecure protocol have no key and must pair again.
-      return list.filter((d) => d && typeof d.key === "string" && d.key.length > 0);
-    } catch {
-      return [];
-    }
-  });
-
-  const [remoteUniqueControl, setRemoteUniqueControl] = useState<boolean>(
-    () => localStorage.getItem("sagebot_remote_unique") === "true"
-  );
+  const [pairingCode, setPairingCode] = useState<string>(() => generatePairCode());
+  const [pairingQrToken, setPairingQrToken] = useState<string>(() => randomHex(32));
+  const [pairingWindowExpiresAt, setPairingWindowExpiresAt] = useState<number>(0);
+  const [pairingWindowSecondsLeft, setPairingWindowSecondsLeft] = useState<number>(0);
 
   const [pendingPairRequest, setPendingPairRequest] = useState<PairRequest | null>(null);
   const [deviceNicknameInput, setDeviceNicknameInput] = useState<string>("");
-  const [showResetConfirmModal, setShowResetConfirmModal] = useState<boolean>(false);
+  const [showUnpairConfirmModal, setShowUnpairConfirmModal] = useState<boolean>(false);
 
   const [remoteClientConnected, setRemoteClientConnected] = useState<boolean>(false);
   const remoteBridgeRef = useRef<RemoteHost | null>(null);
-  const pairedDevicesRef = useRef<PairedDevice[]>(pairedDevices);
-  const secretTokenRef = useRef<string>(secretToken);
-  const remoteUniqueControlRef = useRef<boolean>(remoteUniqueControl);
+  const remoteChannelIdRef = useRef<string>(remoteChannelId);
+  const pairedDeviceRef = useRef<PairedDevice | null>(pairedDevice);
+  const pairingCodeRef = useRef<string>(pairingCode);
   const remoteLastSeenRef = useRef<number>(0);
+  const remoteConnectedToastRef = useRef<boolean>(false);
   const pendingPairRequestRef = useRef<PairRequest | null>(null);
 
   useEffect(() => {
-    pairedDevicesRef.current = pairedDevices;
-  }, [pairedDevices]);
+    remoteChannelIdRef.current = remoteChannelId;
+  }, [remoteChannelId]);
   useEffect(() => {
-    secretTokenRef.current = secretToken;
-  }, [secretToken]);
+    pairedDeviceRef.current = pairedDevice;
+  }, [pairedDevice]);
   useEffect(() => {
-    remoteUniqueControlRef.current = remoteUniqueControl;
-  }, [remoteUniqueControl]);
+    pairingCodeRef.current = pairingCode;
+  }, [pairingCode]);
   useEffect(() => {
     pendingPairRequestRef.current = pendingPairRequest;
   }, [pendingPairRequest]);
+
+  const persistRemoteState = (code: string, channelId: string, device: PairedDevice | null) => {
+    const state: PersistedRemoteState = {
+      code,
+      channel_id: channelId,
+      paired_device: device,
+    };
+    invoke("save_remote_state", { state }).catch((err) =>
+      console.error("Failed to persist DPAPI remote state:", err)
+    );
+  };
 
   const [activeTab, setActiveTab] = useState<TabType>("main");
   const [agents, setAgents] = useState<AgentInfo[]>([]);
@@ -139,13 +135,139 @@ export default function App() {
   // Career tab state
   const [careerMatches, setCareerMatches] = useState<CareerMatch[]>([]);
   const [selectedCareerMatch, setSelectedCareerMatch] = useState<CareerMatch | null>(null);
+  const [careerFilters, setCareerFilters] = useState<MatchFilters>(() =>
+    loadSavedFilters("sagebot_career_filters_v1")
+  );
+
+  const updateCareerFilters = (next: MatchFilters) => {
+    setCareerFilters(next);
+    saveFilters("sagebot_career_filters_v1", next);
+  };
 
   // Players directory tab state
   const [encounteredPlayers, setEncounteredPlayers] = useState<PlayerEncounter[]>([]);
   const [selectedPlayerEncounter, setSelectedPlayerEncounter] = useState<PlayerEncounter | null>(null);
   const [playerSearchQuery, setPlayerSearchQuery] = useState<string>("");
+  const [playersFilters, setPlayersFilters] = useState<MatchFilters>(() =>
+    loadSavedFilters("sagebot_players_filters_v1")
+  );
   const [isLoadingPlayers, setIsLoadingPlayers] = useState<boolean>(false);
   const [playerToDelete, setPlayerToDelete] = useState<PlayerEncounter | null>(null);
+
+  const updatePlayersFilters = (next: MatchFilters) => {
+    setPlayersFilters(next);
+    saveFilters("sagebot_players_filters_v1", next);
+  };
+
+  const availableCareerMaps = useMemo(() => {
+    const mapSet = new Set<string>();
+    for (const m of careerMatches) {
+      if (m.map_name && m.map_name.trim()) mapSet.add(m.map_name.trim());
+    }
+    return Array.from(mapSet).sort((a, b) => a.localeCompare(b));
+  }, [careerMatches]);
+
+  const filteredCareerMatches = useMemo(() => {
+    if (!hasActiveFilters(careerFilters)) return careerMatches;
+    return careerMatches.filter((m) => matchesFilterCriteria(m, careerFilters));
+  }, [careerMatches, careerFilters]);
+
+  const careerFilteredSummary = useMemo(() => {
+    const total = filteredCareerMatches.length;
+    let wins = 0;
+    let losses = 0;
+    let draws = 0;
+    let kills = 0;
+    let deaths = 0;
+    for (const m of filteredCareerMatches) {
+      const r = (m.result || "").toUpperCase();
+      if (r === "VICTORY") wins += 1;
+      else if (r === "DEFEAT") losses += 1;
+      else draws += 1;
+      kills += m.my_kills || 0;
+      deaths += m.my_deaths || 0;
+    }
+    const decided = wins + losses;
+    const winRate = decided > 0 ? Math.round((wins / decided) * 1000) / 10 : 0;
+    const avgKd = deaths > 0 ? kills / deaths : kills;
+    return { total, wins, losses, draws, winRate, avgKd };
+  }, [filteredCareerMatches]);
+
+  const availablePlayerMaps = useMemo(() => {
+    const mapSet = new Set<string>();
+    for (const p of encounteredPlayers) {
+      if (p.last_seen_map && p.last_seen_map.trim()) mapSet.add(p.last_seen_map.trim());
+      if (p.history) {
+        for (const h of p.history) {
+          if (h.map_name && h.map_name.trim()) mapSet.add(h.map_name.trim());
+        }
+      }
+    }
+    return Array.from(mapSet).sort((a, b) => a.localeCompare(b));
+  }, [encounteredPlayers]);
+
+  const filteredPlayerEntries = useMemo(() => {
+    const q = playerSearchQuery.trim().toLowerCase();
+    const filtersActive = hasActiveFilters(playersFilters);
+    const out: Array<{
+      player: PlayerEncounter;
+      matchingCount: number;
+      latestMatch: EncounterMatchHistory | null;
+    }> = [];
+
+    for (const p of encounteredPlayers) {
+      if (q && !p.name.toLowerCase().includes(q)) continue;
+
+      if (!filtersActive) {
+        out.push({
+          player: p,
+          matchingCount: p.encounters_count,
+          latestMatch: null,
+        });
+        continue;
+      }
+
+      const sourceHistory: EncounterMatchHistory[] =
+        p.history && p.history.length > 0
+          ? p.history
+          : [
+              {
+                match_id: "",
+                timestamp: p.last_seen_timestamp,
+                date_str: p.last_seen_date_str,
+                time_str: p.last_seen_time_str,
+                map_name: p.last_seen_map,
+                gamemode: "",
+                relationship: p.last_relationship,
+                result: p.last_result,
+                score_ally: p.last_score_ally,
+                score_enemy: p.last_score_enemy,
+                agent_id: p.last_seen_agent_id,
+                agent_name: p.last_seen_agent_name,
+                rank_tier: p.last_rank_tier,
+                rank_name: p.last_rank_name,
+                rr: p.last_rr,
+                kills: 0,
+                deaths: 0,
+                assists: 0,
+                score: 0,
+                is_win: p.last_result === "VICTORY",
+              },
+            ];
+
+      const matching = sourceHistory.filter((h) => matchesFilterCriteria(h, playersFilters));
+      if (matching.length === 0) continue;
+
+      const sortedMatching = [...matching].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+      out.push({
+        player: p,
+        matchingCount: matching.length,
+        latestMatch: sortedMatching[0],
+      });
+    }
+
+    return out;
+  }, [encounteredPlayers, playerSearchQuery, playersFilters]);
 
   const loadCareerMatches = async () => {
     try {
@@ -345,7 +467,9 @@ export default function App() {
     chat_enabled: false,
     chat_target: 0,
     chat_interval: 3,
-    chat_text: "With great Power comes great Responsibility",
+    chat_text: DEFAULT_GRILLED_CHEESE_CHAT,
+    custom_chat_messages: [],
+    custom_chat_seeded: false,
     webhook_enabled: true,
     webhook_url: "",
     webhook_user_id: "",
@@ -382,13 +506,12 @@ export default function App() {
     comms_second_num: 6,
     comms_random: false,
     comms_delay: 3,
-    custom_macro_json: "",
   });
 
   const [isRunning, setIsRunning] = useState<boolean>(false);
   const [logs, setLogs] = useState<string[]>([
     "[SYSTEM] SageBot initialized.",
-    "[SYSTEM] Settings loaded from config.ini.",
+    "[SYSTEM] Settings loaded.",
   ]);
   const [isRebindingMain, setIsRebindingMain] = useState<boolean>(false);
   const [isRebindingAfk, setIsRebindingAfk] = useState<boolean>(false);
@@ -396,26 +519,10 @@ export default function App() {
   const [isRebindingVoteYes, setIsRebindingVoteYes] = useState<boolean>(false);
   const [isRebindingVoteNo, setIsRebindingVoteNo] = useState<boolean>(false);
   const [agentRoleFilter, setAgentRoleFilter] = useState<string>("All");
-  const [isRecordingMacro, setIsRecordingMacro] = useState<boolean>(false);
-  const [macroLiveActions, setMacroLiveActions] = useState<MacroAction[]>([]);
-  const [activeHoldingKeys, setActiveHoldingKeys] = useState<string[]>([]);
-  const [showMacroImportModal, setShowMacroImportModal] = useState<boolean>(false);
-  const [macroImportText, setMacroImportText] = useState<string>("");
-  const [macroCompilerError, setMacroCompilerError] = useState<string | null>(null);
-
-  // Macro recording & playback refs
-  const macroRecordStartRef = useRef<number>(0);
-  const activeKeysDownRef = useRef<Map<string, number>>(new Map());
-  const recordedActionsRef = useRef<MacroAction[]>([]);
-  const macroScheduledTimeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
-  const macroActiveDownKeysRef = useRef<Set<string>>(new Set());
-  const isRecordingMacroRef = useRef<boolean>(false);
-  isRecordingMacroRef.current = isRecordingMacro;
   const [changelogContent, setChangelogContent] = useState<string>("");
   const [updateStatus, setUpdateStatus] = useState<string>("");
   const [toasts, setToasts] = useState<ToastMsg[]>([]);
   const [showKillModal, setShowKillModal] = useState<boolean>(false);
-  const [showChatWarningModal, setShowChatWarningModal] = useState<boolean>(false);
   const [errorModal, setErrorModal] = useState<{ title: string; message: string; submessage?: string } | null>(null);
 
   // In-App Auto Updater State
@@ -833,13 +940,44 @@ export default function App() {
     }
   }, [logs]);
 
-  // Initial Data Fetch
+  // Initial Data Fetch (config, agents, changelog, DPAPI remote store)
   useEffect(() => {
+    // Clear legacy plaintext WebView localStorage remote keys
+    [
+      "sagebot_remote_code",
+      "sagebot_remote_secret",
+      "sagebot_remote_channel",
+      "sagebot_paired_devices",
+      "sagebot_remote_unique",
+    ].forEach((k) => localStorage.removeItem(k));
+
+    invoke<PersistedRemoteState | null>("load_remote_state")
+      .then((saved) => {
+        const ch = saved?.channel_id && saved.channel_id.length === 32 ? saved.channel_id : randomHex(16);
+        const dev = saved?.paired_device && saved.paired_device.key ? saved.paired_device : null;
+        remoteChannelIdRef.current = ch;
+        pairedDeviceRef.current = dev;
+        setRemoteChannelId(ch);
+        setPairedDevice(dev);
+        if (!saved || !saved.channel_id) {
+          persistRemoteState("", ch, dev);
+        }
+      })
+      .catch((err) => {
+        console.error("Failed to load DPAPI remote state:", err);
+        const fallbackCh = randomHex(16);
+        remoteChannelIdRef.current = fallbackCh;
+        setRemoteChannelId(fallbackCh);
+      })
+      .finally(() => {
+        setRemoteStateLoaded(true);
+      });
+
     invoke<AppConfig>("get_config")
       .then((cfg) => {
         if (cfg) {
-          if (cfg.anti_afk_mode > 3) {
-            cfg.anti_afk_mode = 3;
+          if (cfg.anti_afk_mode > 2) {
+            cfg.anti_afk_mode = 2;
           }
           setConfig(cfg);
           if (!cfg.auto_derank_enabled) {
@@ -901,8 +1039,10 @@ export default function App() {
       });
   }, []);
 
-  // Remote host lifecycle (restarts cleanly when the code or channel is reset)
+  // Remote host lifecycle (single-device DPAPI store, 3-minute pairing window, challenge-response reconnect)
   useEffect(() => {
+    if (!remoteStateLoaded || !remoteChannelIdRef.current) return;
+
     const sendStatusUpdate = (bridgeInstance?: RemoteHost | null) => {
       const b = bridgeInstance ?? remoteBridgeRef.current;
       if (!b) return;
@@ -925,12 +1065,8 @@ export default function App() {
     };
 
     const bridge = new RemoteHost({
-      code: remoteRoomCode,
-      channelId: remoteChannelId,
-      getToken: () => secretTokenRef.current,
-      getDevices: () => pairedDevicesRef.current,
-      canAcceptDevice: (cid) =>
-        !remoteUniqueControlRef.current || pairedDevicesRef.current.every((d) => d.id === cid),
+      channelId: remoteChannelIdRef.current,
+      getDevice: () => pairedDeviceRef.current,
       onReady: () => sendStatusUpdate(bridge),
       onPairRequest: (req) => {
         setDeviceNicknameInput(req.proposed_name);
@@ -939,28 +1075,59 @@ export default function App() {
       onPairCancelled: (cid) => {
         if (pendingPairRequestRef.current?.client_id === cid) setPendingPairRequest(null);
       },
-      onDevicePaired: (dev) => {
+      onPairingWindowClosed: (reason) => {
+        setPairingWindowExpiresAt(0);
+        setPairingWindowSecondsLeft(0);
+        if (reason) {
+          showToast(reason);
+          addLog(`[REMOTE] ${reason}`);
+        }
+      },
+      onDevicePaired: (dev, newChannelId) => {
+        const now = Date.now();
         const newDev: PairedDevice = {
           ...dev,
           paired_at: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          last_seen_ms: now,
         };
-        const next = [...pairedDevicesRef.current.filter((d) => d.id !== dev.id), newDev];
-        pairedDevicesRef.current = next;
-        setPairedDevices(next);
-        localStorage.setItem("sagebot_paired_devices", JSON.stringify(next));
-        remoteLastSeenRef.current = Date.now();
+        pairedDeviceRef.current = newDev;
+        remoteChannelIdRef.current = newChannelId;
+        remoteLastSeenRef.current = now;
+        remoteConnectedToastRef.current = true;
+        setPairedDevice(newDev);
+        setRemoteChannelId(newChannelId);
         setRemoteClientConnected(true);
+        setPairingWindowExpiresAt(0);
+        setPairingWindowSecondsLeft(0);
+        persistRemoteState(pairingCodeRef.current, newChannelId, newDev);
         setTimeout(() => sendStatusUpdate(bridge), 250);
         showToast(`Paired: ${dev.name}`);
+        addLog(`[REMOTE] Paired device: ${dev.name}`);
+      },
+      onDeviceConnected: (dev) => {
+        const now = Date.now();
+        remoteLastSeenRef.current = now;
+        if (pairedDeviceRef.current) {
+          const updatedDev: PairedDevice = { ...pairedDeviceRef.current, last_seen_ms: now };
+          pairedDeviceRef.current = updatedDev;
+          setPairedDevice(updatedDev);
+          persistRemoteState(pairingCodeRef.current, remoteChannelIdRef.current, updatedDev);
+        }
+        setRemoteClientConnected(true);
+        if (!remoteConnectedToastRef.current) {
+          remoteConnectedToastRef.current = true;
+          showToast(`Remote connected: ${dev.name}`);
+          addLog(`[REMOTE] Connected: ${dev.name}`);
+        }
+        setTimeout(() => sendStatusUpdate(bridge), 150);
       },
       onCommand: async (_cid, data) => {
-        remoteLastSeenRef.current = Date.now();
-        setRemoteClientConnected((prev) => {
-          if (!prev) {
-            showToast("Mobile Remote connected");
-          }
-          return true;
-        });
+        const now = Date.now();
+        remoteLastSeenRef.current = now;
+        if (pairedDeviceRef.current) {
+          pairedDeviceRef.current = { ...pairedDeviceRef.current, last_seen_ms: now };
+        }
+        setRemoteClientConnected(true);
 
         const action = typeof data.action === "string" ? data.action : "";
         switch (action) {
@@ -970,6 +1137,20 @@ export default function App() {
             break;
           case "ping":
             break;
+          case "unpair": {
+            const freshChannel = randomHex(16);
+            pairedDeviceRef.current = null;
+            remoteChannelIdRef.current = freshChannel;
+            remoteConnectedToastRef.current = false;
+            setPairedDevice(null);
+            setRemoteChannelId(freshChannel);
+            setRemoteClientConnected(false);
+            bridge.rotateChannel(freshChannel);
+            persistRemoteState("", freshChannel, null);
+            showToast("Mobile Remote unpaired by phone");
+            addLog("[REMOTE] Device unpaired remotely.");
+            break;
+          }
           case "toggle_bot":
             if (runningRef.current) {
               stopSagebot("Mobile remote trigger");
@@ -987,7 +1168,7 @@ export default function App() {
               });
             } catch (err) {
               bridge.send({
-                type: "toast",
+                type: "screenshot_error",
                 payload: `Screenshot failed: ${err}`,
               });
             }
@@ -1150,10 +1331,17 @@ export default function App() {
     };
     scheduleSync();
 
-    // The phone pings every 5s; consider it gone after 15s of silence
+    // The phone pings every 4.5s; mark offline after 15s of silence
     const presenceTimer = setInterval(() => {
-      if (Date.now() - remoteLastSeenRef.current > 15000) {
+      if (remoteConnectedToastRef.current && Date.now() - remoteLastSeenRef.current > 15000) {
+        remoteConnectedToastRef.current = false;
         setRemoteClientConnected(false);
+        if (pairedDeviceRef.current) {
+          const updatedDev = { ...pairedDeviceRef.current, last_seen_ms: remoteLastSeenRef.current };
+          pairedDeviceRef.current = updatedDev;
+          setPairedDevice(updatedDev);
+          persistRemoteState(pairingCodeRef.current, remoteChannelIdRef.current, updatedDev);
+        }
       }
     }, 3000);
 
@@ -1163,9 +1351,29 @@ export default function App() {
       clearInterval(presenceTimer);
       bridge.destroy();
       remoteBridgeRef.current = null;
+      remoteConnectedToastRef.current = false;
       setRemoteClientConnected(false);
     };
-  }, [remoteRoomCode, remoteChannelId]);
+  }, [remoteStateLoaded]);
+
+  // 3-minute Pairing Window countdown timer
+  useEffect(() => {
+    if (!pairingWindowExpiresAt) {
+      setPairingWindowSecondsLeft(0);
+      return;
+    }
+    const tick = () => {
+      const remaining = Math.max(0, Math.ceil((pairingWindowExpiresAt - Date.now()) / 1000));
+      setPairingWindowSecondsLeft(remaining);
+      if (remaining <= 0) {
+        setPairingWindowExpiresAt(0);
+        remoteBridgeRef.current?.closePairingWindow("Pairing window expired.");
+      }
+    };
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, [pairingWindowExpiresAt]);
 
   // Disable default browser/WebView context menu on right-click
   useEffect(() => {
@@ -1213,6 +1421,29 @@ export default function App() {
   }, []);
 
   // Remote Device Pairing Handlers
+  const handleStartPairingWindow = async () => {
+    const newCode = generatePairCode();
+    const newToken = randomHex(32);
+    const nextChannel = pairedDeviceRef.current ? randomHex(16) : remoteChannelIdRef.current || randomHex(16);
+    if (!remoteChannelIdRef.current) {
+      remoteChannelIdRef.current = nextChannel;
+      setRemoteChannelId(nextChannel);
+    }
+    pairingCodeRef.current = newCode;
+    setPairingCode(newCode);
+    setPairingQrToken(newToken);
+    setPairingWindowExpiresAt(Date.now() + PAIRING_WINDOW_SECONDS * 1000);
+    setPairingWindowSecondsLeft(PAIRING_WINDOW_SECONDS);
+    await remoteBridgeRef.current?.openPairingWindow(newCode, newToken, nextChannel);
+    addLog("[REMOTE] Pairing window opened (3 minutes).");
+  };
+
+  const handleClosePairingWindow = () => {
+    setPairingWindowExpiresAt(0);
+    setPairingWindowSecondsLeft(0);
+    remoteBridgeRef.current?.closePairingWindow();
+  };
+
   const handleApproveDevice = async () => {
     const req = pendingPairRequest;
     if (!req) return;
@@ -1221,7 +1452,7 @@ export default function App() {
     const name = deviceNicknameInput.trim() || req.proposed_name || "Phone";
     const dev = await remoteBridgeRef.current?.approve(req.client_id, name);
     if (!dev) {
-      showToast(remoteUniqueControlRef.current ? "Unique Control: remove the current device first." : "Pairing request expired.");
+      showToast("Pairing request expired.");
     }
   };
 
@@ -1234,54 +1465,27 @@ export default function App() {
     showToast("Device pairing denied");
   };
 
-  const handleRemoveDevice = async (devId: string) => {
-    // Tell the phone first (while its key still exists), then delete the key: it can never get back in.
-    await remoteBridgeRef.current?.sendTo(devId, { type: "revoked" });
-    const next = pairedDevicesRef.current.filter((d) => d.id !== devId);
-    pairedDevicesRef.current = next;
-    setPairedDevices(next);
-    localStorage.setItem("sagebot_paired_devices", JSON.stringify(next));
-    showToast("Device removed and disconnected.");
-  };
-
-  const handleToggleUniqueControl = async () => {
-    const next = !remoteUniqueControl;
-    if (next && pairedDevicesRef.current.length > 1) {
-      // Keep only the first paired device and revoke any extra ones
-      const [keep, ...extra] = pairedDevicesRef.current;
-      for (const dev of extra) {
-        await remoteBridgeRef.current?.sendTo(dev.id, { type: "revoked" });
-      }
-      const trimmed = [keep];
-      pairedDevicesRef.current = trimmed;
-      setPairedDevices(trimmed);
-      localStorage.setItem("sagebot_paired_devices", JSON.stringify(trimmed));
+  const handleUnpairRemoteDevice = async () => {
+    setShowUnpairConfirmModal(false);
+    setPairingWindowExpiresAt(0);
+    setPairingWindowSecondsLeft(0);
+    remoteBridgeRef.current?.closePairingWindow();
+    if (pairedDeviceRef.current) {
+      await remoteBridgeRef.current?.revokeDevice(pairedDeviceRef.current);
     }
-    remoteUniqueControlRef.current = next;
-    setRemoteUniqueControl(next);
-    localStorage.setItem("sagebot_remote_unique", String(next));
-    showToast(next ? "Unique Control enabled: one device only." : "Unique Control disabled.");
-  };
-
-  const handleResetRemoteCode = async () => {
-    setShowResetConfirmModal(false);
-    await remoteBridgeRef.current?.send({ type: "force_logout" });
-    const newCode = generatePairCode();
-    const newToken = randomHex(32);
-    const newChannel = randomHex(16);
-    secretTokenRef.current = newToken;
-    pairedDevicesRef.current = [];
+    const freshChannel = randomHex(16);
+    remoteBridgeRef.current?.rotateChannel(freshChannel);
+    pairedDeviceRef.current = null;
+    remoteChannelIdRef.current = freshChannel;
+    remoteConnectedToastRef.current = false;
     pendingPairRequestRef.current = null;
-    setRemoteRoomCode(newCode);
-    setSecretToken(newToken);
-    setRemoteChannelId(newChannel);
-    setPairedDevices([]);
+    setPairedDevice(null);
+    setRemoteChannelId(freshChannel);
+    setRemoteClientConnected(false);
     setPendingPairRequest(null);
-    localStorage.setItem("sagebot_remote_code", newCode);
-    localStorage.setItem("sagebot_remote_secret", newToken);
-    localStorage.setItem("sagebot_remote_channel", newChannel);
-    localStorage.setItem("sagebot_paired_devices", JSON.stringify([]));
-    showToast("Code reset. All devices logged out.");
+    persistRemoteState("", freshChannel, null);
+    showToast("Device unpaired and channel rotated.");
+    addLog("[REMOTE] Paired device removed.");
   };
 
   // Hidden developer authentication listener (Ctrl + Shift + P)
@@ -2033,232 +2237,6 @@ export default function App() {
     );
   };
 
-  // Macro Recording Effect
-  useEffect(() => {
-    if (!isRecordingMacro) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-
-      // Enter stops recording automatically and saves (Enter is strictly never recorded)
-      if (e.key === "Enter") {
-        stopRecordingMacro();
-        return;
-      }
-
-      // Backspace deletes the newest recorded key
-      if (e.key === "Backspace") {
-        if (recordedActionsRef.current.length > 0) {
-          recordedActionsRef.current.pop();
-          setMacroLiveActions([...recordedActionsRef.current]);
-        }
-        return;
-      }
-
-      // Ignore OS auto-repeat events while key is held down
-      if (e.repeat) return;
-
-      let keyName = e.key;
-      if (e.code === "Space") keyName = "Space";
-      else if (e.code === "Tab") keyName = "Tab";
-      else if (e.key.length === 1) keyName = e.key.toUpperCase();
-      else if (e.code.startsWith("Key")) keyName = e.code.replace("Key", "").toUpperCase();
-      else if (e.code.startsWith("Digit")) keyName = e.code.replace("Digit", "");
-      else keyName = e.key;
-
-      const now = Date.now();
-      activeKeysDownRef.current.set(keyName, now);
-      setActiveHoldingKeys(Array.from(activeKeysDownRef.current.keys()));
-    };
-
-    const handleKeyUp = (e: KeyboardEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-
-      if (e.key === "Enter" || e.key === "Backspace") return;
-
-      let keyName = e.key;
-      if (e.code === "Space") keyName = "Space";
-      else if (e.code === "Tab") keyName = "Tab";
-      else if (e.key.length === 1) keyName = e.key.toUpperCase();
-      else if (e.code.startsWith("Key")) keyName = e.code.replace("Key", "").toUpperCase();
-      else if (e.code.startsWith("Digit")) keyName = e.code.replace("Digit", "");
-      else keyName = e.key;
-
-      if (activeKeysDownRef.current.has(keyName)) {
-        const pressTime = activeKeysDownRef.current.get(keyName)!;
-        const now = Date.now();
-        const startRaw = pressTime - macroRecordStartRef.current;
-        const durRaw = now - pressTime;
-
-        // OCD-friendly: clean snapping to 50ms intervals
-        const start_ms = Math.round(startRaw / 50) * 50;
-        const duration_ms = Math.max(50, Math.round(durRaw / 50) * 50);
-
-        const newAction = { key: keyName, start_ms, duration_ms };
-        recordedActionsRef.current.push(newAction);
-        setMacroLiveActions([...recordedActionsRef.current]);
-
-        activeKeysDownRef.current.delete(keyName);
-        setActiveHoldingKeys(Array.from(activeKeysDownRef.current.keys()));
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("keyup", handleKeyUp);
-
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("keyup", handleKeyUp);
-    };
-  }, [isRecordingMacro]);
-
-  const startRecordingMacro = () => {
-    macroRecordStartRef.current = Date.now();
-    activeKeysDownRef.current.clear();
-    recordedActionsRef.current = [];
-    setMacroLiveActions([]);
-    setActiveHoldingKeys([]);
-    setIsRecordingMacro(true);
-  };
-
-  const stopRecordingMacro = () => {
-    setIsRecordingMacro(false);
-    const now = Date.now();
-    // Finalize any keys that are still being held down at the moment of stop
-    activeKeysDownRef.current.forEach((pressTime, keyName) => {
-      const start_ms = Math.round((pressTime - macroRecordStartRef.current) / 50) * 50;
-      const duration_ms = Math.max(50, Math.round((now - pressTime) / 50) * 50);
-      recordedActionsRef.current.push({ key: keyName, start_ms, duration_ms });
-    });
-    activeKeysDownRef.current.clear();
-    setActiveHoldingKeys([]);
-
-    // Calculate total loop duration
-    const actions = [...recordedActionsRef.current];
-    let maxEnd = 0;
-    actions.forEach((a) => {
-      if (a.start_ms + a.duration_ms > maxEnd) {
-        maxEnd = a.start_ms + a.duration_ms;
-      }
-    });
-    const totalRaw = now - macroRecordStartRef.current;
-    const total_loop_ms = Math.max(maxEnd, Math.round(totalRaw / 50) * 50);
-
-    const macroData = {
-      total_loop_ms: Math.max(total_loop_ms, 500),
-      actions,
-    };
-    const jsonStr = JSON.stringify(macroData, null, 2);
-    updateAndSaveConfig({ custom_macro_json: jsonStr });
-    setMacroLiveActions(actions);
-    addLog(`[CONFIG] Macro saved (${actions.length} action${actions.length === 1 ? "" : "s"}, loop: ${(macroData.total_loop_ms / 1000).toFixed(2)}s).`);
-  };
-
-  const clearMacro = () => {
-    recordedActionsRef.current = [];
-    setMacroLiveActions([]);
-    setActiveHoldingKeys([]);
-    updateAndSaveConfig({ custom_macro_json: "" });
-    addLog("[CONFIG] Custom macro cleared.");
-  };
-
-  const exportMacro = () => {
-    let jsonStr = config.custom_macro_json;
-    if (!jsonStr) {
-      jsonStr = JSON.stringify({ total_loop_ms: 0, actions: [] }, null, 2);
-    }
-    navigator.clipboard.writeText(jsonStr).then(() => {
-      showToast("Copied to clipboard.");
-    });
-  };
-
-  const handleValidateAndApplyMacro = () => {
-    setMacroCompilerError(null);
-    const raw = macroImportText.trim();
-    if (!raw) {
-      setMacroCompilerError("[CompilerError] Cannot import empty macro JSON.");
-      return;
-    }
-
-    let parsed: any;
-    try {
-      parsed = JSON.parse(raw);
-    } catch (e: any) {
-      const msg = e.message || "Invalid JSON format";
-      let lineNum = 1;
-      let colNum = 1;
-      const match = msg.match(/at position (\d+)/) || msg.match(/line (\d+) column (\d+)/);
-      if (match && match.length === 3) {
-        lineNum = parseInt(match[1]);
-        colNum = parseInt(match[2]);
-      } else if (match && match.length === 2) {
-        const pos = parseInt(match[1]);
-        const lines = raw.substring(0, pos).split("\n");
-        lineNum = lines.length;
-        colNum = lines[lines.length - 1].length + 1;
-      }
-      const rawLines = raw.split("\n");
-      const errLine = rawLines[lineNum - 1] || "";
-      const pointer = " ".repeat(Math.max(0, colNum - 1)) + "^";
-
-      const formatted = `[SyntaxError] ${msg} (line ${lineNum}, col ${colNum})\n\n  ${lineNum} | ${errLine}\n    | ${pointer}\n\nHint: Verify that keys and strings use double quotes and there are no trailing commas.`;
-      setMacroCompilerError(formatted);
-      return;
-    }
-
-    const actions: any[] = Array.isArray(parsed) ? parsed : parsed.actions;
-    if (!Array.isArray(actions)) {
-      setMacroCompilerError(`[ValidationError] Root JSON must contain an "actions" array or be an array of actions.\n\nReceived: ${typeof parsed}\nExpected: { "total_loop_ms": 3000, "actions": [ ... ] }`);
-      return;
-    }
-
-    for (let i = 0; i < actions.length; i++) {
-      const a = actions[i];
-      if (typeof a !== "object" || a === null) {
-        setMacroCompilerError(`[ValidationError] Action #${i + 1} must be an object { "key": string, "start_ms": number, "duration_ms": number }`);
-        return;
-      }
-      if (typeof a.key !== "string" || !a.key.trim()) {
-        setMacroCompilerError(`[ValidationError] Action #${i + 1} is missing a valid string property "key".\n\nSnippet: ${JSON.stringify(a)}`);
-        return;
-      }
-      if (typeof a.start_ms !== "number" || isNaN(a.start_ms) || a.start_ms < 0) {
-        setMacroCompilerError(`[ValidationError] Action #${i + 1} ("${a.key}") must have "start_ms" as a positive integer (e.g. 0, 500).\n\nSnippet: ${JSON.stringify(a)}`);
-        return;
-      }
-      if (typeof a.duration_ms !== "number" || isNaN(a.duration_ms) || a.duration_ms <= 0) {
-        setMacroCompilerError(`[ValidationError] Action #${i + 1} ("${a.key}") must have "duration_ms" as a positive integer in milliseconds (minimum 50ms).\n\nSnippet: ${JSON.stringify(a)}`);
-        return;
-      }
-    }
-
-    const cleanActions = actions.map((a) => ({
-      key: a.key.trim(),
-      start_ms: Math.round(a.start_ms / 50) * 50,
-      duration_ms: Math.max(50, Math.round(a.duration_ms / 50) * 50),
-    }));
-
-    let maxEnd = 0;
-    cleanActions.forEach((a) => {
-      if (a.start_ms + a.duration_ms > maxEnd) maxEnd = a.start_ms + a.duration_ms;
-    });
-
-    const total_loop_ms = typeof parsed.total_loop_ms === "number" && parsed.total_loop_ms >= maxEnd
-      ? Math.round(parsed.total_loop_ms / 50) * 50
-      : maxEnd;
-
-    const finalObj = { total_loop_ms, actions: cleanActions };
-    const savedJson = JSON.stringify(finalObj, null, 2);
-
-    updateAndSaveConfig({ custom_macro_json: savedJson });
-    setMacroLiveActions(cleanActions);
-    setShowMacroImportModal(false);
-    showToast("Macro imported successfully.");
-    addLog(`[CONFIG] Imported custom macro (${cleanActions.length} actions, loop: ${(total_loop_ms / 1000).toFixed(2)}s).`);
-  };
-
   // Start / Stop SageBot Logic
   const startSagebot = (fromRemote = false) => {
     if (runningRef.current) return;
@@ -2318,14 +2296,6 @@ export default function App() {
     hasLoggedCommsRef.current = false;
     hasLoggedChatRef.current = false;
     hasSentAgentSelectWebhookRef.current = false;
-
-    // Clear macro timeouts and release active keys
-    macroScheduledTimeoutsRef.current.forEach(t => clearTimeout(t));
-    macroScheduledTimeoutsRef.current = [];
-    macroActiveDownKeysRef.current.forEach(k => {
-      invoke("trigger_key_up", { key: k }).catch(() => { });
-    });
-    macroActiveDownKeysRef.current.clear();
 
     // Keep hasSentMatchStartWebhookRef and lastSentMatchStartKeyRef across stops/starts during the same game
     roundStartTimestampRef.current = 0;
@@ -2797,112 +2767,6 @@ export default function App() {
     config.comms_delay,
     config.auto_focus_game,
   ]);
-
-  // Active Macros Mode playback loop (Mode 3)
-  useEffect(() => {
-    if (!isRunning || config.anti_afk_mode !== 3) {
-      macroScheduledTimeoutsRef.current.forEach((t) => clearTimeout(t));
-      macroScheduledTimeoutsRef.current = [];
-      macroActiveDownKeysRef.current.forEach((k) => {
-        invoke("trigger_key_up", { key: k }).catch(() => { });
-      });
-      macroActiveDownKeysRef.current.clear();
-      return;
-    }
-
-    let parsed: MacroData | null = null;
-    try {
-      if (config.custom_macro_json) {
-        parsed = JSON.parse(config.custom_macro_json);
-      }
-    } catch (_) { }
-
-    if (!parsed || !Array.isArray(parsed.actions) || parsed.actions.length === 0) {
-      return;
-    }
-
-    const macroData = parsed;
-    let isCancelled = false;
-
-    const scheduleCycle = async () => {
-      if (isCancelled || !runningRef.current) return;
-      const currentSt = statusRef.current;
-      const isIngame =
-        devBypassRef.current ||
-        ((currentSt.is_game_ready || currentSt.game_live) &&
-          currentSt.match_state === "In Game");
-
-      if (!isIngame) {
-        macroActiveDownKeysRef.current.forEach((k) => {
-          invoke("trigger_key_up", { key: k }).catch(() => { });
-        });
-        macroActiveDownKeysRef.current.clear();
-        const t = setTimeout(scheduleCycle, 1000);
-        macroScheduledTimeoutsRef.current.push(t);
-        return;
-      }
-
-      // Yield to Auto Surrender and release keys if currently spamming /ff
-      if (surrenderSpamUntilRef.current > Date.now()) {
-        macroActiveDownKeysRef.current.forEach((k) => {
-          invoke("trigger_key_up", { key: k }).catch(() => { });
-        });
-        macroActiveDownKeysRef.current.clear();
-        const t = setTimeout(scheduleCycle, 500);
-        macroScheduledTimeoutsRef.current.push(t);
-        return;
-      }
-
-      const isFocused = await invoke<boolean>("check_valorant_focused").catch(() => false);
-      if (!isFocused) {
-        macroActiveDownKeysRef.current.forEach((k) => {
-          invoke("trigger_key_up", { key: k }).catch(() => { });
-        });
-        macroActiveDownKeysRef.current.clear();
-        const t = setTimeout(scheduleCycle, 1000);
-        macroScheduledTimeoutsRef.current.push(t);
-        return;
-      }
-
-      const loopDuration = Math.max(macroData.total_loop_ms || 1000, 500);
-
-      macroData.actions.forEach((act) => {
-        const tDown = setTimeout(() => {
-          if (isCancelled || !runningRef.current) return;
-          invoke("trigger_key_down", { key: act.key }).catch(() => { });
-          macroActiveDownKeysRef.current.add(act.key);
-        }, act.start_ms);
-        macroScheduledTimeoutsRef.current.push(tDown);
-
-        const tUp = setTimeout(() => {
-          invoke("trigger_key_up", { key: act.key }).catch(() => { });
-          macroActiveDownKeysRef.current.delete(act.key);
-        }, act.start_ms + act.duration_ms);
-        macroScheduledTimeoutsRef.current.push(tUp);
-      });
-
-      const tLoop = setTimeout(() => {
-        macroActiveDownKeysRef.current.forEach((k) => {
-          invoke("trigger_key_up", { key: k }).catch(() => { });
-        });
-        macroActiveDownKeysRef.current.clear();
-        scheduleCycle();
-      }, loopDuration);
-      macroScheduledTimeoutsRef.current.push(tLoop);
-    };
-
-    scheduleCycle();
-
-    return () => {
-      isCancelled = true;
-      macroScheduledTimeoutsRef.current.forEach((t) => clearTimeout(t));
-      macroScheduledTimeoutsRef.current = [];
-      macroActiveDownKeysRef.current.forEach((k) => {
-        invoke("trigger_key_up", { key: k }).catch(() => { });
-      });
-      macroActiveDownKeysRef.current.clear();
-    };
-  }, [isRunning, config.anti_afk_mode, config.custom_macro_json]);
 
   // Audio Sync
   const togglePlayMusic = () => {
@@ -4535,6 +4399,17 @@ export default function App() {
                       </div>
                     </div>
 
+                    {careerMatches.length > 0 && (
+                      <MatchFilterBar
+                        filters={careerFilters}
+                        onChange={updateCareerFilters}
+                        availableMaps={availableCareerMaps}
+                        shownCount={filteredCareerMatches.length}
+                        totalCount={careerMatches.length}
+                        itemLabel="matches"
+                      />
+                    )}
+
                     {/* MATCHES LIST */}
                     {(() => {
                       if (careerMatches.length === 0) {
@@ -4549,9 +4424,58 @@ export default function App() {
                         );
                       }
 
+                      if (filteredCareerMatches.length === 0) {
+                        return (
+                          <div className="career-empty-card">
+                            <History size={30} style={{ color: "rgba(168, 85, 247, 0.4)", marginBottom: "8px" }} />
+                            <h3>No Matching Games Found</h3>
+                            <p>Try adjusting your map, date, or victory/defeat filters.</p>
+                            <button
+                              type="button"
+                              className="match-filter-clear-btn"
+                              style={{ marginTop: "10px" }}
+                              onClick={() => updateCareerFilters({ ...DEFAULT_MATCH_FILTERS })}
+                            >
+                              Clear Filters
+                            </button>
+                          </div>
+                        );
+                      }
+
                       return (
-                        <div className="career-matches-grid">
-                          {careerMatches.map((m) => {
+                        <>
+                          <div className="career-summary-strip">
+                            <div className="career-summary-stat">
+                              <span className="career-summary-label">WIN RATE</span>
+                              <span
+                                className="career-summary-val"
+                                style={{ color: careerFilteredSummary.winRate >= 50 ? "#10b981" : "#fb7185" }}
+                              >
+                                {careerFilteredSummary.winRate}%
+                              </span>
+                            </div>
+                            <div className="career-summary-stat">
+                              <span className="career-summary-label">RECORD</span>
+                              <span className="career-summary-val">
+                                <span style={{ color: "#34d399" }}>{careerFilteredSummary.wins}W</span>
+                                {" - "}
+                                <span style={{ color: "#fb7185" }}>{careerFilteredSummary.losses}L</span>
+                                {careerFilteredSummary.draws > 0 ? ` - ${careerFilteredSummary.draws}D` : ""}
+                              </span>
+                            </div>
+                            <div className="career-summary-stat">
+                              <span className="career-summary-label">AVG K/D</span>
+                              <span
+                                className="career-summary-val"
+                                style={{ color: careerFilteredSummary.avgKd >= 1.0 ? "#38bdf8" : "#fca5a5" }}
+                              >
+                                {careerFilteredSummary.avgKd.toFixed(2)}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="career-matches-grid">
+                            {filteredCareerMatches.map((m) => {
                             const isWin = m.result === "VICTORY";
                             const isLoss = m.result === "DEFEAT";
                             const splashUrl = MAP_SPLASHES[m.map_name.toLowerCase()] || "";
@@ -4676,7 +4600,8 @@ export default function App() {
                               </div>
                             );
                           })}
-                        </div>
+                          </div>
+                        </>
                       );
                     })()}
                   </div>
@@ -4995,6 +4920,17 @@ export default function App() {
                       </div>
                     </div>
 
+                    {encounteredPlayers.length > 0 && (
+                      <MatchFilterBar
+                        filters={playersFilters}
+                        onChange={updatePlayersFilters}
+                        availableMaps={availablePlayerMaps}
+                        shownCount={filteredPlayerEntries.length}
+                        totalCount={encounteredPlayers.length}
+                        itemLabel="players"
+                      />
+                    )}
+
                     {isLoadingPlayers && encounteredPlayers.length === 0 ? (
                       <div className="shop-loading-card">
                         <RefreshCw size={24} className="spin" style={{ color: "#2dd4bf" }} />
@@ -5011,18 +4947,22 @@ export default function App() {
                         </span>
                       </div>
                     ) : (() => {
-                      // Filter by name only
-                      const filtered = encounteredPlayers.filter((p) => {
-                        if (!playerSearchQuery.trim()) return true;
-                        return p.name.toLowerCase().includes(playerSearchQuery.trim().toLowerCase());
-                      });
-
-                      if (filtered.length === 0) {
+                      if (filteredPlayerEntries.length === 0) {
                         return (
                           <div className="career-empty-subtab" style={{ padding: "48px 20px" }}>
                             <p style={{ color: "#94a3b8", fontWeight: 700 }}>
-                              No players match "{playerSearchQuery}"
+                              No encountered players match the current search or filters.
                             </p>
+                            {hasActiveFilters(playersFilters) && (
+                              <button
+                                type="button"
+                                className="match-filter-clear-btn"
+                                style={{ marginTop: "10px" }}
+                                onClick={() => updatePlayersFilters({ ...DEFAULT_MATCH_FILTERS })}
+                              >
+                                Clear Filters
+                              </button>
+                            )}
                           </div>
                         );
                       }
@@ -5058,29 +4998,43 @@ export default function App() {
                         return null;
                       };
 
-                      // Sort: live active players first (allies then enemies), then by timestamp descending
-                      const sortedPlayers = [...filtered].sort((a, b) => {
-                        const roleA = getLiveRole(a.puuid);
-                        const roleB = getLiveRole(b.puuid);
+                      // Sort: live active players first (allies then enemies), then by latest matching timestamp descending
+                      const sortedEntries = [...filteredPlayerEntries].sort((a, b) => {
+                        const roleA = getLiveRole(a.player.puuid);
+                        const roleB = getLiveRole(b.player.puuid);
                         if (roleA && !roleB) return -1;
                         if (!roleA && roleB) return 1;
                         if (roleA && roleB) {
                           if (roleA === "ally" && roleB === "enemy") return -1;
                           if (roleA === "enemy" && roleB === "ally") return 1;
                         }
-                        return (b.last_seen_timestamp || 0) - (a.last_seen_timestamp || 0);
+                        const tsA = a.latestMatch?.timestamp ?? a.player.last_seen_timestamp ?? 0;
+                        const tsB = b.latestMatch?.timestamp ?? b.player.last_seen_timestamp ?? 0;
+                        return tsB - tsA;
                       });
+
+                      const filtersActive = hasActiveFilters(playersFilters);
 
                       return (
                         <div className="players-cards-grid">
-                          {sortedPlayers.map((p) => {
-                            const splashUrl = MAP_SPLASHES[p.last_seen_map.toLowerCase()] || "";
-                            const isLastWin = p.last_result === "VICTORY";
-                            const isLastLoss = p.last_result === "DEFEAT";
+                          {sortedEntries.map(({ player: p, matchingCount, latestMatch }) => {
+                            const dispMap = latestMatch?.map_name || p.last_seen_map;
+                            const dispAgentId = latestMatch?.agent_id || p.last_seen_agent_id;
+                            const dispAgentName = latestMatch?.agent_name || p.last_seen_agent_name;
+                            const dispResult = latestMatch?.result || p.last_result;
+                            const dispScoreAlly = latestMatch ? latestMatch.score_ally : p.last_score_ally;
+                            const dispScoreEnemy = latestMatch ? latestMatch.score_enemy : p.last_score_enemy;
+                            const dispTs = latestMatch ? latestMatch.timestamp : p.last_seen_timestamp;
+                            const dispDateStr = latestMatch ? latestMatch.date_str : p.last_seen_date_str;
+                            const dispTimeStr = latestMatch ? latestMatch.time_str : p.last_seen_time_str;
+
+                            const splashUrl = MAP_SPLASHES[dispMap.toLowerCase()] || "";
+                            const isLastWin = dispResult === "VICTORY";
+                            const isLastLoss = dispResult === "DEFEAT";
                             const liveRole = getLiveRole(p.puuid);
-                            const localSeen = formatLocalTimestamp(p.last_seen_timestamp);
-                            const seenDate = localSeen.dateStr || p.last_seen_date_str;
-                            const seenTime = localSeen.timeStr || p.last_seen_time_str;
+                            const localSeen = formatLocalTimestamp(dispTs);
+                            const seenDate = localSeen.dateStr || dispDateStr;
+                            const seenTime = localSeen.timeStr || dispTimeStr;
 
                             return (
                               <div
@@ -5100,11 +5054,11 @@ export default function App() {
                                 {/* 1. Agent Icon & Identity & Rank (Name and Tag on ONE line) */}
                                 <div className="player-card-identity-box">
                                   <div className="career-card-agent-box">
-                                    {p.last_seen_agent_id ? (
+                                    {dispAgentId ? (
                                       <img
                                         className="career-card-agent-img"
-                                        src={`https://media.valorant-api.com/agents/${p.last_seen_agent_id}/displayicon.png`}
-                                        alt={resolveAgentName(p.last_seen_agent_id, p.last_seen_agent_name)}
+                                        src={`https://media.valorant-api.com/agents/${dispAgentId}/displayicon.png`}
+                                        alt={resolveAgentName(dispAgentId, dispAgentName)}
                                       />
                                     ) : (
                                       <div className="tracker-agent-placeholder">?</div>
@@ -5145,24 +5099,31 @@ export default function App() {
                                   </div>
                                 </div>
 
-                                {/* 2. Middle: Last Encounter Result (+ Live Role Badge if in current match) */}
+                                {/* 2. Middle: Match Result (+ Live Role / Filtered Match Count Badge) */}
                                 <div className="player-card-middle-col">
                                   {liveRole && (
                                     <span className={`live-encounter-badge ${liveRole === "ally" ? "live-ally" : "live-enemy"}`}>
                                       {liveRole === "ally" ? "CURRENT TEAMMATE" : "CURRENT ENEMY"}
                                     </span>
                                   )}
+                                  {filtersActive && !liveRole && (
+                                    <span className="player-filter-match-count">
+                                      {matchingCount} match{matchingCount === 1 ? "" : "es"}
+                                    </span>
+                                  )}
                                   <div className="player-card-last-match-wrap">
-                                    <span className="last-res-caption">LAST MATCH</span>
+                                    <span className="last-res-caption">
+                                      {filtersActive ? "MATCH" : "LAST MATCH"}
+                                    </span>
                                     <div className="last-res-banner">
                                       <span
                                         className={`career-card-result-tag ${isLastWin ? "tag-win" : isLastLoss ? "tag-loss" : "tag-draw"
                                           }`}
                                       >
-                                        {p.last_result || "MATCH"}
+                                        {dispResult || "MATCH"}
                                       </span>
                                       <span className="last-res-score">
-                                        {p.last_score_ally} - {p.last_score_enemy}
+                                        {dispScoreAlly} - {dispScoreEnemy}
                                       </span>
                                     </div>
                                   </div>
@@ -5178,7 +5139,7 @@ export default function App() {
                                   }}
                                 >
                                   <div className="career-card-map-info">
-                                    <span className="career-card-map-name">{p.last_seen_map}</span>
+                                    <span className="career-card-map-name">{dispMap}</span>
                                     <span className="career-card-date-time">
                                       {seenDate} {seenTime && `• ${seenTime}`}
                                     </span>
@@ -5430,22 +5391,6 @@ export default function App() {
                         <span className="active-badge">● ACTIVE</span>
                       )}
                     </div>
-
-                    <div
-                      className={`radio-card ${config.anti_afk_mode === 3 ? "active" : ""}`}
-                      onClick={() => {
-                        updateAndSaveConfig({ anti_afk_mode: 3 });
-                        addLog("[CONFIG] Anti-AFK Method set to Macros.");
-                      }}
-                    >
-                      <div className="radio-dot">
-                        {config.anti_afk_mode === 3 && <div className="dot-inner" />}
-                      </div>
-                      <span className="radio-label">Macros</span>
-                      {config.anti_afk_mode === 3 && (
-                        <span className="active-badge">● ACTIVE</span>
-                      )}
-                    </div>
                   </div>
                 </div>
 
@@ -5455,18 +5400,14 @@ export default function App() {
                       ? "Click Mode Settings"
                       : config.anti_afk_mode === 1
                         ? "Hold Mode Settings"
-                        : config.anti_afk_mode === 2
-                          ? "Comms Settings"
-                          : "Macros Settings"}
+                        : "Comms Settings"}
                   </div>
                   <div className="pane-subtitle">
                     {config.anti_afk_mode === 0
                       ? "Randomly clicks the selected key."
                       : config.anti_afk_mode === 1
                         ? "Continuously holds down the selected key."
-                        : config.anti_afk_mode === 2
-                          ? "Auto spam Communications."
-                          : "Custom recorded multi-key macro sequence with natural timing."}
+                        : "Auto spam Communications."}
                   </div>
 
                   {config.anti_afk_mode === 2 ? (
@@ -5626,105 +5567,6 @@ export default function App() {
                           />
                           <span style={{ fontSize: "12px", color: "rgba(255, 255, 255, 0.6)" }}>sec</span>
                         </div>
-                      </div>
-                    </>
-                  ) : config.anti_afk_mode === 3 ? (
-                    /* MACROS MODE SETTINGS */
-                    <>
-                      <div className="control-note" style={{ marginTop: "8px", marginBottom: "8px" }}>
-                        Sequence viewer (uneditable). Click <strong>Record Macro</strong> to record keys with natural timings.
-                      </div>
-
-                      <div className={`macro-viewer-box ${isRecordingMacro ? "recording" : ""}`}>
-                        {isRecordingMacro ? (
-                          <>
-                            <div className="macro-recording-badge">
-                              ● Recording... (Backspace: Delete, Enter or Stop: Save)
-                            </div>
-                            {activeHoldingKeys.map((k) => (
-                              <div key={k} className="macro-action-pill holding">
-                                <span className="macro-pill-key">{k}</span>
-                                <span className="macro-pill-time">(holding...)</span>
-                              </div>
-                            ))}
-                            {macroLiveActions.map((act, idx) => (
-                              <div key={idx} className="macro-action-pill">
-                                <span className="macro-pill-key">{act.key}</span>
-                                <span className="macro-pill-time">@{(act.start_ms / 1000).toFixed(2)}s ({(act.duration_ms / 1000).toFixed(2)}s)</span>
-                              </div>
-                            ))}
-                          </>
-                        ) : macroLiveActions.length === 0 ? (
-                          <div className="macro-viewer-placeholder">
-                            No macro recorded. Click [Record Macro] to start.
-                          </div>
-                        ) : (
-                          macroLiveActions.map((act, idx) => (
-                            <div key={idx} className="macro-action-pill">
-                              <span className="macro-pill-key">{act.key}</span>
-                              <span className="macro-pill-time">@{(act.start_ms / 1000).toFixed(2)}s ({(act.duration_ms / 1000).toFixed(2)}s)</span>
-                            </div>
-                          ))
-                        )}
-                      </div>
-
-                      <div className="macro-btn-row">
-                        <button
-                          className={`macro-btn ${isRecordingMacro ? "record-active" : ""}`}
-                          onClick={() => {
-                            if (isRecordingMacro) {
-                              stopRecordingMacro();
-                            } else {
-                              startRecordingMacro();
-                            }
-                          }}
-                        >
-                          {isRecordingMacro ? (
-                            <>
-                              <Square size={13} fill="#ef4444" />
-                              <span>Stop Recording</span>
-                            </>
-                          ) : (
-                            <>
-                              <Play size={13} fill="#10b981" />
-                              <span>Record Macro</span>
-                            </>
-                          )}
-                        </button>
-
-                        <button
-                          className="macro-btn"
-                          onClick={clearMacro}
-                          disabled={isRecordingMacro}
-                          data-tooltip="Clear macro"
-                        >
-                          <Trash2 size={13} />
-                          <span>Clear</span>
-                        </button>
-
-                        <button
-                          className="macro-btn"
-                          onClick={exportMacro}
-                          disabled={isRecordingMacro}
-                          data-tooltip="Copy JSON to clipboard"
-                        >
-                          <Copy size={13} />
-                          <span>Export JSON</span>
-                        </button>
-
-                        <button
-                          className="macro-btn"
-                          onClick={() => {
-                            setMacroImportText(config.custom_macro_json || "");
-                            setMacroCompilerError(null);
-                            setShowMacroImportModal(true);
-                          }}
-                          disabled={isRecordingMacro}
-                          data-tooltip="Import JSON from file or clipboard"
-                        >
-                          <Upload size={13} />
-                          <span>Import JSON</span>
-                        </button>
                       </div>
                     </>
                   ) : (
@@ -6432,7 +6274,6 @@ export default function App() {
                 chatIntervalInput={chatIntervalInput}
                 setChatIntervalInput={setChatIntervalInput}
                 commitChatInterval={commitChatInterval}
-                setShowChatWarningModal={setShowChatWarningModal}
                 updateAndSaveConfig={updateAndSaveConfig}
                 onLog={addLog}
               />
@@ -6482,13 +6323,13 @@ export default function App() {
             {activeTab === "remote" && (
               <RemoteTab
                 remoteClientConnected={remoteClientConnected}
-                remoteRoomCode={remoteRoomCode}
-                secretToken={secretToken}
-                remoteUniqueControl={remoteUniqueControl}
-                pairedDevices={pairedDevices}
-                onOpenResetModal={() => setShowResetConfirmModal(true)}
-                onToggleUniqueControl={handleToggleUniqueControl}
-                onRemoveDevice={handleRemoveDevice}
+                pairedDevice={pairedDevice}
+                pairingWindowSecondsLeft={pairingWindowSecondsLeft}
+                pairingCode={pairingCode}
+                pairingQrToken={pairingQrToken}
+                onStartPairingWindow={handleStartPairingWindow}
+                onClosePairingWindow={handleClosePairingWindow}
+                onOpenUnpairModal={() => setShowUnpairConfirmModal(true)}
               />
             )}
 
@@ -6621,9 +6462,6 @@ export default function App() {
         isRiotSignedIn={isRiotSignedIn}
         onLog={addLog}
         onToast={showToast}
-        showChatWarningModal={showChatWarningModal}
-        setShowChatWarningModal={setShowChatWarningModal}
-        updateAndSaveConfig={updateAndSaveConfig}
         playerToDelete={playerToDelete}
         setPlayerToDelete={setPlayerToDelete}
         deletePlayerEncounter={deletePlayerEncounter}
@@ -6636,13 +6474,6 @@ export default function App() {
         setUpdateProgress={setUpdateProgress}
         updateError={updateError}
         setUpdateError={setUpdateError}
-        showMacroImportModal={showMacroImportModal}
-        setShowMacroImportModal={setShowMacroImportModal}
-        macroImportText={macroImportText}
-        setMacroImportText={setMacroImportText}
-        macroCompilerError={macroCompilerError || ""}
-        setMacroCompilerError={setMacroCompilerError}
-        handleValidateAndApplyMacro={handleValidateAndApplyMacro}
         showAuthModal={showAuthModal}
         setShowAuthModal={setShowAuthModal}
         authInput={authInput}
@@ -6656,9 +6487,9 @@ export default function App() {
         setDeviceNicknameInput={setDeviceNicknameInput}
         handleDenyDevice={handleDenyDevice}
         handleApproveDevice={handleApproveDevice}
-        showResetConfirmModal={showResetConfirmModal}
-        setShowResetConfirmModal={setShowResetConfirmModal}
-        handleResetRemoteCode={handleResetRemoteCode}
+        showUnpairConfirmModal={showUnpairConfirmModal}
+        setShowUnpairConfirmModal={setShowUnpairConfirmModal}
+        handleUnpairRemoteDevice={handleUnpairRemoteDevice}
       />
     </div>
   );
